@@ -194,15 +194,20 @@ async fn list_threads(
         // Default behaviour for retriever is to get most recent messages
         let messages = thread.channel_id.messages(&ctx.http, |retriever| retriever.limit(1)).await?;
         let author = if let Some(last_message) = messages.first() {
-            let mut author = last_message.author.name.clone();
-
-            if let Some(guild_channel) = last_message.channel(&ctx.http).await?.guild() {
-                if let Some(nick) = guild_channel.guild_id.member(&ctx.http, &last_message.author).await.ok().and_then(|member| member.nick) {
-                    author = nick;
-                }
+            if last_message.author.bot {
+                last_message.author.name.clone()
             }
+            else {
+                let mut author = last_message.author.name.clone();
 
-            author
+                if let Some(guild_channel) = last_message.channel(&ctx.http).await?.guild() {
+                    if let Some(nick) = guild_channel.guild_id.member(&ctx.http, &last_message.author).await.ok().and_then(|member| member.nick) {
+                        author = nick;
+                    }
+                }
+
+                author
+            }
         }
         else {
             String::from("No replies yet")
