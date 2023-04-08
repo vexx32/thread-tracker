@@ -236,11 +236,11 @@ async fn list_threads(
 }
 
 async fn send_success_embed(http: impl AsRef<Http>, channel: ChannelId, title: impl ToString, body: impl ToString) {
-    send_embed(http, channel, title, body, Some(Colour::KERBAL)).await
+    send_embed(http, channel, title, body, Some(Colour::FABLED_PINK)).await
 }
 
 async fn send_error_embed(http: impl AsRef<Http>, channel: ChannelId, title: impl ToString, body: impl ToString) {
-    send_embed(http, channel, title, body, Some(Colour::RED)).await;
+    send_embed(http, channel, title, body, Some(Colour::DARK_ORANGE)).await;
 }
 
 async fn send_message_embed(http: impl AsRef<Http>, channel: ChannelId, title: impl ToString, body: impl ToString) {
