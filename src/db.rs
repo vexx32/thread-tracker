@@ -68,7 +68,7 @@ pub(crate) async fn list(pool: &PgPool, guild_id: i64, user_id: i64) -> Result<V
 
 pub(crate) async fn get(pool: &PgPool, guild_id: i64, user_id: i64, channel_id: i64) -> Result<Option<TrackedThread>, sqlx::Error> {
     let mut thread: Vec<TrackedThread> =
-        sqlx::query_as("SELECT channel_id, id FROM threads WHERE user_id = $1 AND channel_id = $2 AND guild_id = $3 ORDER BY id")
+        sqlx::query_as("SELECT channel_id, guild_id, id FROM threads WHERE user_id = $1 AND channel_id = $2 AND guild_id = $3 ORDER BY id")
             .bind(user_id)
             .bind(channel_id)
             .bind(guild_id)
