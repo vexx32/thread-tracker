@@ -66,11 +66,32 @@ impl EventHandler for Bot {
                 handle_send_error(msg.channel_id.say(&ctx.http, format!("Error: {:}", e)).await);
             }
         }
+
+        if msg.content == "tt!help" {
+            handle_send_error(help_message(channel_id, &ctx).await);
+        }
     }
 
     async fn ready(&self, _: Context, ready: Ready) {
         info!("{} is connected!", ready.user.name);
     }
+}
+
+async fn help_message(channel_id: ChannelId, ctx: &Context) -> Result<Message, SerenityError> {
+    let help_message = r#"
+`tt!help`
+This is the command that reaches this help message. You can use it if you ever have any questions about the current functionality of Thread Tracker.
+
+`tt!add`
+This is the command that adds channels and threads to your tracker. After “add”, write a space and then paste the URL of a channel (found under “Copy Link” when you right click or long-press on the channel). If you wish to paste more than one channel, make sure there’s a space between each.
+
+`tt!replies`
+This command shows you, in a list, who responded last to each channel.
+
+`tt!remove`
+Use this in conjunction with a channel or thread URL to remove that URL from your list, or simply say “all” to remove all channels and threads.
+"#;
+    channel_id.say(&ctx.http, help_message).await
 }
 
 async fn remove_channels<'a, I>(
