@@ -52,12 +52,14 @@ impl EventHandler for Bot {
         };
 
         if msg.content.starts_with("tt!add ") {
+            info!("[command] user {:} used command: {:}", author_id, msg.content);
             let command_args = msg.content.split_ascii_whitespace().skip(1);
             if let Err(e) = add_channels(command_args, guild_id, author_id, channel_id, &ctx, &self.database).await {
                 send_error_embed(&ctx.http, channel_id, "Error adding tracked channel(s): {:}", e).await;
             }
         }
         else if msg.content.starts_with("tt!remove ") {
+            info!("[command] user {:} used command: {:}", author_id, msg.content);
             let command_args = msg.content.split_ascii_whitespace().skip(1);
             if let Err(e) = remove_channels(command_args, guild_id, author_id, channel_id, &ctx, &self.database).await {
                 send_error_embed(&ctx.http, channel_id, "Error removing tracked channel(s)", e).await;
@@ -65,12 +67,14 @@ impl EventHandler for Bot {
         }
 
         if msg.content == "tt!replies" {
+            info!("[command] user {:} used command: {:}", author_id, msg.content);
             if let Err(e) = list_threads(guild_id, author_id, channel_id, &ctx, &self.database).await {
                 send_error_embed(&ctx.http, channel_id, "Error retrieving thread list", e).await;
             }
         }
 
         if msg.content == "tt!help" {
+            info!("[command] user {:} used command: {:}", author_id, msg.content);
             help_message(channel_id, &ctx).await;
         }
     }
@@ -89,6 +93,7 @@ fn keep_alive(ctx: Context, heartbeat_interval_seconds: u64) {
         loop {
             interval.tick().await;
             ctx.set_presence(Some(Activity::watching("over your threads (tt!help)")), OnlineStatus::Online).await;
+            info!("[heartbeat] Keep-alive heartbeat set_presence request completed")
         }
     });
 }
@@ -122,6 +127,7 @@ where
     I: Iterator<Item = &'a str>
 {
     let mut args = args.peekable();
+
     if args.peek().is_none() {
         send_error_embed(
             &ctx.http,
