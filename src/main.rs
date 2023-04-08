@@ -164,7 +164,8 @@ where
             let thread = ChannelId(target_channel_id);
             if thread.to_channel(&ctx.http).await.is_ok() {
                 match db::add(database, guild_id.0 as i64, target_channel_id as i64, user_id.0 as i64).await {
-                    Ok(_) => threads_added.push_str(&format!("{:}\n", thread.mention())),
+                    Ok(true) => threads_added.push_str(&format!("{:}\n", thread.mention())),
+                    Ok(false) => threads_added.push_str(&format!("Skipped {:} as it is already being tracked\n", thread.mention())),
                     Err(e) => return Err(e.into()),
                 };
             }
@@ -228,7 +229,7 @@ fn handle_send_error(result: Result<Message, SerenityError>) {
 #[shuttle_runtime::main]
 async fn serenity(
     #[shuttle_shared_db::Postgres(
-        local_uri = "postgres://postgres:{secrets.PASSWORD}@localhost:16695/postgres"
+        //local_uri = "postgres://postgres:{secrets.PASSWORD}@localhost:16695/postgres"
     )] pool: PgPool,
     #[shuttle_secrets::Secrets] secret_store: SecretStore,
 ) -> shuttle_serenity::ShuttleSerenity {

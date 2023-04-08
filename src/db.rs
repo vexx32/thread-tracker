@@ -12,7 +12,13 @@ pub(crate) async fn add(
     guild_id: i64,
     channel_id: i64,
     user_id: i64
-) -> Result<(), sqlx::Error> {
+) -> Result<bool, sqlx::Error> {
+    let existing_thread = get(pool, guild_id, user_id, channel_id).await?;
+
+    if existing_thread.is_some() {
+        return Ok(false);
+    }
+
     sqlx::query("INSERT INTO threads (channel_id, user_id, guild_id) VALUES ($1, $2, $3)")
         .bind(channel_id)
         .bind(user_id)
@@ -20,7 +26,7 @@ pub(crate) async fn add(
         .execute(pool)
         .await?;
 
-    Ok(())
+    Ok(true)
 }
 
 pub(crate) async fn remove(
@@ -60,14 +66,14 @@ pub(crate) async fn list(pool: &PgPool, guild_id: i64, user_id: i64) -> Result<V
     Ok(threads)
 }
 
-pub(crate) async fn get(pool: &PgPool, guild_id: i64, user_id: i64, channel_id: i64) -> Result<TrackedThread, sqlx::Error> {
-    let thread: TrackedThread =
+pub(crate) async fn get(pool: &PgPool, guild_id: i64, user_id: i64, channel_id: i64) -> Result<Option<TrackedThread>, sqlx::Error> {
+    let mut thread: Vec<TrackedThread> =
         sqlx::query_as("SELECT channel_id, id FROM threads WHERE user_id = $1 AND channel_id = $2 AND guild_id = $3 ORDER BY id")
             .bind(user_id)
             .bind(channel_id)
             .bind(guild_id)
-            .fetch_one(pool)
+            .fetch_all(pool)
             .await?;
 
-    Ok(thread)
+    Ok(thread.pop())
 }
