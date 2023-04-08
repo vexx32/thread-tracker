@@ -1,9 +1,11 @@
 use anyhow::{anyhow};
+use serenity::http::Http;
 use serenity::{async_trait};
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
 use serenity::model::prelude::*;
+use serenity::utils::Colour;
 use shuttle_secrets::SecretStore;
 use sqlx::{PgPool, Executor};
 use tracing::{error, info};
@@ -34,41 +36,37 @@ impl From<&db::TrackedThread> for TrackedThread {
 #[async_trait]
 impl EventHandler for Bot {
     async fn message(&self, ctx: Context, msg: Message) {
-        if msg.content == "!hello" {
-            handle_send_error(msg.channel_id.say(&ctx.http, "world!").await);
-        }
-
         let author_id = msg.author.id;
         let channel_id = msg.channel_id;
         let guild_id = if let Some(guild_channel) = channel_id.to_channel(&ctx.http).await.ok().and_then(|response| response.guild()) {
             guild_channel.guild_id
         }
         else {
-            handle_send_error(msg.channel_id.say(&ctx.http, "Error: Not currently in a server.").await);
+            error!("Error: Not currently in a server.");
             return;
         };
 
         if msg.content.starts_with("tt!add ") {
             let command_args = msg.content.split_ascii_whitespace().skip(1);
             if let Err(e) = add_channels(command_args, guild_id, author_id, channel_id, &ctx, &self.database).await {
-                handle_send_error(msg.channel_id.say(&ctx.http, format!("Error adding tracked channel(s): {:}", e)).await);
+                send_error_embed(&ctx.http, channel_id, "Error adding tracked channel(s): {:}", e).await;
             }
         }
         else if msg.content.starts_with("tt!remove ") {
             let command_args = msg.content.split_ascii_whitespace().skip(1);
             if let Err(e) = remove_channels(command_args, guild_id, author_id, channel_id, &ctx, &self.database).await {
-                handle_send_error(msg.channel_id.say(&ctx.http, format!("Error removing tracked channel(s): {:}", e)).await);
+                send_error_embed(&ctx.http, channel_id, "Error removing tracked channel(s)", e).await;
             }
         }
 
         if msg.content == "tt!replies" {
             if let Err(e) = list_threads(guild_id, author_id, channel_id, &ctx, &self.database).await {
-                handle_send_error(msg.channel_id.say(&ctx.http, format!("Error: {:}", e)).await);
+                send_error_embed(&ctx.http, channel_id, "Error retrieving thread list", e).await;
             }
         }
 
         if msg.content == "tt!help" {
-            handle_send_error(help_message(channel_id, &ctx).await);
+            help_message(channel_id, &ctx).await;
         }
     }
 
@@ -77,7 +75,7 @@ impl EventHandler for Bot {
     }
 }
 
-async fn help_message(channel_id: ChannelId, ctx: &Context) -> Result<Message, SerenityError> {
+async fn help_message(channel_id: ChannelId, ctx: &Context) {
     let help_message = r#"
 `tt!help`
 This is the command that reaches this help message. You can use it if you ever have any questions about the current functionality of Thread Tracker.
@@ -91,7 +89,7 @@ This command shows you, in a list, who responded last to each channel.
 `tt!remove`
 Use this in conjunction with a channel or thread URL to remove that URL from your list, or simply say “all” to remove all channels and threads.
 "#;
-    channel_id.say(&ctx.http, help_message).await
+    send_message_embed(&ctx.http, channel_id, "Thread Tracker help", help_message).await
 }
 
 async fn remove_channels<'a, I>(
@@ -107,16 +105,23 @@ where
 {
     let mut args = args.peekable();
     if args.peek().is_none() {
-        channel_id.say(
+        send_error_embed(
             &ctx.http,
-            format!("Please provide a thread or channel URL, for example: `tt!remove {:}` -- or use `tt!remove all` to untrack all threads.",channel_id.mention())
-        ).await?;
+            channel_id,
+            "Invalid arguments provided",
+            &format!("Please provide a thread or channel URL, for example: `tt!remove {:}` -- or use `tt!remove all` to untrack all threads.", channel_id.mention())
+        ).await;
         return Ok(());
     }
 
     if let Some(&"all") = args.peek() {
         match db::remove_all(database, guild_id.0 as i64, user_id.0 as i64).await {
-            Ok(_) => channel_id.say(&ctx.http, format!("All registered threads for user {:} removed.", user_id.mention())).await?,
+            Ok(_) => send_success_embed(
+                &ctx.http,
+                channel_id,
+                "Tracked threads removed",
+                &format!("All registered threads for user {:} removed.", user_id.mention())
+            ).await,
             Err(e) => return Err(e.into()),
         };
 
@@ -136,7 +141,7 @@ where
         }
     }
 
-    channel_id.say(&ctx.http, format!("Removed the following channels from your threads list:\n{:}", threads_removed)).await?;
+    send_success_embed(&ctx.http, channel_id, "Tracked threads removed", &threads_removed).await;
 
     Ok(())
 }
@@ -154,7 +159,12 @@ where
 {
     let mut args = args.peekable();
     if args.peek().is_none() {
-        channel_id.say(&ctx.http, format!("Please provide a thread or channel URL, for example: `tt!add {:}`", channel_id)).await?;
+        send_error_embed(
+            &ctx.http,
+            channel_id,
+            "Invalid arguments provided",
+            &format!("Please provide a thread or channel URL, for example: `tt!add {:}`", channel_id.mention())
+        ).await;
         return Ok(());
     }
 
@@ -164,15 +174,15 @@ where
             let thread = ChannelId(target_channel_id);
             if thread.to_channel(&ctx.http).await.is_ok() {
                 match db::add(database, guild_id.0 as i64, target_channel_id as i64, user_id.0 as i64).await {
-                    Ok(true) => threads_added.push_str(&format!("{:}\n", thread.mention())),
-                    Ok(false) => threads_added.push_str(&format!("Skipped {:} as it is already being tracked\n", thread.mention())),
+                    Ok(true) => threads_added.push_str(&format!("- {:}\n", thread.mention())),
+                    Ok(false) => threads_added.push_str(&format!("- Skipped {:} as it is already being tracked\n", thread.mention())),
                     Err(e) => return Err(e.into()),
                 };
             }
         }
     }
 
-    channel_id.say(&ctx.http, format!("Added the following channels to your threads list:\n{:}", threads_added)).await?;
+    send_success_embed(&ctx.http, channel_id, "Tracked threads added", threads_added).await;
 
     Ok(())
 }
@@ -220,9 +230,31 @@ async fn list_threads(
         response.push_str("No threads are currently being tracked.");
     }
 
-    channel_id.say(&ctx.http, &response).await?;
+    send_message_embed(&ctx.http, channel_id, "Currently tracked threads", &response).await;
 
     Ok(())
+}
+
+async fn send_success_embed(http: impl AsRef<Http>, channel: ChannelId, title: impl ToString, body: impl ToString) {
+    send_embed(http, channel, title, body, Some(Colour::KERBAL)).await
+}
+
+async fn send_error_embed(http: impl AsRef<Http>, channel: ChannelId, title: impl ToString, body: impl ToString) {
+    send_embed(http, channel, title, body, Some(Colour::RED)).await;
+}
+
+async fn send_message_embed(http: impl AsRef<Http>, channel: ChannelId, title: impl ToString, body: impl ToString) {
+    send_embed(http, channel, title, body, None).await;
+}
+
+async fn send_embed(http: impl AsRef<Http>, channel: ChannelId, title: impl ToString, body: impl ToString, colour: Option<Colour>) {
+    handle_send_error(
+        channel.send_message(http, |msg| {
+            msg.embed(|embed| {
+                embed.title(title).description(body).colour(colour.unwrap_or(Colour::PURPLE))
+            })
+        }).await
+    );
 }
 
 fn handle_send_error(result: Result<Message, SerenityError>) {
