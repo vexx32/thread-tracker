@@ -1,5 +1,5 @@
 [package]
-name = "threadtracker"
+name = "thread-tracker"
 version = "0.1.0"
 edition = "2021"
 publish = false
