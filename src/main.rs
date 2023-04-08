@@ -88,7 +88,7 @@ fn keep_alive(ctx: Context, heartbeat_interval_seconds: u64) {
 
         loop {
             interval.tick().await;
-            ctx.set_presence(Some(Activity::watching("over your threads")), OnlineStatus::Online).await;
+            ctx.set_presence(Some(Activity::watching("over your threads (tt!help)")), OnlineStatus::Online).await;
         }
     });
 }
