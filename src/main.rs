@@ -1,3 +1,6 @@
+use std::fs::read;
+use std::time::Duration;
+
 use anyhow::{anyhow};
 use serenity::http::Http;
 use serenity::{async_trait};
@@ -11,6 +14,8 @@ use sqlx::{PgPool, Executor};
 use tracing::{error, info};
 
 mod db;
+
+const HEARTBEAT_INTERVAL_SECONDS: u64 = 255;
 
 struct Bot
 {
@@ -70,9 +75,22 @@ impl EventHandler for Bot {
         }
     }
 
-    async fn ready(&self, _: Context, ready: Ready) {
+    async fn ready(&self, ctx: Context, ready: Ready) {
         info!("{} is connected!", ready.user.name);
+
+        keep_alive(ctx, HEARTBEAT_INTERVAL_SECONDS);
     }
+}
+
+fn keep_alive(ctx: Context, heartbeat_interval_seconds: u64) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(heartbeat_interval_seconds));
+
+        loop {
+            interval.tick().await;
+            ctx.set_presence(Some(Activity::watching("over your threads")), OnlineStatus::Online).await;
+        }
+    });
 }
 
 async fn help_message(channel_id: ChannelId, ctx: &Context) {
