@@ -17,11 +17,6 @@ mod db;
 
 const HEARTBEAT_INTERVAL_SECONDS: u64 = 255;
 
-struct Bot
-{
-    database: PgPool,
-}
-
 struct TrackedThread {
     pub channel_id: ChannelId,
     pub guild_id: GuildId,
@@ -38,6 +33,46 @@ impl From<&db::TrackedThread> for TrackedThread {
     }
 }
 
+struct Bot
+{
+    database: PgPool,
+}
+
+impl Bot {
+    async fn process_command<'a, I>(&self, ctx: &Context, channel_id: ChannelId, guild_id: GuildId, user_id: UserId, command: &str, args: I)
+    where
+        I: Iterator<Item = &'a str>
+    {
+        match command {
+            "tt!help" => {
+                error_on_additional_arguments(&ctx, args, channel_id).await;
+                help_message(channel_id, &ctx).await;
+            },
+            "tt!add" => {
+                if let Err(e) = add_channels(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
+                    send_error_embed(&ctx.http, channel_id, "Error adding tracked channel(s): {:}", e).await;
+                }
+            },
+            "tt!remove" => {
+                if let Err(e) = remove_channels(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
+                    send_error_embed(&ctx.http, channel_id, "Error removing tracked channel(s)", e).await;
+                }
+            },
+            "tt!replies" => {
+                error_on_additional_arguments(&ctx, args, channel_id).await;
+                if let Err(e) = list_threads(guild_id, user_id, channel_id, &ctx, &self.database).await {
+                    send_error_embed(&ctx.http, channel_id, "Error retrieving thread list", e).await;
+                }
+            },
+            _ => {
+                info!("[command] {} was not recognised.", command);
+                return;
+            }
+        }
+    }
+}
+
+
 #[async_trait]
 impl EventHandler for Bot {
     async fn message(&self, ctx: Context, msg: Message) {
@@ -51,31 +86,14 @@ impl EventHandler for Bot {
             return;
         };
 
-        if msg.content.starts_with("tt!add ") {
-            info!("[command] user {:} used command: {:}", author_id, msg.content);
-            let command_args = msg.content.split_ascii_whitespace().skip(1);
-            if let Err(e) = add_channels(command_args, guild_id, author_id, channel_id, &ctx, &self.database).await {
-                send_error_embed(&ctx.http, channel_id, "Error adding tracked channel(s): {:}", e).await;
-            }
-        }
-        else if msg.content.starts_with("tt!remove ") {
-            info!("[command] user {:} used command: {:}", author_id, msg.content);
-            let command_args = msg.content.split_ascii_whitespace().skip(1);
-            if let Err(e) = remove_channels(command_args, guild_id, author_id, channel_id, &ctx, &self.database).await {
-                send_error_embed(&ctx.http, channel_id, "Error removing tracked channel(s)", e).await;
-            }
+        if !msg.content.starts_with("tt!") {
+            return;
         }
 
-        if msg.content == "tt!replies" {
-            info!("[command] user {:} used command: {:}", author_id, msg.content);
-            if let Err(e) = list_threads(guild_id, author_id, channel_id, &ctx, &self.database).await {
-                send_error_embed(&ctx.http, channel_id, "Error retrieving thread list", e).await;
-            }
-        }
-
-        if msg.content == "tt!help" {
-            info!("[command] user {:} used command: {:}", author_id, msg.content);
-            help_message(channel_id, &ctx).await;
+        let mut command_args = msg.content.split_ascii_whitespace();
+        if let Some(command) = command_args.next() {
+            info!("[command] processing command `{}` from user `{}`", msg.content, author_id);
+            self.process_command(&ctx, channel_id, guild_id, author_id, command, command_args).await;
         }
     }
 
@@ -104,7 +122,7 @@ async fn help_message(channel_id: ChannelId, ctx: &Context) {
 This is the command that reaches this help message. You can use it if you ever have any questions about the current functionality of Thread Tracker.
 
 `tt!add`
-This is the command that adds channels and threads to your tracker. After “add”, write a space and then paste the URL of a channel (found under “Copy Link” when you right click or long-press on the channel). If you wish to paste more than one channel, make sure there’s a space between each.
+This is the command that adds channels and threads to your tracker. After “add”, write a space or linebreak and then paste the URL of a channel (found under “Copy Link” when you right click or long-press on the channel). If you wish to paste more than one channel, make sure there’s a space between each.
 
 `tt!replies`
 This command shows you, in a list, who responded last to each channel.
@@ -113,6 +131,17 @@ This command shows you, in a list, who responded last to each channel.
 Use this in conjunction with a channel or thread URL to remove that URL from your list, or simply say “all” to remove all channels and threads.
 "#;
     send_message_embed(&ctx.http, channel_id, "Thread Tracker help", help_message).await
+}
+
+async fn error_on_additional_arguments<'a, I>(ctx: &Context, unrecognised_args: I, channel_id: ChannelId)
+where
+    I: Iterator<Item = &'a str>
+{
+    let mut unrecognised_args = unrecognised_args.peekable();
+    if let Some(_) = unrecognised_args.peek() {
+        let args: Vec<_> = unrecognised_args.collect();
+        send_error_embed(&ctx.http, channel_id, "Unrecognised arguments", args.join(", ")).await;
+    }
 }
 
 async fn remove_channels<'a, I>(
@@ -247,7 +276,7 @@ async fn list_threads(
             String::from("No replies yet")
         };
 
-        response.push_str(&format!("{:} — {:}\n", thread.channel_id.mention(), author))
+        response.push_str(&format!("{} — {}\n", thread.channel_id.mention(), author))
     }
 
     if response.len() == 0 {
@@ -272,6 +301,7 @@ async fn send_message_embed(http: impl AsRef<Http>, channel: ChannelId, title: i
 }
 
 async fn send_embed(http: impl AsRef<Http>, channel: ChannelId, title: impl ToString, body: impl ToString, colour: Option<Colour>) {
+    info!("Sending embed `{}` with content `{}`", title.to_string(), body.to_string());
     handle_send_error(
         channel.send_message(http, |msg| {
             msg.embed(|embed| {
