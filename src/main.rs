@@ -182,19 +182,29 @@ where
     }
 
     let mut threads_removed = String::new();
+    let mut errors = String::new();
     for thread_id in args {
         if let Some(Ok(target_channel_id)) = thread_id.split("/").last().and_then(|x| Some(x.parse())) {
             let thread = ChannelId(target_channel_id);
-            if thread.to_channel(&ctx.http).await.is_ok() {
-                match db::remove(database, guild_id.0 as i64, target_channel_id as i64, user_id.0 as i64).await {
-                    Ok(_) => threads_removed.push_str(&format!("{:}\n", thread.mention())),
-                    Err(e) => return Err(e.into()),
-                };
+            match thread.to_channel(&ctx.http).await {
+                Ok(_) => match db::remove(database, guild_id.0 as i64, target_channel_id as i64, user_id.0 as i64).await {
+                    Ok(_) => threads_removed.push_str(&format!("• {:}\n", thread.mention())),
+                    Err(e) => errors.push_str(&format!("• Failed to unregister thread {}: {}\n", thread.mention(), e)),
+                },
+                Err(e) => errors.push_str(&format!("• Cannot access channel {}: {}\n", thread_id, e)),
             }
+        }
+        else {
+            errors.push_str(&format!("• Could not parse channel ID: {}\n", thread_id));
         }
     }
 
-    send_success_embed(&ctx.http, channel_id, "Tracked threads removed", &threads_removed).await;
+    if errors.len() > 0 {
+        error!("Errors handling thread removal:\n{}", errors);
+        send_error_embed(&ctx.http, channel_id, "Error removing tracked threads", errors).await;
+    }
+
+    send_success_embed(&ctx.http, channel_id, "Tracked threads removed", threads_removed).await;
 
     Ok(())
 }
@@ -222,17 +232,27 @@ where
     }
 
     let mut threads_added = String::new();
+    let mut errors = String::new();
     for thread_id in args {
         if let Some(Ok(target_channel_id)) = thread_id.split("/").last().and_then(|x| Some(x.parse())) {
             let thread = ChannelId(target_channel_id);
-            if thread.to_channel(&ctx.http).await.is_ok() {
-                match db::add(database, guild_id.0 as i64, target_channel_id as i64, user_id.0 as i64).await {
-                    Ok(true) => threads_added.push_str(&format!("- {:}\n", thread.mention())),
-                    Ok(false) => threads_added.push_str(&format!("- Skipped {:} as it is already being tracked\n", thread.mention())),
-                    Err(e) => return Err(e.into()),
-                };
+            match thread.to_channel(&ctx.http).await {
+                Ok(_) => match db::add(database, guild_id.0 as i64, target_channel_id as i64, user_id.0 as i64).await {
+                    Ok(true) => threads_added.push_str(&format!("• {:}\n", thread.mention())),
+                    Ok(false) => threads_added.push_str(&format!("• Skipped {:} as it is already being tracked\n", thread.mention())),
+                    Err(e) => errors.push_str(&format!("• Failed to register thread {}: {}\n", thread.mention(), e)),
+                },
+                Err(e) => errors.push_str(&format!("• Cannot access channel {}: {}\n", thread.mention(), e)),
             }
         }
+        else {
+            errors.push_str(&format!("• Could not parse channel ID: {}\n", thread_id));
+        }
+    }
+
+    if errors.len() > 0 {
+        error!("Errors handling thread registration:\n{}", errors);
+        send_error_embed(&ctx.http, channel_id, "Error adding tracked threads", errors).await;
     }
 
     send_success_embed(&ctx.http, channel_id, "Tracked threads added", threads_added).await;
@@ -276,7 +296,7 @@ async fn list_threads(
             String::from("No replies yet")
         };
 
-        response.push_str(&format!("{} — {}\n", thread.channel_id.mention(), author))
+        response.push_str(&format!("• {} — {}\n", thread.channel_id.mention(), author))
     }
 
     if response.len() == 0 {
