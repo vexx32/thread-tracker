@@ -18,3 +18,5 @@ serde = "1.0.159"
 shuttle-shared-db = { version = "0.13.0", features = ["postgres"] }
 sqlx = { version = "0.6.3", features = ["runtime-tokio-native-tls", "postgres"] }
 postgres = "0.19.5"
+regex = "1.7.3"
+lazy_static = "1.4.0"

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{anyhow};
@@ -11,21 +12,29 @@ use serenity::utils::Colour;
 use shuttle_secrets::SecretStore;
 use sqlx::{PgPool, Executor};
 use tracing::{error, info};
+use lazy_static::lazy_static;
+use regex::Regex;
 
 mod db;
 
 const HEARTBEAT_INTERVAL_SECONDS: u64 = 255;
 
+lazy_static!{
+    static ref URL_REGEX: Regex = Regex::new("^https://discord.com/channels/").unwrap();
+}
+
 struct TrackedThread {
     pub channel_id: ChannelId,
+    pub category: Option<String>,
     pub guild_id: GuildId,
     pub id: i32,
 }
 
-impl From<&db::TrackedThread> for TrackedThread {
-    fn from(thread: &db::TrackedThread) -> Self {
+impl From<db::TrackedThread> for TrackedThread {
+    fn from(thread: db::TrackedThread) -> Self {
         Self {
             channel_id: ChannelId(thread.channel_id as u64),
+            category: thread.category,
             guild_id: GuildId(thread.guild_id as u64),
             id: thread.id,
         }
@@ -48,18 +57,22 @@ impl Bot {
                 help_message(channel_id, &ctx).await;
             },
             "tt!add" => {
-                if let Err(e) = add_channels(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
+                if let Err(e) = add_threads(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error adding tracked channel(s): {:}", e).await;
                 }
             },
+            "tt!cat" => {
+                if let Err(e) = set_threads_category(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
+                    send_error_embed(&ctx.http, channel_id, "Error updating channels' categories", e).await;
+                }
+            },
             "tt!remove" => {
-                if let Err(e) = remove_channels(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
+                if let Err(e) = remove_threads(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error removing tracked channel(s)", e).await;
                 }
             },
             "tt!replies" => {
-                error_on_additional_arguments(&ctx, args, channel_id).await;
-                if let Err(e) = list_threads(guild_id, user_id, channel_id, &ctx, &self.database).await {
+                if let Err(e) = list_threads(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error retrieving thread list", e).await;
                 }
             },
@@ -119,13 +132,24 @@ async fn help_message(channel_id: ChannelId, ctx: &Context) {
 This is the command that reaches this help message. You can use it if you ever have any questions about the current functionality of Thread Tracker.
 
 `tt!add`
-This is the command that adds channels and threads to your tracker. After “add”, write a space or linebreak and then paste the URL of a channel (found under “Copy Link” when you right click or long-press on the channel). If you wish to paste more than one channel, make sure there’s a space between each.
+This is the command that adds channels and threads to your tracker. After `add`, write a space or linebreak and then paste the URL of a channel (found under `Copy Link` when you right click or long-press on the channel). If you wish to paste more than one channel, make sure there's a space between each.
+
+`tt!add categoryname`
+This command will let you add channels and threads to your tracker with the designated category name. It works just like the normal add command, except you must specify the category name before any thread or channel URLs. Category names cannot contain spaces.
+
+`tt!cat categoryname`
+This command will let you change an already-tracked thread's category. Specify the category name along with thread URLs to change those threads' categories. Specify `unset` or `none` as the category name to make the thread uncategorised. If you want to specify more than one thread, make sure there's a space between each.
+
+Threads in the same category will be grouped together when using `tt!replies`. Category names cannot contain spaces.
 
 `tt!replies`
-This command shows you, in a list, who responded last to each channel.
+This command shows you, in a list, who responded last to each channel, with each category grouped together.
+
+`tt!replies categoryname`
+This command lists your tracked threads and who last responded to each for the specified category or categories. Separate additional categories with spaces.
 
 `tt!remove`
-Use this in conjunction with a channel or thread URL to remove that URL from your list, or simply say “all” to remove all channels and threads.
+Use this in conjunction with a channel or thread URL to remove that URL from your list, one or more category names to remove all threads in those categories, or simply `all` to remove all tracked threads.
 "#;
     send_message_embed(&ctx.http, channel_id, "Thread Tracker help", help_message).await
 }
@@ -141,100 +165,43 @@ where
     }
 }
 
-async fn remove_channels<'a, I>(
-    args: I,
+async fn add_threads<'a>(
+    args: impl Iterator<Item = &'a str>,
     guild_id: GuildId,
     user_id: UserId,
     channel_id: ChannelId,
     ctx: &Context,
     database: &PgPool
 ) -> Result<(), anyhow::Error>
-where
-    I: Iterator<Item = &'a str>
 {
     let mut args = args.peekable();
-
-    if args.peek().is_none() {
-        send_error_embed(
-            &ctx.http,
-            channel_id,
-            "Invalid arguments provided",
-            &format!("Please provide a thread or channel URL, for example: `tt!remove {:}` -- or use `tt!remove all` to untrack all threads.", channel_id.mention())
-        ).await;
-        return Ok(());
-    }
-
-    if let Some(&"all") = args.peek() {
-        match db::remove_all(database, guild_id.0 as i64, user_id.0 as i64).await {
-            Ok(_) => send_success_embed(
-                &ctx.http,
-                channel_id,
-                "Tracked threads removed",
-                &format!("All registered threads for user {:} removed.", user_id.mention())
-            ).await,
-            Err(e) => return Err(e.into()),
-        };
-
-        return Ok(());
-    }
-
-    let mut threads_removed = String::new();
-    let mut errors = String::new();
-    for thread_id in args {
-        if let Some(Ok(target_channel_id)) = thread_id.split("/").last().and_then(|x| Some(x.parse())) {
-            let thread = ChannelId(target_channel_id);
-            match thread.to_channel(&ctx.http).await {
-                Ok(_) => match db::remove(database, guild_id.0 as i64, target_channel_id as i64, user_id.0 as i64).await {
-                    Ok(_) => threads_removed.push_str(&format!("• {:}\n", thread.mention())),
-                    Err(e) => errors.push_str(&format!("• Failed to unregister thread {}: {}\n", thread.mention(), e)),
-                },
-                Err(e) => errors.push_str(&format!("• Cannot access channel {}: {}\n", thread_id, e)),
-            }
-        }
-        else {
-            errors.push_str(&format!("• Could not parse channel ID: {}\n", thread_id));
-        }
-    }
-
-    if errors.len() > 0 {
-        error!("Errors handling thread removal:\n{}", errors);
-        send_error_embed(&ctx.http, channel_id, "Error removing tracked threads", errors).await;
-    }
-
-    send_success_embed(&ctx.http, channel_id, "Tracked threads removed", threads_removed).await;
-
-    Ok(())
-}
-
-async fn add_channels<'a, I>(
-    args: I,
-    guild_id: GuildId,
-    user_id: UserId,
-    channel_id: ChannelId,
-    ctx: &Context,
-    database: &PgPool
-) -> Result<(), anyhow::Error>
-where
-    I: Iterator<Item = &'a str>
-{
-    let mut args = args.peekable();
-    if args.peek().is_none() {
-        send_error_embed(
-            &ctx.http,
-            channel_id,
-            "Invalid arguments provided",
-            &format!("Please provide a thread or channel URL, for example: `tt!add {:}`", channel_id.mention())
-        ).await;
-        return Ok(());
-    }
 
     let mut threads_added = String::new();
     let mut errors = String::new();
+
+    let category = if !URL_REGEX.is_match(args.peek().unwrap_or(&"")) {
+        args.next()
+    }
+    else {
+        None
+    };
+
+    if args.peek().is_none() {
+        send_error_embed(
+            &ctx.http,
+            channel_id,
+            "Insufficient arguments provided",
+            &format!("Please provide a thread or channel URL, such as: `tt!add {channel}`, optionally alongside a category name: `tt!add category {channel}`", channel = channel_id.mention())
+        ).await;
+
+        return Ok(());
+    }
+
     for thread_id in args {
         if let Some(Ok(target_channel_id)) = thread_id.split("/").last().and_then(|x| Some(x.parse())) {
             let thread = ChannelId(target_channel_id);
             match thread.to_channel(&ctx.http).await {
-                Ok(_) => match db::add(database, guild_id.0 as i64, target_channel_id as i64, user_id.0 as i64).await {
+                Ok(_) => match db::add(database, guild_id.0 as i64, target_channel_id as i64, user_id.0 as i64, category.as_deref()).await {
                     Ok(true) => threads_added.push_str(&format!("• {:}\n", thread.mention())),
                     Ok(false) => threads_added.push_str(&format!("• Skipped {:} as it is already being tracked\n", thread.mention())),
                     Err(e) => errors.push_str(&format!("• Failed to register thread {}: {}\n", thread.mention(), e)),
@@ -252,48 +219,213 @@ where
         send_error_embed(&ctx.http, channel_id, "Error adding tracked threads", errors).await;
     }
 
-    send_success_embed(&ctx.http, channel_id, "Tracked threads added", threads_added).await;
+    let title = match category {
+        Some(name) => format!("Tracked threads added to `{}`", name),
+        None => "Tracked threads added".to_owned(),
+    };
+
+    send_success_embed(&ctx.http, channel_id, title, threads_added).await;
 
     Ok(())
 }
 
-async fn list_threads(
+async fn set_threads_category<'a>(
+    args: impl Iterator<Item = &'a str>,
+    guild_id: GuildId,
+    user_id: UserId,
+    channel_id: ChannelId,
+    ctx: &Context,
+    database: &PgPool
+) -> Result<(), anyhow::Error>
+{
+    let mut args = args.peekable();
+
+    let mut threads_updated = String::new();
+    let mut errors = String::new();
+
+    let category = match args.next() {
+        Some("unset" | "none") => None,
+        Some(cat) => Some(cat),
+        None => {
+            send_error_embed(
+                &ctx.http,
+                channel_id,
+                "Insufficient arguments provided",
+                &format!("Please provide a category name and a thread or channel URL, such as: `tt!cat category {}`", channel_id.mention())
+            ).await;
+
+            return Ok(());
+        },
+    };
+
+    for thread_id in args {
+        if let Some(Ok(target_channel_id)) = thread_id.split("/").last().and_then(|x| Some(x.parse())) {
+            let thread = ChannelId(target_channel_id);
+            match thread.to_channel(&ctx.http).await {
+                Ok(_) => match db::update_category(database, guild_id.0 as i64, target_channel_id as i64, user_id.0 as i64, category.as_deref()).await {
+                    Ok(true) => threads_updated.push_str(&format!("• {:}\n", thread.mention())),
+                    Ok(false) => threads_updated.push_str(&format!("• Skipped {:} as it is not currently being tracked\n", thread.mention())),
+                    Err(e) => errors.push_str(&format!("• Failed to update thread category {}: {}\n", thread.mention(), e)),
+                },
+                Err(e) => errors.push_str(&format!("• Cannot access channel {}: {}\n", thread.mention(), e)),
+            }
+        }
+        else {
+            errors.push_str(&format!("• Could not parse channel ID: {}\n", thread_id));
+        }
+    }
+
+    if errors.len() > 0 {
+        error!("Errors updating thread categories:\n{}", errors);
+        send_error_embed(&ctx.http, channel_id, "Error updating thread category", errors).await;
+    }
+
+    let title = match category {
+        Some(name) => format!("Tracked threads' category set to `{}`", name),
+        None => "Tracked threads' categories removed".to_owned(),
+    };
+
+    send_success_embed(&ctx.http, channel_id, title, threads_updated).await;
+
+    Ok(())
+}
+
+async fn remove_threads<'a>(
+    args: impl Iterator<Item = &'a str>,
+    guild_id: GuildId,
+    user_id: UserId,
+    channel_id: ChannelId,
+    ctx: &Context,
+    database: &PgPool
+) -> Result<(), anyhow::Error>
+{
+    let mut args = args.peekable();
+
+    if args.peek().is_none() {
+        send_error_embed(
+            &ctx.http,
+            channel_id,
+            "Invalid arguments provided",
+            &format!("Please provide a thread or channel URL, for example: `tt!remove {:}` -- or use `tt!remove all` to untrack all threads.", channel_id.mention())
+        ).await;
+        return Ok(());
+    }
+
+    if let Some(&"all") = args.peek() {
+        match db::remove_all(database, guild_id.0 as i64, user_id.0 as i64, None).await {
+            Ok(_) => send_success_embed(
+                &ctx.http,
+                channel_id,
+                "Tracked threads removed",
+                &format!("All registered threads for user {:} removed.", user_id.mention())
+            ).await,
+            Err(e) => return Err(e.into()),
+        };
+
+        return Ok(());
+    }
+
+    let mut threads_removed = String::new();
+    let mut errors = String::new();
+
+    for thread_or_category in args {
+        if !URL_REGEX.is_match(thread_or_category) {
+            match db::remove_all(database, guild_id.0 as i64, user_id.0 as i64, Some(thread_or_category)).await {
+                Ok(0) => errors.push_str(&format!("• No threads in category {} to remove", thread_or_category)),
+                Ok(count) => threads_removed.push_str(&format!("• All {} threads in category `{}` removed", count, thread_or_category)),
+                Err(e) => errors.push_str(&format!("• Unable to remove threads in category `{}`: {}", thread_or_category, e)),
+            }
+        }
+        else if let Some(Ok(target_channel_id)) = thread_or_category.split("/").last().and_then(|x| Some(x.parse())) {
+            let thread = ChannelId(target_channel_id);
+            match thread.to_channel(&ctx.http).await {
+                Ok(_) => match db::remove(database, guild_id.0 as i64, target_channel_id as i64, user_id.0 as i64).await {
+                    Ok(_) => threads_removed.push_str(&format!("• {:}\n", thread.mention())),
+                    Err(e) => errors.push_str(&format!("• Failed to unregister thread {}: {}\n", thread.mention(), e)),
+                },
+                Err(e) => errors.push_str(&format!("• Cannot access channel {}: {}\n", thread_or_category, e)),
+            }
+        }
+        else {
+            errors.push_str(&format!("• Could not parse channel ID: {}\n", thread_or_category));
+        }
+    }
+
+    if errors.len() > 0 {
+        error!("Errors handling thread removal:\n{}", errors);
+        send_error_embed(&ctx.http, channel_id, "Error removing tracked threads", errors).await;
+    }
+
+    send_success_embed(&ctx.http, channel_id, "Tracked threads removed", threads_removed).await;
+
+    Ok(())
+}
+
+async fn list_threads<'a>(
+    args: impl Iterator<Item = &'a str>,
     guild_id: GuildId,
     user_id: UserId,
     channel_id: ChannelId,
     ctx: &Context,
     database: &PgPool
 ) -> Result<(), anyhow::Error> {
-    let threads: Vec<TrackedThread> = db::list(database, guild_id.0 as i64, user_id.0 as i64).await?
-        .iter()
-        .map(|t| t.into())
-        .collect();
+    let mut args = args.peekable();
 
     let mut response = String::new();
+    let mut threads: Vec<TrackedThread> = Vec::new();
+
+    if args.peek().is_some() {
+        for category in args {
+            threads.extend(
+                db::list(database, guild_id.0 as i64, user_id.0 as i64, Some(category)).await?
+                    .into_iter()
+                    .map(|t| t.into())
+            );
+        }
+    }
+    else {
+        threads.extend(
+            db::list(database, guild_id.0 as i64, user_id.0 as i64, None).await?
+                .into_iter()
+                .map(|t| t.into())
+        );
+    }
+
+    let mut categories: BTreeMap<Option<String>, Vec<TrackedThread>> = BTreeMap::new();
     for thread in threads {
-        // Default behaviour for retriever is to get most recent messages
-        let messages = thread.channel_id.messages(&ctx.http, |retriever| retriever.limit(1)).await?;
-        let author = if let Some(last_message) = messages.first() {
-            if last_message.author.bot {
-                last_message.author.name.clone()
+        categories.entry(thread.category.clone()).or_default().push(thread);
+    }
+
+    for (name, threads) in categories {
+        response.push_str(&format!("__**{}**__\n\n", name.as_deref().unwrap_or("Uncategorised")));
+
+        for thread in threads {
+            // Default behaviour for retriever is to get most recent messages
+            let messages = thread.channel_id.messages(&ctx.http, |retriever| retriever.limit(1)).await?;
+            let author = if let Some(last_message) = messages.first() {
+                if last_message.author.bot {
+                    last_message.author.name.clone()
+                }
+                else {
+                    let mut author = last_message.author.name.clone();
+
+                    if let Some(guild_channel) = last_message.channel(&ctx.http).await?.guild() {
+                        if let Some(nick) = guild_channel.guild_id.member(&ctx.http, &last_message.author).await.ok().and_then(|member| member.nick) {
+                            author = nick;
+                        }
+                    }
+
+                    author
+                }
             }
             else {
-                let mut author = last_message.author.name.clone();
+                String::from("No replies yet")
+            };
 
-                if let Some(guild_channel) = last_message.channel(&ctx.http).await?.guild() {
-                    if let Some(nick) = guild_channel.guild_id.member(&ctx.http, &last_message.author).await.ok().and_then(|member| member.nick) {
-                        author = nick;
-                    }
-                }
-
-                author
-            }
+            response.push_str(&format!("• {} — {}\n", thread.channel_id.mention(), author))
         }
-        else {
-            String::from("No replies yet")
-        };
 
-        response.push_str(&format!("• {} — {}\n", thread.channel_id.mention(), author))
+        response.push_str("\n");
     }
 
     if response.len() == 0 {
