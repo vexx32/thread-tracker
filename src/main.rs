@@ -1,4 +1,3 @@
-use std::fs::read;
 use std::time::Duration;
 
 use anyhow::{anyhow};
@@ -100,20 +99,18 @@ impl EventHandler for Bot {
     async fn ready(&self, ctx: Context, ready: Ready) {
         info!("{} is connected!", ready.user.name);
 
-        keep_alive(ctx, HEARTBEAT_INTERVAL_SECONDS);
+        keep_alive(ctx, HEARTBEAT_INTERVAL_SECONDS).await;
     }
 }
 
-fn keep_alive(ctx: Context, heartbeat_interval_seconds: u64) {
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(heartbeat_interval_seconds));
+async fn keep_alive(ctx: Context, heartbeat_interval_seconds: u64) {
+    let mut interval = tokio::time::interval(Duration::from_secs(heartbeat_interval_seconds));
 
-        loop {
-            interval.tick().await;
-            ctx.set_presence(Some(Activity::watching("over your threads (tt!help)")), OnlineStatus::Online).await;
-            info!("[heartbeat] Keep-alive heartbeat set_presence request completed")
-        }
-    });
+    loop {
+        interval.tick().await;
+        ctx.set_presence(Some(Activity::watching("over your threads (tt!help)")), OnlineStatus::Online).await;
+        info!("[heartbeat] Keep-alive heartbeat set_presence request completed")
+    }
 }
 
 async fn help_message(channel_id: ChannelId, ctx: &Context) {
