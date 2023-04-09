@@ -32,8 +32,8 @@ struct TrackedThread {
     pub id: i32,
 }
 
-impl From<db::TrackedThread> for TrackedThread {
-    fn from(thread: db::TrackedThread) -> Self {
+impl From<db::TrackedThreadRow> for TrackedThread {
+    fn from(thread: db::TrackedThreadRow) -> Self {
         Self {
             channel_id: ChannelId(thread.channel_id as u64),
             category: thread.category,
@@ -53,8 +53,8 @@ struct ThreadWatcher {
     pub categories: Option<String>,
 }
 
-impl From<db::ThreadWatcher> for ThreadWatcher {
-    fn from(watcher: db::ThreadWatcher) -> Self {
+impl From<db::ThreadWatcherRow> for ThreadWatcher {
+    fn from(watcher: db::ThreadWatcherRow) -> Self {
         Self {
             channel_id: ChannelId(watcher.channel_id as u64),
             message_id: MessageId(watcher.message_id as u64),
@@ -198,7 +198,12 @@ async fn update_watchers(ctx: &Context, database: &PgPool) -> Result<(), anyhow:
         let mut message = ctx.http.get_message(watcher.channel_id.0, watcher.message_id.0).await?;
 
         let mut threads: Vec<TrackedThread> = Vec::new();
-        match watcher.categories {
+        match watcher.categories.as_deref() {
+            Some("") | None => threads.extend(
+            db::list_threads(database, watcher.guild_id.0, watcher.user_id.0, None).await?
+                .into_iter()
+                .map(|t| t.into())
+            ),
             Some(cats) => {
                 for category in cats.split(" ") {
                     threads.extend(
@@ -208,10 +213,6 @@ async fn update_watchers(ctx: &Context, database: &PgPool) -> Result<(), anyhow:
                     );
                 }
             },
-            None => threads = db::list_threads(database, watcher.guild_id.0, watcher.user_id.0, None).await?
-                .into_iter()
-                .map(|t| t.into())
-                .collect(),
         }
 
         let threads_content = get_thread_list_content(threads, ctx).await?;
@@ -268,11 +269,16 @@ async fn add_watcher(
     ctx: &Context,
     database: &PgPool,
 ) -> Result<(), anyhow::Error> {
-    let arguments = args.join(" ");
+    let arguments = if args.len() > 0 {
+        Some(args.join(" "))
+    }
+    else {
+        None
+    };
 
-    let message = list_threads(args, guild_id, user_id, channel_id, ctx, database).await?;
+    let message = list_threads_with_title(args, guild_id, user_id, channel_id, "Watching threads", ctx, database).await?;
 
-    if let Err(e) = db::add_watcher(database, user_id.0, message.id.0, channel_id.0, guild_id.0, &arguments).await {
+    if let Err(e) = db::add_watcher(database, user_id.0, message.id.0, channel_id.0, guild_id.0, arguments.as_deref()).await {
         send_error_embed(&ctx.http, channel_id, "Error adding thread watcher", e).await;
     }
 
@@ -540,6 +546,18 @@ async fn list_threads(
     ctx: &Context,
     database: &PgPool
 ) -> Result<Message, anyhow::Error> {
+    list_threads_with_title(args, guild_id, user_id, channel_id, "Currently tracked threads", ctx, database).await
+}
+
+async fn list_threads_with_title(
+    args: Vec<String>,
+    guild_id: GuildId,
+    user_id: UserId,
+    channel_id: ChannelId,
+    embed_title: impl ToString,
+    ctx: &Context,
+    database: &PgPool
+) -> Result<Message, anyhow::Error> {
     let mut args = args.into_iter().peekable();
 
     let mut threads: Vec<TrackedThread> = Vec::new();
@@ -563,7 +581,7 @@ async fn list_threads(
 
     let response = get_thread_list_content(threads, ctx).await?;
 
-    Ok(send_message_embed(&ctx.http, channel_id, "Currently tracked threads", &response).await?)
+    Ok(send_message_embed(&ctx.http, channel_id, embed_title, &response).await?)
 }
 
 async fn get_thread_list_content(threads: Vec<TrackedThread>, ctx: &Context) -> Result<String, SerenityError> {

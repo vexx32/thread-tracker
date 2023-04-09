@@ -1,7 +1,7 @@
 use sqlx::{FromRow, PgPool};
 
 #[derive(FromRow)]
-pub(crate) struct TrackedThread {
+pub(crate) struct TrackedThreadRow {
     pub id: i32,
     pub channel_id: i64,
     pub guild_id: i64,
@@ -9,7 +9,7 @@ pub(crate) struct TrackedThread {
 }
 
 #[derive(FromRow)]
-pub(crate) struct ThreadWatcher {
+pub(crate) struct ThreadWatcherRow {
     pub id: i32,
     pub user_id: i64,
     pub message_id: i64,
@@ -18,13 +18,13 @@ pub(crate) struct ThreadWatcher {
     pub categories: Option<String>,
 }
 
-pub(crate) async fn list_watchers(pool: &PgPool) -> Result<Vec<ThreadWatcher>, sqlx::Error> {
+pub(crate) async fn list_watchers(pool: &PgPool) -> Result<Vec<ThreadWatcherRow>, sqlx::Error> {
     sqlx::query_as("SELECT id, user_id, message_id, channel_id, guild_id, categories FROM watchers")
         .fetch_all(pool)
         .await
 }
 
-pub(crate) async fn get_watcher(pool: &PgPool, channel_id: u64, message_id: u64) -> Result<Option<ThreadWatcher>, sqlx::Error> {
+pub(crate) async fn get_watcher(pool: &PgPool, channel_id: u64, message_id: u64) -> Result<Option<ThreadWatcherRow>, sqlx::Error> {
     sqlx::query_as("SELECT id, user_id, message_id, channel_id, guild_id, categories FROM watchers WHERE channel_id = $1 AND message_id = $2")
         .bind(channel_id as i64)
         .bind(message_id as i64)
@@ -38,7 +38,7 @@ pub(crate) async fn add_watcher(
     message_id: u64,
     channel_id: u64,
     guild_id: u64,
-    categories: &str,
+    categories: Option<&str>,
 ) -> Result<bool, sqlx::Error> {
     let result = sqlx::query("INSERT INTO watchers (user_id, message_id, channel_id, guild_id, categories) VALUES ($1, $2, $3, $4, $5)")
         .bind(user_id as i64)
@@ -142,7 +142,7 @@ pub(crate) async fn remove_all_threads(pool: &PgPool, guild_id: u64, user_id: u6
     Ok(result.rows_affected())
 }
 
-pub(crate) async fn list_threads(pool: &PgPool, guild_id: u64, user_id: u64, category: Option<&str>) -> Result<Vec<TrackedThread>, sqlx::Error> {
+pub(crate) async fn list_threads(pool: &PgPool, guild_id: u64, user_id: u64, category: Option<&str>) -> Result<Vec<TrackedThreadRow>, sqlx::Error> {
     let query = match category {
         Some(c) => sqlx::query_as("SELECT channel_id, category, guild_id, id FROM threads WHERE user_id = $1 AND guild_id = $2 AND category = $3 ORDER BY id")
             .bind(user_id as i64)
@@ -153,13 +153,13 @@ pub(crate) async fn list_threads(pool: &PgPool, guild_id: u64, user_id: u64, cat
             .bind(guild_id as i64),
     };
 
-    let threads: Vec<TrackedThread> = query.fetch_all(pool).await?;
+    let threads: Vec<TrackedThreadRow> = query.fetch_all(pool).await?;
 
     Ok(threads)
 }
 
-pub(crate) async fn get_thread(pool: &PgPool, guild_id: u64, user_id: u64, channel_id: u64) -> Result<Option<TrackedThread>, sqlx::Error> {
-    let mut thread: Vec<TrackedThread> =
+pub(crate) async fn get_thread(pool: &PgPool, guild_id: u64, user_id: u64, channel_id: u64) -> Result<Option<TrackedThreadRow>, sqlx::Error> {
+    let mut thread: Vec<TrackedThreadRow> =
         sqlx::query_as("SELECT channel_id, category, guild_id, id FROM threads WHERE user_id = $1 AND channel_id = $2 AND guild_id = $3 ORDER BY id")
             .bind(user_id as i64)
             .bind(channel_id as i64)
