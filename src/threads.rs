@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use lazy_static::lazy_static;
 use serenity::{
     model::prelude::*,
-    prelude::*, futures::future, utils::{MessageBuilder, Content, ContentModifier, EmbedMessageBuilding},
+    prelude::*,
+    utils::{MessageBuilder, Content, ContentModifier, EmbedMessageBuilding},
 };
 use regex::Regex;
 use sqlx::PgPool;
@@ -308,7 +309,8 @@ pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, ctx: &Contex
             message.push("• ");
 
             if let Some(gc) = &guild_channel {
-                message.push_named_link(format!("#{}", gc.name), format!("https://discord.com/channels/{}/{}", gc.guild_id, gc.id));
+                let name = trim_link_name(&gc.name);
+                message.push_named_link(format!("**#{}**", name), format!("https://discord.com/channels/{}/{}", gc.guild_id, gc.id));
             }
             else {
                 message.push(thread.channel_id.mention());
@@ -326,4 +328,14 @@ pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, ctx: &Contex
     }
 
     Ok(response)
+}
+
+fn trim_link_name(name: &str) -> String {
+    if name.chars().count() > 32 {
+        let (cutoff, _) = name.char_indices().nth(31).unwrap();
+        format!("{}…", &name[0..cutoff].trim())
+    }
+    else {
+        name.to_owned()
+    }
 }
