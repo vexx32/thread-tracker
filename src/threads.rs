@@ -291,11 +291,16 @@ pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, ctx: &Contex
             let guild_channel = thread.channel_id.to_channel(&ctx.http).await.map_or(None, |gc| gc.guild());
 
             let last_message_author = match last_message {
-                Some(message) => match &guild_channel {
-                    Some(gc) => message.author
-                        .nick_in(&ctx.http, gc.guild_id).await
-                        .unwrap_or_else(|| message.author.name),
-                    None => message.author.name,
+                Some(message) => if message.author.bot {
+                    message.author.name
+                }
+                else {
+                    match &guild_channel {
+                        Some(gc) => message.author
+                            .nick_in(&ctx.http, gc.guild_id).await
+                            .unwrap_or_else(|| message.author.name),
+                        None => message.author.name,
+                    }
                 },
                 None => String::from("No replies yet"),
             };
