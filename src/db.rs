@@ -84,7 +84,7 @@ pub(crate) async fn remove_all(pool: &PgPool, guild_id: i64, user_id: i64, categ
 
 pub(crate) async fn list(pool: &PgPool, guild_id: i64, user_id: i64, category: Option<&str>) -> Result<Vec<TrackedThread>, sqlx::Error> {
     let query = match category {
-        Some(c) => sqlx::query_as("SELECT channel_id, category, guild_id, id, FROM threads WHERE user_id = $1 AND guild_id = $2 AND category = $3 ORDER BY id")
+        Some(c) => sqlx::query_as("SELECT channel_id, category, guild_id, id FROM threads WHERE user_id = $1 AND guild_id = $2 AND category = $3 ORDER BY id")
             .bind(user_id)
             .bind(guild_id)
             .bind(c),
