@@ -17,7 +17,8 @@ use regex::Regex;
 
 mod db;
 
-const HEARTBEAT_INTERVAL_SECONDS: u64 = 255;
+const HEARTBEAT_INTERVAL_SECONDS: u32 = 255;
+const WATCHER_UPDATE_INTERVAL_SECONDS: u32 = 120;
 
 lazy_static!{
     static ref URL_REGEX: Regex = Regex::new("^https://discord.com/channels/").unwrap();
@@ -41,16 +42,43 @@ impl From<db::TrackedThread> for TrackedThread {
     }
 }
 
+struct ThreadWatcher {
+    pub message_id: MessageId,
+    pub channel_id: ChannelId,
+    pub guild_id: GuildId,
+    pub user_id: UserId,
+    pub id: i32,
+    pub categories: Option<String>,
+}
+
+impl From<db::ThreadWatcher> for ThreadWatcher {
+    fn from(watcher: db::ThreadWatcher) -> Self {
+        Self {
+            channel_id: ChannelId(watcher.channel_id as u64),
+            message_id: MessageId(watcher.message_id as u64),
+            guild_id: GuildId(watcher.guild_id as u64),
+            user_id: UserId(watcher.user_id as u64),
+            id: watcher.id,
+            categories: watcher.categories,
+        }
+    }
+}
+
 struct Bot
 {
     database: PgPool,
 }
 
 impl Bot {
-    async fn process_command<'a, I>(&self, ctx: &Context, channel_id: ChannelId, guild_id: GuildId, user_id: UserId, command: &str, args: I)
-    where
-        I: Iterator<Item = &'a str>
-    {
+    async fn process_command(
+        &self,
+        ctx: &Context,
+        channel_id: ChannelId,
+        guild_id: GuildId,
+        user_id: UserId,
+        command: &str,
+        args: Vec<&str>
+    ) {
         match command {
             "tt!help" => {
                 error_on_additional_arguments(&ctx, args, channel_id).await;
@@ -72,10 +100,15 @@ impl Bot {
                 }
             },
             "tt!replies" => {
-                if let Err(e) = list_threads(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
+                if let Err(e) = list_threads(args.into_iter().map(|s| s.to_owned()).collect(), guild_id, user_id, channel_id, &ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error retrieving thread list", e).await;
                 }
             },
+            "tt!watch" => {
+                if let Err(e) = add_watcher(args.into_iter().map(|s| s.to_owned()).collect(), guild_id, user_id, channel_id, &ctx, &self.database).await {
+                    send_error_embed(&ctx.http, channel_id, "Error adding watcher", e).await;
+                }
+            }
             _ => {
                 info!("[command] {} was not recognised.", command);
                 return;
@@ -105,25 +138,84 @@ impl EventHandler for Bot {
         let mut command_args = msg.content.split_ascii_whitespace();
         if let Some(command) = command_args.next() {
             info!("[command] processing command `{}` from user `{}`", msg.content, author_id);
-            self.process_command(&ctx, channel_id, guild_id, author_id, command, command_args).await;
+            self.process_command(&ctx, channel_id, guild_id, author_id, command, command_args.collect()).await;
         }
     }
 
     async fn ready(&self, ctx: Context, ready: Ready) {
         info!("{} is connected!", ready.user.name);
 
-        keep_alive(ctx, HEARTBEAT_INTERVAL_SECONDS).await;
+        run_periodic_tasks(&ctx, &self.database).await;
     }
 }
 
-async fn keep_alive(ctx: Context, heartbeat_interval_seconds: u64) {
-    let mut interval = tokio::time::interval(Duration::from_secs(heartbeat_interval_seconds));
+async fn run_periodic_tasks(context: &Context, database: &PgPool) {
+    let ctx = context.clone();
 
-    loop {
-        interval.tick().await;
-        ctx.set_presence(Some(Activity::watching("over your threads (tt!help)")), OnlineStatus::Online).await;
-        info!("[heartbeat] Keep-alive heartbeat set_presence request completed")
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECONDS.into()));
+
+        loop {
+            interval.tick().await;
+            heartbeat(&ctx).await;
+        }
+    });
+
+    let ctx = context.clone();
+    let db = database.clone();
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(WATCHER_UPDATE_INTERVAL_SECONDS.into()));
+
+        loop {
+            interval.tick().await;
+            if let Err(e) = update_watchers(&ctx, &db).await {
+                error!("Error updating watchers: {}", e);
+            }
+        }
+    });
+}
+
+async fn heartbeat(ctx: &Context) {
+    ctx.set_presence(Some(Activity::watching("over your threads (tt!help)")), OnlineStatus::Online).await;
+    info!("[heartbeat] Keep-alive heartbeat set_presence request completed")
+}
+
+async fn update_watchers(ctx: &Context, database: &PgPool) -> Result<(), anyhow::Error> {
+    let watchers: Vec<ThreadWatcher> = db::list_watchers(database).await?
+        .into_iter()
+        .map(|w| w.into())
+        .collect();
+
+    for watcher in watchers {
+        let mut message = ctx.http.get_message(watcher.channel_id.0, watcher.message_id.0).await?;
+
+        let mut threads: Vec<TrackedThread> = Vec::new();
+        match watcher.categories {
+            Some(cats) => {
+                for category in cats.split(" ") {
+                    threads.extend(
+                        db::list_threads(database, watcher.guild_id.0, watcher.user_id.0, Some(category)).await?
+                            .into_iter()
+                            .map(|t| t.into())
+                    );
+                }
+            },
+            None => threads = db::list_threads(database, watcher.guild_id.0, watcher.user_id.0, None).await?
+                .into_iter()
+                .map(|t| t.into())
+                .collect(),
+        }
+
+        let threads_content = get_thread_list_content(threads, ctx).await?;
+
+        message.edit(&ctx, |msg| msg.embed(|embed| embed.title("Currently tracked threads").description(threads_content)))
+            .await
+            .err()
+            .map(|e| error!("Could not edit message: {}", e));
     }
+
+    Ok(())
 }
 
 async fn help_message(channel_id: ChannelId, ctx: &Context) {
@@ -137,36 +229,52 @@ This is the command that adds channels and threads to your tracker. After `add`,
 `tt!cat`
 This command will let you change an already-tracked thread's category. Specify the category name first, and then thread URLs to change those threads' categories. Use `unset` or `none` as the category name to make the thread(s) uncategorised. If you want to specify more than one thread, make sure there's a space between each. Category names cannot contain spaces.
 
+`tt!remove`
+Use this in conjunction with a channel or thread URL to remove that URL from your list, one or more category names to remove all threads in those categories, or simply `all` to remove all tracked threads.
+
 `tt!replies`
 This command shows you, in a list, who responded last to each channel, with each category grouped together. Specify one or more category names to list only the threads in those categories.
 
-`tt!remove`
-Use this in conjunction with a channel or thread URL to remove that URL from your list, one or more category names to remove all threads in those categories, or simply `all` to remove all tracked threads.
+`tt!watch`
+This command is similar to `tt!replies`, but once the list has been generated, the bot will periodically re-check the threads and update the same message rather than sending additional messages.
 "#;
-    send_message_embed(&ctx.http, channel_id, "Thread Tracker help", HELP_MESSAGE).await
+    handle_send_error(send_message_embed(&ctx.http, channel_id, "Thread Tracker help", HELP_MESSAGE).await);
 }
 
-async fn error_on_additional_arguments<'a, I>(ctx: &Context, unrecognised_args: I, channel_id: ChannelId)
-where
-    I: Iterator<Item = &'a str>
-{
-    let mut unrecognised_args = unrecognised_args.peekable();
-    if let Some(_) = unrecognised_args.peek() {
-        let args: Vec<_> = unrecognised_args.collect();
-        send_error_embed(&ctx.http, channel_id, "Unrecognised arguments", args.join(", ")).await;
+async fn error_on_additional_arguments(ctx: &Context, unrecognised_args: Vec<&str>, channel_id: ChannelId) {
+    if unrecognised_args.len() > 0 {
+        send_error_embed(&ctx.http, channel_id, "Unrecognised arguments", unrecognised_args.join(", ")).await;
     }
 }
 
+async fn add_watcher(
+    args: Vec<String>,
+    guild_id: GuildId,
+    user_id: UserId,
+    channel_id: ChannelId,
+    ctx: &Context,
+    database: &PgPool,
+) -> Result<(), anyhow::Error> {
+    let arguments = args.join(" ");
+
+    let message = list_threads(args, guild_id, user_id, channel_id, ctx, database).await?;
+
+    if let Err(e) = db::add_watcher(database, user_id.0, message.id.0, channel_id.0, guild_id.0, &arguments).await {
+        send_error_embed(&ctx.http, channel_id, "Error adding thread watcher", e).await;
+    }
+
+    Ok(())
+}
+
 async fn add_threads<'a>(
-    args: impl Iterator<Item = &'a str>,
+    args: Vec<&str>,
     guild_id: GuildId,
     user_id: UserId,
     channel_id: ChannelId,
     ctx: &Context,
     database: &PgPool
-) -> Result<(), anyhow::Error>
-{
-    let mut args = args.peekable();
+) -> Result<(), anyhow::Error> {
+    let mut args = args.into_iter().peekable();
 
     let mut threads_added = String::new();
     let mut errors = String::new();
@@ -193,7 +301,7 @@ async fn add_threads<'a>(
         if let Some(Ok(target_channel_id)) = thread_id.split("/").last().and_then(|x| Some(x.parse())) {
             let thread = ChannelId(target_channel_id);
             match thread.to_channel(&ctx.http).await {
-                Ok(_) => match db::add(database, guild_id.0 as i64, target_channel_id as i64, user_id.0 as i64, category.as_deref()).await {
+                Ok(_) => match db::add_thread(database, guild_id.0, target_channel_id, user_id.0, category.as_deref()).await {
                     Ok(true) => threads_added.push_str(&format!("• {:}\n", thread.mention())),
                     Ok(false) => threads_added.push_str(&format!("• Skipped {:} as it is already being tracked\n", thread.mention())),
                     Err(e) => errors.push_str(&format!("• Failed to register thread {}: {}\n", thread.mention(), e)),
@@ -216,21 +324,20 @@ async fn add_threads<'a>(
         None => "Tracked threads added".to_owned(),
     };
 
-    send_success_embed(&ctx.http, channel_id, title, threads_added).await;
+    handle_send_error(send_success_embed(&ctx.http, channel_id, title, threads_added).await);
 
     Ok(())
 }
 
-async fn set_threads_category<'a>(
-    args: impl Iterator<Item = &'a str>,
+async fn set_threads_category(
+    args: Vec<&str>,
     guild_id: GuildId,
     user_id: UserId,
     channel_id: ChannelId,
     ctx: &Context,
     database: &PgPool
-) -> Result<(), anyhow::Error>
-{
-    let mut args = args.peekable();
+) -> Result<(), anyhow::Error> {
+    let mut args = args.into_iter().peekable();
 
     let mut threads_updated = String::new();
     let mut errors = String::new();
@@ -254,7 +361,7 @@ async fn set_threads_category<'a>(
         if let Some(Ok(target_channel_id)) = thread_id.split("/").last().and_then(|x| Some(x.parse())) {
             let thread = ChannelId(target_channel_id);
             match thread.to_channel(&ctx.http).await {
-                Ok(_) => match db::update_category(database, guild_id.0 as i64, target_channel_id as i64, user_id.0 as i64, category.as_deref()).await {
+                Ok(_) => match db::update_thread_category(database, guild_id.0, target_channel_id, user_id.0, category.as_deref()).await {
                     Ok(true) => threads_updated.push_str(&format!("• {:}\n", thread.mention())),
                     Ok(false) => threads_updated.push_str(&format!("• Skipped {:} as it is not currently being tracked\n", thread.mention())),
                     Err(e) => errors.push_str(&format!("• Failed to update thread category {}: {}\n", thread.mention(), e)),
@@ -277,21 +384,20 @@ async fn set_threads_category<'a>(
         None => "Tracked threads' categories removed".to_owned(),
     };
 
-    send_success_embed(&ctx.http, channel_id, title, threads_updated).await;
+    handle_send_error(send_success_embed(&ctx.http, channel_id, title, threads_updated).await);
 
     Ok(())
 }
 
-async fn remove_threads<'a>(
-    args: impl Iterator<Item = &'a str>,
+async fn remove_threads(
+    args: Vec<&str>,
     guild_id: GuildId,
     user_id: UserId,
     channel_id: ChannelId,
     ctx: &Context,
     database: &PgPool
-) -> Result<(), anyhow::Error>
-{
-    let mut args = args.peekable();
+) -> Result<(), anyhow::Error> {
+    let mut args = args.into_iter().peekable();
 
     if args.peek().is_none() {
         send_error_embed(
@@ -304,13 +410,13 @@ async fn remove_threads<'a>(
     }
 
     if let Some(&"all") = args.peek() {
-        match db::remove_all(database, guild_id.0 as i64, user_id.0 as i64, None).await {
-            Ok(_) => send_success_embed(
+        match db::remove_all_threads(database, guild_id.0, user_id.0, None).await {
+            Ok(_) => handle_send_error(send_success_embed(
                 &ctx.http,
                 channel_id,
                 "Tracked threads removed",
                 &format!("All registered threads for user {:} removed.", user_id.mention())
-            ).await,
+            ).await),
             Err(e) => return Err(e.into()),
         };
 
@@ -322,7 +428,7 @@ async fn remove_threads<'a>(
 
     for thread_or_category in args {
         if !URL_REGEX.is_match(thread_or_category) {
-            match db::remove_all(database, guild_id.0 as i64, user_id.0 as i64, Some(thread_or_category)).await {
+            match db::remove_all_threads(database, guild_id.0, user_id.0, Some(thread_or_category)).await {
                 Ok(0) => errors.push_str(&format!("• No threads in category {} to remove", thread_or_category)),
                 Ok(count) => threads_removed.push_str(&format!("• All {} threads in category `{}` removed", count, thread_or_category)),
                 Err(e) => errors.push_str(&format!("• Unable to remove threads in category `{}`: {}", thread_or_category, e)),
@@ -331,7 +437,7 @@ async fn remove_threads<'a>(
         else if let Some(Ok(target_channel_id)) = thread_or_category.split("/").last().and_then(|x| Some(x.parse())) {
             let thread = ChannelId(target_channel_id);
             match thread.to_channel(&ctx.http).await {
-                Ok(_) => match db::remove(database, guild_id.0 as i64, target_channel_id as i64, user_id.0 as i64).await {
+                Ok(_) => match db::remove_thread(database, guild_id.0, target_channel_id, user_id.0).await {
                     Ok(_) => threads_removed.push_str(&format!("• {:}\n", thread.mention())),
                     Err(e) => errors.push_str(&format!("• Failed to unregister thread {}: {}\n", thread.mention(), e)),
                 },
@@ -348,28 +454,27 @@ async fn remove_threads<'a>(
         send_error_embed(&ctx.http, channel_id, "Error removing tracked threads", errors).await;
     }
 
-    send_success_embed(&ctx.http, channel_id, "Tracked threads removed", threads_removed).await;
+    handle_send_error(send_success_embed(&ctx.http, channel_id, "Tracked threads removed", threads_removed).await);
 
     Ok(())
 }
 
-async fn list_threads<'a>(
-    args: impl Iterator<Item = &'a str>,
+async fn list_threads(
+    args: Vec<String>,
     guild_id: GuildId,
     user_id: UserId,
     channel_id: ChannelId,
     ctx: &Context,
     database: &PgPool
-) -> Result<(), anyhow::Error> {
-    let mut args = args.peekable();
+) -> Result<Message, anyhow::Error> {
+    let mut args = args.into_iter().peekable();
 
-    let mut response = String::new();
     let mut threads: Vec<TrackedThread> = Vec::new();
 
     if args.peek().is_some() {
         for category in args {
             threads.extend(
-                db::list(database, guild_id.0 as i64, user_id.0 as i64, Some(category)).await?
+                db::list_threads(database, guild_id.0, user_id.0, Some(category.as_str())).await?
                     .into_iter()
                     .map(|t| t.into())
             );
@@ -377,13 +482,21 @@ async fn list_threads<'a>(
     }
     else {
         threads.extend(
-            db::list(database, guild_id.0 as i64, user_id.0 as i64, None).await?
+            db::list_threads(database, guild_id.0, user_id.0, None).await?
                 .into_iter()
                 .map(|t| t.into())
         );
     }
 
+    let response = get_thread_list_content(threads, ctx).await?;
+
+    Ok(send_message_embed(&ctx.http, channel_id, "Currently tracked threads", &response).await?)
+}
+
+async fn get_thread_list_content(threads: Vec<TrackedThread>, ctx: &Context) -> Result<String, SerenityError> {
+    let mut response = String::new();
     let mut categories: BTreeMap<Option<String>, Vec<TrackedThread>> = BTreeMap::new();
+
     for thread in threads {
         categories.entry(thread.category.clone()).or_default().push(thread);
     }
@@ -405,7 +518,14 @@ async fn list_threads<'a>(
                     let mut author = last_message.author.name.clone();
 
                     if let Some(guild_channel) = last_message.channel(&ctx.http).await?.guild() {
-                        if let Some(nick) = guild_channel.guild_id.member(&ctx.http, &last_message.author).await.ok().and_then(|member| member.nick) {
+                        if guild_channel.thread_metadata.map(|thread| thread.archived).unwrap_or(false) {
+                            guild_channel.edit_thread(&ctx.http, |thread| thread.archived(false)).await
+                                .map(|t| info!("Un-archived thread `{}`", t))
+                                .err()
+                                .map(|e| error!("Unable to un-archive thread `{}`: {}", guild_channel.name, e));
+                        }
+
+                        if let Ok(Some(nick)) = guild_channel.guild_id.member(&ctx.http, &last_message.author).await.map(|member| member.nick) {
                             author = nick;
                         }
                     }
@@ -427,32 +547,35 @@ async fn list_threads<'a>(
         response.push_str("No threads are currently being tracked.");
     }
 
-    send_message_embed(&ctx.http, channel_id, "Currently tracked threads", &response).await;
-
-    Ok(())
+    Ok(response)
 }
 
-async fn send_success_embed(http: impl AsRef<Http>, channel: ChannelId, title: impl ToString, body: impl ToString) {
+async fn send_success_embed(http: impl AsRef<Http>, channel: ChannelId, title: impl ToString, body: impl ToString) -> Result<Message, SerenityError> {
     send_embed(http, channel, title, body, Some(Colour::FABLED_PINK)).await
 }
 
 async fn send_error_embed(http: impl AsRef<Http>, channel: ChannelId, title: impl ToString, body: impl ToString) {
-    send_embed(http, channel, title, body, Some(Colour::DARK_ORANGE)).await;
+    handle_send_error(send_embed(http, channel, title, body, Some(Colour::DARK_ORANGE)).await);
 }
 
-async fn send_message_embed(http: impl AsRef<Http>, channel: ChannelId, title: impl ToString, body: impl ToString) {
-    send_embed(http, channel, title, body, None).await;
+async fn send_message_embed(http: impl AsRef<Http>, channel: ChannelId, title: impl ToString, body: impl ToString) -> Result<Message, SerenityError> {
+    send_embed(http, channel, title, body, None).await
 }
 
-async fn send_embed(http: impl AsRef<Http>, channel: ChannelId, title: impl ToString, body: impl ToString, colour: Option<Colour>) {
+async fn send_embed(
+    http: impl AsRef<Http>,
+    channel: ChannelId,
+    title: impl ToString,
+    body: impl ToString,
+    colour: Option<Colour>
+) -> Result<Message, SerenityError> {
     info!("Sending embed `{}` with content `{}`", title.to_string(), body.to_string());
-    handle_send_error(
-        channel.send_message(http, |msg| {
-            msg.embed(|embed| {
-                embed.title(title).description(body).colour(colour.unwrap_or(Colour::PURPLE))
-            })
-        }).await
-    );
+
+    channel.send_message(http, |msg| {
+        msg.embed(|embed| {
+            embed.title(title).description(body).colour(colour.unwrap_or(Colour::PURPLE))
+        })
+    }).await
 }
 
 fn handle_send_error(result: Result<Message, SerenityError>) {
