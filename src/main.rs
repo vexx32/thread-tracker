@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{anyhow};
+use chrono::Utc;
 use serenity::http::Http;
 use serenity::{async_trait};
 use serenity::model::channel::Message;
@@ -42,6 +43,7 @@ impl From<db::TrackedThread> for TrackedThread {
     }
 }
 
+#[derive(Debug)]
 struct ThreadWatcher {
     pub message_id: MessageId,
     pub channel_id: ChannelId,
@@ -108,7 +110,12 @@ impl Bot {
                 if let Err(e) = add_watcher(args.into_iter().map(|s| s.to_owned()).collect(), guild_id, user_id, channel_id, &ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error adding watcher", e).await;
                 }
-            }
+            },
+            "tt!unwatch" => {
+                if let Err(e) = remove_watcher(args, user_id, channel_id, &ctx, &self.database).await {
+                    send_error_embed(&ctx.http, channel_id, "Error removing watcher", e).await;
+                }
+            },
             _ => {
                 info!("[command] {} was not recognised.", command);
                 return;
@@ -209,7 +216,10 @@ async fn update_watchers(ctx: &Context, database: &PgPool) -> Result<(), anyhow:
 
         let threads_content = get_thread_list_content(threads, ctx).await?;
 
-        message.edit(&ctx, |msg| msg.embed(|embed| embed.title("Currently tracked threads").description(threads_content)))
+        message.edit(&ctx, |msg| msg.embed(|embed|
+                embed.title("Watching threads")
+                    .description(threads_content)
+                    .footer(|footer| footer.text(format!("Last updated: {}", Utc::now())))))
             .await
             .err()
             .map(|e| error!("Could not edit message: {}", e));
@@ -221,7 +231,7 @@ async fn update_watchers(ctx: &Context, database: &PgPool) -> Result<(), anyhow:
 async fn help_message(channel_id: ChannelId, ctx: &Context) {
     const HELP_MESSAGE: &'static str = r#"
 `tt!help`
-This is the command that reaches this help message. You can use it if you ever have any questions about the current functionality of Thread Tracker.
+This is the command that reaches this help message. You can use it if you ever have any questions about the current functionality of Thread Tracker. To report bugs or make feature requests, go to: <https://github.com/vexx32/thread-tracker>
 
 `tt!add`
 This is the command that adds channels and threads to your tracker. After `add`, write a space or linebreak and then paste the URL of a channel (found under `Copy Link` when you right click or long-press on the channel). If you wish to paste more than one channel, make sure there's a space or linebreak between each. To add channels to a specific category, use `tt!add categoryname` followed by the channels you want to add to that category. Category names cannot contain spaces.
@@ -237,6 +247,9 @@ This command shows you, in a list, who responded last to each channel, with each
 
 `tt!watch`
 This command is similar to `tt!replies`, but once the list has been generated, the bot will periodically re-check the threads and update the same message rather than sending additional messages.
+
+`tt!unwatch`
+Copy the message URL from an existing watcher message (with the title "Watching threads") and use it with this command to remove the watcher and its associated message.
 "#;
     handle_send_error(send_message_embed(&ctx.http, channel_id, "Thread Tracker help", HELP_MESSAGE).await);
 }
@@ -261,6 +274,66 @@ async fn add_watcher(
 
     if let Err(e) = db::add_watcher(database, user_id.0, message.id.0, channel_id.0, guild_id.0, &arguments).await {
         send_error_embed(&ctx.http, channel_id, "Error adding thread watcher", e).await;
+    }
+
+    Ok(())
+}
+
+async fn remove_watcher(
+    args: Vec<&str>,
+    user_id: UserId,
+    channel_id: ChannelId,
+    ctx: &Context,
+    database: &PgPool,
+) -> Result<(), anyhow::Error> {
+    let mut args = args.into_iter().peekable();
+    if args.peek().is_none() {
+        send_error_embed(
+            &ctx.http,
+            channel_id,
+            "Insufficient arguments provided",
+            "Please provide a message URL to a watcher message, such as: `tt!unwatch <message url>`."
+        ).await;
+
+        return Ok(());
+    }
+
+    let message_url = args.next().unwrap();
+    let mut message_url_fragments = message_url.split('/').rev();
+    let watcher_message_id: u64 = match message_url_fragments.next().and_then(|s| s.parse().ok()) {
+        Some(n) => n,
+        None => {
+            send_error_embed(&ctx.http, channel_id, "Error fetching watcher", &format!("Could not parse message ID from `{}`", message_url)).await;
+            return Ok(());
+        }
+    };
+    let watcher_channel_id: u64 = match message_url_fragments.next().and_then(|s| s.parse().ok()) {
+        Some(n) => n,
+        None => {
+            send_error_embed(&ctx.http, channel_id, "Error fetching watcher", &format!("Could not parse channel ID from `{}`", message_url)).await;
+            return Ok(())
+        }
+    };
+
+    let watcher: ThreadWatcher = match db::get_watcher(database, watcher_channel_id, watcher_message_id).await? {
+        Some(w) => w.into(),
+        None => {
+            send_error_embed(&ctx.http, channel_id, "Error fetching watcher", &format!("Could not find a watcher for the target message: `{}`", message_url)).await;
+            return Ok(())
+        }
+    };
+
+    if watcher.user_id != user_id {
+        send_error_embed(&ctx.http, channel_id, "Action not permitted", &format!("User {} does not own the watcher.", user_id)).await;
+        return Ok(())
+    }
+
+    match db::remove_watcher(database, watcher.guild_id.0, watcher.channel_id.0, watcher.message_id.0).await? {
+        0 => error!("Watcher should have been present in the database, but was missing when removal was attempted: {:?}", watcher),
+        _ => {
+            handle_send_error(send_success_embed(&ctx.http, channel_id, "Watcher removed", "Watcher successfully removed.").await);
+            ctx.http.get_message(watcher.channel_id.0, watcher.message_id.0).await?.delete(&ctx.http).await?;
+        }
     }
 
     Ok(())

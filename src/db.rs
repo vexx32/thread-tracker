@@ -24,6 +24,14 @@ pub(crate) async fn list_watchers(pool: &PgPool) -> Result<Vec<ThreadWatcher>, s
         .await
 }
 
+pub(crate) async fn get_watcher(pool: &PgPool, channel_id: u64, message_id: u64) -> Result<Option<ThreadWatcher>, sqlx::Error> {
+    sqlx::query_as("SELECT id, user_id, message_id, channel_id, guild_id, categories FROM watchers WHERE channel_id = $1 AND message_id = $2")
+        .bind(channel_id as i64)
+        .bind(message_id as i64)
+        .fetch_optional(pool)
+        .await
+}
+
 pub(crate) async fn add_watcher(
     pool: &PgPool,
     user_id: u64,
