@@ -127,31 +127,23 @@ async fn keep_alive(ctx: Context, heartbeat_interval_seconds: u64) {
 }
 
 async fn help_message(channel_id: ChannelId, ctx: &Context) {
-    let help_message = r#"
+    const HELP_MESSAGE: &'static str = r#"
 `tt!help`
 This is the command that reaches this help message. You can use it if you ever have any questions about the current functionality of Thread Tracker.
 
 `tt!add`
-This is the command that adds channels and threads to your tracker. After `add`, write a space or linebreak and then paste the URL of a channel (found under `Copy Link` when you right click or long-press on the channel). If you wish to paste more than one channel, make sure there's a space between each.
+This is the command that adds channels and threads to your tracker. After `add`, write a space or linebreak and then paste the URL of a channel (found under `Copy Link` when you right click or long-press on the channel). If you wish to paste more than one channel, make sure there's a space or linebreak between each. To add channels to a specific category, use `tt!add categoryname` followed by the channels you want to add to that category. Category names cannot contain spaces.
 
-`tt!add categoryname`
-This command will let you add channels and threads to your tracker with the designated category name. It works just like the normal add command, except you must specify the category name before any thread or channel URLs. Category names cannot contain spaces.
-
-`tt!cat categoryname`
-This command will let you change an already-tracked thread's category. Specify the category name along with thread URLs to change those threads' categories. Specify `unset` or `none` as the category name to make the thread uncategorised. If you want to specify more than one thread, make sure there's a space between each.
-
-Threads in the same category will be grouped together when using `tt!replies`. Category names cannot contain spaces.
+`tt!cat`
+This command will let you change an already-tracked thread's category. Specify the category name first, and then thread URLs to change those threads' categories. Use `unset` or `none` as the category name to make the thread(s) uncategorised. If you want to specify more than one thread, make sure there's a space between each. Category names cannot contain spaces.
 
 `tt!replies`
-This command shows you, in a list, who responded last to each channel, with each category grouped together.
-
-`tt!replies categoryname`
-This command lists your tracked threads and who last responded to each for the specified category or categories. Separate additional categories with spaces.
+This command shows you, in a list, who responded last to each channel, with each category grouped together. Specify one or more category names to list only the threads in those categories.
 
 `tt!remove`
 Use this in conjunction with a channel or thread URL to remove that URL from your list, one or more category names to remove all threads in those categories, or simply `all` to remove all tracked threads.
 "#;
-    send_message_embed(&ctx.http, channel_id, "Thread Tracker help", help_message).await
+    send_message_embed(&ctx.http, channel_id, "Thread Tracker help", HELP_MESSAGE).await
 }
 
 async fn error_on_additional_arguments<'a, I>(ctx: &Context, unrecognised_args: I, channel_id: ChannelId)
