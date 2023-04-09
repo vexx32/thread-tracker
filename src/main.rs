@@ -21,7 +21,6 @@ mod watchers;
 
 use background_tasks::*;
 use messaging::*;
-use watchers::*;
 
 use CommandError::*;
 
@@ -29,16 +28,16 @@ const HELP_MESSAGE: &'static str = r#"
 `tt!help`
 This is the command that reaches this help message. You can use it if you ever have any questions about the current functionality of Thread Tracker. To report bugs or make feature requests, go to: <https://github.com/vexx32/thread-tracker>
 
-`tt!add`
+`tt!add` // `tt!track`
 This is the command that adds channels and threads to your tracker. After `add`, write a space or linebreak and then paste the URL of a channel (found under `Copy Link` when you right click or long-press on the channel). If you wish to paste more than one channel, make sure there's a space or linebreak between each. To add channels to a specific category, use `tt!add categoryname` followed by the channels you want to add to that category. Category names cannot contain spaces.
 
-`tt!cat`
+`tt!cat` // `tt!category`
 This command will let you change an already-tracked thread's category. Specify the category name first, and then thread URLs to change those threads' categories. Use `unset` or `none` as the category name to make the thread(s) uncategorised. If you want to specify more than one thread, make sure there's a space between each. Category names cannot contain spaces.
 
-`tt!remove`
+`tt!rm` // `tt!remove`
 Use this in conjunction with a channel or thread URL to remove that URL from your list, one or more category names to remove all threads in those categories, or simply `all` to remove all tracked threads.
 
-`tt!replies`
+`tt!replies` // `tt!threads`
 This command shows you, in a list, who responded last to each channel, with each category grouped together. Specify one or more category names to list only the threads in those categories.
 
 `tt!watch`
@@ -55,6 +54,9 @@ pub(crate) enum CommandError {
 
     #[error("Unrecognised arguments: {0}")]
     UnrecognisedArguments(String),
+
+    #[error("Unknown command `{0}`. Use `tt!help` for a list of commands.")]
+    UnknownCommand(String),
 }
 
 struct Bot
@@ -79,22 +81,22 @@ impl Bot {
                 };
                 help_message(channel_id, &ctx).await;
             },
-            "tt!add" => {
+            "tt!add" | "tt!track" => {
                 if let Err(e) = threads::add(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error adding tracked channel(s): {:}", e).await;
                 }
             },
-            "tt!cat" => {
+            "tt!cat" | "tt!category" => {
                 if let Err(e) = threads::set_category(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error updating channels' categories", e).await;
                 }
             },
-            "tt!remove" => {
+            "tt!rm" | "tt!remove" => {
                 if let Err(e) = threads::remove(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error removing tracked channel(s)", e).await;
                 }
             },
-            "tt!replies" => {
+            "tt!replies" | "tt!threads" => {
                 if let Err(e) = threads::send_list(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error retrieving thread list", e).await;
                 }
@@ -109,9 +111,9 @@ impl Bot {
                     send_error_embed(&ctx.http, channel_id, "Error removing watcher", e).await;
                 }
             },
-            _ => {
-                info!("[command] {} was not recognised.", command);
-                return;
+            other => {
+                info!("Unknown command received: {}", other);
+                send_error_embed(&ctx.http, channel_id, "Unknown command", UnknownCommand(String::from(other))).await;
             }
         }
     }
