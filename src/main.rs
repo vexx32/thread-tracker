@@ -189,13 +189,29 @@ async fn heartbeat(ctx: &Context) {
 }
 
 async fn update_watchers(ctx: &Context, database: &PgPool) -> Result<(), anyhow::Error> {
+    info!("[threadwatch] Updating watchers");
     let watchers: Vec<ThreadWatcher> = db::list_watchers(database).await?
         .into_iter()
         .map(|w| w.into())
         .collect();
 
     for watcher in watchers {
-        let mut message = ctx.http.get_message(watcher.channel_id.0, watcher.message_id.0).await?;
+        info!("[threadwatch] Updating watcher {:?}", watcher);
+        let mut message = match ctx.http.get_message(watcher.channel_id.0, watcher.message_id.0).await {
+            Ok(m) => m,
+            Err(e) => {
+                let channel_name = watcher.channel_id
+                    .to_channel(&ctx.http).await
+                    .map_or(None, |c| c.guild())
+                    .map_or_else(|| "<unavailable channel>".to_owned(), |gc| gc.name);
+
+                error!("[threadwatch] Could not find message {} in channel {}: {}. Removing watcher.", watcher.message_id, channel_name, e);
+                db::remove_watcher(database, watcher.guild_id.0, watcher.channel_id.0, watcher.message_id.0).await
+                    .map_err(|e| error!("Failed to remove watcher: {}", e))
+                    .ok();
+                continue;
+            },
+        };
 
         let mut threads: Vec<TrackedThread> = Vec::new();
         match watcher.categories.as_deref() {
