@@ -389,7 +389,10 @@ async fn list_threads<'a>(
     }
 
     for (name, threads) in categories {
-        response.push_str(&format!("__**{}**__\n\n", name.as_deref().unwrap_or("Uncategorised")));
+        match name {
+            Some(n) => response.push_str(&format!("__**{}**__\n\n", n)),
+            None => {},
+        }
 
         for thread in threads {
             // Default behaviour for retriever is to get most recent messages
