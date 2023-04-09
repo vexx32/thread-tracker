@@ -100,12 +100,12 @@ impl Bot {
                 }
             },
             "tt!watch" => {
-                if let Err(e) = add_watcher(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
+                if let Err(e) = watchers::add(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error adding watcher", e).await;
                 }
             },
             "tt!unwatch" => {
-                if let Err(e) = remove_watcher(args, user_id, channel_id, &ctx, &self.database).await {
+                if let Err(e) = watchers::remove(args, user_id, channel_id, &ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error removing watcher", e).await;
                 }
             },

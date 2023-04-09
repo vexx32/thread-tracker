@@ -49,7 +49,7 @@ enum WatcherError {
     NotAllowed(String),
 }
 
-pub(crate) async fn add_watcher(
+pub(crate) async fn add(
     args: Vec<&str>,
     guild_id: GuildId,
     user_id: UserId,
@@ -71,7 +71,7 @@ pub(crate) async fn add_watcher(
     Ok(())
 }
 
-pub(crate) async fn remove_watcher(
+pub(crate) async fn remove(
     args: Vec<&str>,
     user_id: UserId,
     channel_id: ChannelId,

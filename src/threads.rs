@@ -8,7 +8,6 @@ use serenity::{
 };
 use regex::Regex;
 use sqlx::PgPool;
-use thiserror::Error;
 use tracing::{error, info};
 
 use crate::{
@@ -20,11 +19,6 @@ use crate::{
 
 lazy_static!{
     static ref URL_REGEX: Regex = Regex::new("^https://discord.com/channels/").unwrap();
-}
-
-#[derive(Debug, Error)]
-enum ThreadError {
-
 }
 
 pub(crate) struct TrackedThread {
@@ -76,10 +70,13 @@ pub(crate) async fn add<'a>(
         if let Some(Ok(target_channel_id)) = thread_id.split("/").last().and_then(|x| Some(x.parse())) {
             let thread = ChannelId(target_channel_id);
             match thread.to_channel(&ctx.http).await {
-                Ok(_) => match db::add_thread(database, guild_id.0, target_channel_id, user_id.0, category.as_deref()).await {
-                    Ok(true) => threads_added.push_str(&format!("• {:}\n", thread.mention())),
-                    Ok(false) => threads_added.push_str(&format!("• Skipped {:} as it is already being tracked\n", thread.mention())),
-                    Err(e) => errors.push_str(&format!("• Failed to register thread {}: {}\n", thread.mention(), e)),
+                Ok(_) => {
+                    info!("Adding tracked thread {} for user {}", target_channel_id, user_id);
+                    match db::add_thread(database, guild_id.0, target_channel_id, user_id.0, category.as_deref()).await {
+                        Ok(true) => threads_added.push_str(&format!("• {:}\n", thread.mention())),
+                        Ok(false) => threads_added.push_str(&format!("• Skipped {:} as it is already being tracked\n", thread.mention())),
+                        Err(e) => errors.push_str(&format!("• Failed to register thread {}: {}\n", thread.mention(), e)),
+                    }
                 },
                 Err(e) => errors.push_str(&format!("• Cannot access channel {}: {}\n", thread.mention(), e)),
             }
@@ -288,7 +285,7 @@ pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, ctx: &Contex
 
         for thread in threads {
             // Default behaviour for retriever is to get most recent messages
-            let last_message = thread.channel_id.messages(&ctx.http, |retriever| retriever.limit(1)).await?.pop();
+            let last_message = thread.channel_id.messages(&ctx.http, |retriever| retriever.limit(1)).await.ok().map(|mut m| m.pop()).flatten();
             let guild_channel = thread.channel_id.to_channel(&ctx.http).await.map_or(None, |gc| gc.guild());
 
             let last_message_author = match last_message {
