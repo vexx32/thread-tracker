@@ -2608,6 +2608,7 @@ dependencies = [
  "shuttle-serenity",
  "shuttle-shared-db",
  "sqlx",
+ "thiserror",
  "tokio",
  "tracing",
 ]

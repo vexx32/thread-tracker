@@ -1,4 +1,6 @@
-use sqlx::{FromRow, PgPool};
+use sqlx::FromRow;
+
+pub use sqlx::PgPool as Database;
 
 #[derive(FromRow)]
 pub(crate) struct TrackedThreadRow {
@@ -18,22 +20,22 @@ pub(crate) struct ThreadWatcherRow {
     pub categories: Option<String>,
 }
 
-pub(crate) async fn list_watchers(pool: &PgPool) -> Result<Vec<ThreadWatcherRow>, sqlx::Error> {
+pub(crate) async fn list_watchers(database: &Database) -> Result<Vec<ThreadWatcherRow>, sqlx::Error> {
     sqlx::query_as("SELECT id, user_id, message_id, channel_id, guild_id, categories FROM watchers")
-        .fetch_all(pool)
+        .fetch_all(database)
         .await
 }
 
-pub(crate) async fn get_watcher(pool: &PgPool, channel_id: u64, message_id: u64) -> Result<Option<ThreadWatcherRow>, sqlx::Error> {
+pub(crate) async fn get_watcher(database: &Database, channel_id: u64, message_id: u64) -> Result<Option<ThreadWatcherRow>, sqlx::Error> {
     sqlx::query_as("SELECT id, user_id, message_id, channel_id, guild_id, categories FROM watchers WHERE channel_id = $1 AND message_id = $2")
         .bind(channel_id as i64)
         .bind(message_id as i64)
-        .fetch_optional(pool)
+        .fetch_optional(database)
         .await
 }
 
 pub(crate) async fn add_watcher(
-    pool: &PgPool,
+    database: &Database,
     user_id: u64,
     message_id: u64,
     channel_id: u64,
@@ -46,36 +48,32 @@ pub(crate) async fn add_watcher(
         .bind(channel_id as i64)
         .bind(guild_id as i64)
         .bind(categories)
-        .execute(pool)
+        .execute(database)
         .await?;
 
     Ok(result.rows_affected() > 0)
 }
 
 pub(crate) async fn remove_watcher(
-    pool: &PgPool,
-    guild_id: u64,
-    channel_id: u64,
-    message_id: u64,
+    database: &Database,
+    watcher_id: i32,
 ) -> Result<u64, sqlx::Error> {
-    let result = sqlx::query("DELETE FROM watchers WHERE guild_id = $1 AND channel_id = $2 AND message_id = $3")
-        .bind(guild_id as i64)
-        .bind(channel_id as i64)
-        .bind(message_id as i64)
-        .execute(pool)
+    let result = sqlx::query("DELETE FROM watchers WHERE id = $1")
+        .bind(watcher_id)
+        .execute(database)
         .await?;
 
     Ok(result.rows_affected())
 }
 
 pub(crate) async fn add_thread(
-    pool: &PgPool,
+    database: &Database,
     guild_id: u64,
     channel_id: u64,
     user_id: u64,
     category: Option<&str>,
 ) -> Result<bool, sqlx::Error> {
-    let existing_thread = get_thread(pool, guild_id, user_id, channel_id).await?;
+    let existing_thread = get_thread(database, guild_id, user_id, channel_id).await?;
 
     if existing_thread.is_some() {
         return Ok(false);
@@ -86,14 +84,14 @@ pub(crate) async fn add_thread(
         .bind(user_id as i64)
         .bind(guild_id as i64)
         .bind(category)
-        .execute(pool)
+        .execute(database)
         .await?;
 
     Ok(true)
 }
 
 pub(crate) async fn update_thread_category(
-    pool: &PgPool,
+    database: &Database,
     guild_id: u64,
     channel_id: u64,
     user_id: u64,
@@ -104,14 +102,14 @@ pub(crate) async fn update_thread_category(
         .bind(guild_id as i64)
         .bind(channel_id as i64)
         .bind(user_id as i64)
-        .execute(pool)
+        .execute(database)
         .await?;
 
     Ok(result.rows_affected() > 0)
 }
 
 pub(crate) async fn remove_thread(
-    pool: &PgPool,
+    database: &Database,
     guild_id: u64,
     channel_id: u64,
     user_id: u64,
@@ -120,13 +118,13 @@ pub(crate) async fn remove_thread(
         .bind(channel_id as i64)
         .bind(user_id as i64)
         .bind(guild_id as i64)
-        .execute(pool)
+        .execute(database)
         .await?;
 
     Ok(result.rows_affected())
 }
 
-pub(crate) async fn remove_all_threads(pool: &PgPool, guild_id: u64, user_id: u64, category: Option<&str>) -> Result<u64, sqlx::Error> {
+pub(crate) async fn remove_all_threads(database: &Database, guild_id: u64, user_id: u64, category: Option<&str>) -> Result<u64, sqlx::Error> {
     let query = match category {
         Some(c) => sqlx::query("DELETE FROM threads where user_id = $1 AND guild_id = $2 AND category = $3")
             .bind(user_id as i64)
@@ -137,12 +135,12 @@ pub(crate) async fn remove_all_threads(pool: &PgPool, guild_id: u64, user_id: u6
             .bind(guild_id as i64),
     };
 
-    let result = query.execute(pool).await?;
+    let result = query.execute(database).await?;
 
     Ok(result.rows_affected())
 }
 
-pub(crate) async fn list_threads(pool: &PgPool, guild_id: u64, user_id: u64, category: Option<&str>) -> Result<Vec<TrackedThreadRow>, sqlx::Error> {
+pub(crate) async fn list_threads(database: &Database, guild_id: u64, user_id: u64, category: Option<&str>) -> Result<Vec<TrackedThreadRow>, sqlx::Error> {
     let query = match category {
         Some(c) => sqlx::query_as("SELECT channel_id, category, guild_id, id FROM threads WHERE user_id = $1 AND guild_id = $2 AND category = $3 ORDER BY id")
             .bind(user_id as i64)
@@ -153,18 +151,18 @@ pub(crate) async fn list_threads(pool: &PgPool, guild_id: u64, user_id: u64, cat
             .bind(guild_id as i64),
     };
 
-    let threads: Vec<TrackedThreadRow> = query.fetch_all(pool).await?;
+    let threads: Vec<TrackedThreadRow> = query.fetch_all(database).await?;
 
     Ok(threads)
 }
 
-pub(crate) async fn get_thread(pool: &PgPool, guild_id: u64, user_id: u64, channel_id: u64) -> Result<Option<TrackedThreadRow>, sqlx::Error> {
+pub(crate) async fn get_thread(database: &Database, guild_id: u64, user_id: u64, channel_id: u64) -> Result<Option<TrackedThreadRow>, sqlx::Error> {
     let mut thread: Vec<TrackedThreadRow> =
         sqlx::query_as("SELECT channel_id, category, guild_id, id FROM threads WHERE user_id = $1 AND channel_id = $2 AND guild_id = $3 ORDER BY id")
             .bind(user_id as i64)
             .bind(channel_id as i64)
             .bind(guild_id as i64)
-            .fetch_all(pool)
+            .fetch_all(database)
             .await?;
 
     Ok(thread.pop())
