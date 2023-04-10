@@ -147,7 +147,7 @@ impl EventHandler for Bot {
     async fn ready(&self, ctx: Context, ready: Ready) {
         info!("{} is connected!", ready.user.name);
 
-        run_periodic_tasks(&ctx, &self.database).await;
+        run_periodic_tasks(ctx.into(), self.database.clone().into()).await;
     }
 }
 

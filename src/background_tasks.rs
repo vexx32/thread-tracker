@@ -1,7 +1,8 @@
 use std::{
     fmt::Display,
     time::Duration,
-    future::Future
+    future::Future,
+    sync::Arc,
 };
 
 use chrono::Utc;
@@ -21,65 +22,61 @@ use crate::{
 const HEARTBEAT_INTERVAL_SECONDS: u32 = 255;
 const WATCHER_UPDATE_INTERVAL_SECONDS: u32 = 120;
 
-pub(crate) async fn run_periodic_tasks(context: &Context, database: &Database) {
+pub(crate) async fn run_periodic_tasks(context: Arc<Context>, database: Arc<Database>) {
     spawn_task_loop(
-        &context,
-        &database,
+        context.clone(),
+        database.clone(),
         Duration::from_secs(HEARTBEAT_INTERVAL_SECONDS.into()),
         |c, _| heartbeat(c));
 
     spawn_result_task_loop(
-        &context,
-        &database,
+        context.clone(),
+        database.clone(),
         Duration::from_secs(WATCHER_UPDATE_INTERVAL_SECONDS.into()),
         |c, db| update_watchers(c, db)
     );
 }
 
-fn spawn_task_loop<F, Ft>(context: &Context, database: &Database, period: Duration, mut task: F)
+fn spawn_task_loop<F, Ft>(context: Arc<Context>, database: Arc<Database>, period: Duration, mut task: F)
 where
-    F: FnMut(Context, Database) -> Ft + Send + 'static,
+    F: FnMut(Arc<Context>, Arc<Database>) -> Ft + Send + 'static,
     Ft: Future<Output = ()> + Send + 'static,
 {
-    let ctx = context.clone();
-    let db = database.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(period);
 
         loop {
             interval.tick().await;
-            task(ctx.clone(), db.clone()).await;
+            task(Arc::clone(&context), Arc::clone(&database)).await;
         }
     });
 }
 
-fn spawn_result_task_loop<F, T, U, Ft>(context: &Context, database: &Database, period: Duration, mut task: F)
+fn spawn_result_task_loop<F, T, U, Ft>(context: Arc<Context>, database: Arc<Database>, period: Duration, mut task: F)
 where
-    F: FnMut(Context, Database) -> Ft + Send + 'static,
+    F: FnMut(Arc<Context>, Arc<Database>) -> Ft + Send + 'static,
     Ft: Future<Output = Result<T, U>> + Send + 'static,
     U: Display,
 {
-    let ctx = context.clone();
-    let db = database.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(period);
 
         loop {
             interval.tick().await;
 
-            if let Err(e) = task(ctx.clone(), db.clone()).await {
+            if let Err(e) = task(Arc::clone(&context), Arc::clone(&database)).await {
                 error!("Error running periodic task: {}", e)
             }
         }
     });
 }
 
-pub(crate) async fn heartbeat(ctx: Context) {
+pub(crate) async fn heartbeat(ctx: Arc<Context>) {
     ctx.set_presence(Some(Activity::watching("over your threads (tt!help)")), OnlineStatus::Online).await;
     info!("[heartbeat] Keep-alive heartbeat set_presence request completed")
 }
 
-pub(crate) async fn update_watchers(ctx: Context, database: Database) -> Result<(), anyhow::Error> {
+pub(crate) async fn update_watchers(ctx: Arc<Context>, database: Arc<Database>) -> Result<(), anyhow::Error> {
     info!("[threadwatch] Updating watchers");
     let watchers: Vec<ThreadWatcher> = db::list_watchers(&database).await?
         .into_iter()
