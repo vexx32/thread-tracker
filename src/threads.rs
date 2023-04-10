@@ -7,11 +7,10 @@ use serenity::{
     utils::{MessageBuilder, Content, ContentModifier, EmbedMessageBuilding},
 };
 use regex::Regex;
-use sqlx::PgPool;
 use tracing::{error, info};
 
 use crate::{
-    db,
+    db::{self, Database},
     messaging::*,
 
     CommandError::*,
@@ -45,7 +44,7 @@ pub(crate) async fn add<'a>(
     user_id: UserId,
     channel_id: ChannelId,
     ctx: &Context,
-    database: &PgPool
+    database: &Database
 ) -> Result<(), anyhow::Error> {
     let mut args = args.into_iter().peekable();
 
@@ -107,7 +106,7 @@ pub(crate) async fn set_category(
     user_id: UserId,
     channel_id: ChannelId,
     ctx: &Context,
-    database: &PgPool
+    database: &Database
 ) -> Result<(), anyhow::Error> {
     let mut args = args.into_iter().peekable();
 
@@ -158,7 +157,7 @@ pub(crate) async fn remove(
     user_id: UserId,
     channel_id: ChannelId,
     ctx: &Context,
-    database: &PgPool
+    database: &Database
 ) -> Result<(), anyhow::Error> {
     let mut args = args.into_iter().peekable();
 
@@ -223,7 +222,7 @@ pub(crate) async fn send_list(
     user_id: UserId,
     channel_id: ChannelId,
     ctx: &Context,
-    database: &PgPool
+    database: &Database
 ) -> Result<Message, anyhow::Error> {
     send_list_with_title(args, guild_id, user_id, channel_id, "Currently tracked threads", ctx, database).await
 }
@@ -235,7 +234,7 @@ pub(crate) async fn send_list_with_title(
     channel_id: ChannelId,
     embed_title: impl ToString,
     ctx: &Context,
-    database: &PgPool
+    database: &Database
 ) -> Result<Message, anyhow::Error> {
     let mut args = args.into_iter().peekable();
 

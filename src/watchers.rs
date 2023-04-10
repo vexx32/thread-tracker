@@ -2,13 +2,12 @@ use serenity::{
     model::prelude::*,
     prelude::*,
 };
-use sqlx::PgPool;
 use thiserror::Error;
 use tracing::{error, info};
 
 use crate::{
-    db,
-    threads::*,
+    db::{self, Database},
+    threads,
     messaging::*,
 
     CommandError::*,
@@ -55,7 +54,7 @@ pub(crate) async fn add(
     user_id: UserId,
     channel_id: ChannelId,
     ctx: &Context,
-    database: &PgPool,
+    database: &Database,
 ) -> anyhow::Result<()> {
     info!("[threadwatch] Adding watcher for user {}, categories {:?}", user_id, args);
     let arguments = if args.len() > 0 {
@@ -65,7 +64,7 @@ pub(crate) async fn add(
         None
     };
 
-    let message = send_list_with_title(args, guild_id, user_id, channel_id, "Watching threads", ctx, database).await?;
+    let message = threads::send_list_with_title(args, guild_id, user_id, channel_id, "Watching threads", ctx, database).await?;
     db::add_watcher(database, user_id.0, message.id.0, channel_id.0, guild_id.0, arguments.as_deref()).await?;
 
     Ok(())
@@ -76,7 +75,7 @@ pub(crate) async fn remove(
     user_id: UserId,
     channel_id: ChannelId,
     ctx: &Context,
-    database: &PgPool,
+    database: &Database,
 ) -> anyhow::Result<()> {
     let mut args = args.into_iter().peekable();
     if args.peek().is_none() {

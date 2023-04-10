@@ -9,7 +9,7 @@ use serenity::{
     prelude::*,
 };
 use shuttle_secrets::SecretStore;
-use sqlx::{PgPool, Executor};
+use sqlx::Executor;
 use thiserror::Error;
 use tracing::{error, info};
 
@@ -19,6 +19,7 @@ mod threads;
 mod messaging;
 mod watchers;
 
+use db::Database;
 use background_tasks::*;
 use messaging::*;
 
@@ -61,7 +62,7 @@ pub(crate) enum CommandError {
 
 struct Bot
 {
-    database: PgPool,
+    database: Database,
 }
 
 impl Bot {
@@ -166,7 +167,7 @@ fn error_on_additional_arguments(unrecognised_args: Vec<&str>) -> Result<(), Com
 async fn serenity(
     #[shuttle_shared_db::Postgres(
         //local_uri = "postgres://postgres:{secrets.PASSWORD}@localhost:16695/postgres"
-    )] pool: PgPool,
+    )] pool: Database,
     #[shuttle_secrets::Secrets] secret_store: SecretStore,
 ) -> shuttle_serenity::ShuttleSerenity {
     use anyhow::Context;

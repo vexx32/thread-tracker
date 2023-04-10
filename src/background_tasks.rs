@@ -10,13 +10,12 @@ use serenity::{
     prelude::*,
     utils::Colour,
 };
-use sqlx::PgPool;
 use tracing::{error, info};
 
 use crate::{
     db::{self, Database},
-    threads::*,
-    watchers::*,
+    threads::{self, TrackedThread},
+    watchers::ThreadWatcher,
 };
 
 const HEARTBEAT_INTERVAL_SECONDS: u32 = 255;
@@ -80,7 +79,7 @@ pub(crate) async fn heartbeat(ctx: Context) {
     info!("[heartbeat] Keep-alive heartbeat set_presence request completed")
 }
 
-pub(crate) async fn update_watchers(ctx: Context, database: PgPool) -> Result<(), anyhow::Error> {
+pub(crate) async fn update_watchers(ctx: Context, database: Database) -> Result<(), anyhow::Error> {
     info!("[threadwatch] Updating watchers");
     let watchers: Vec<ThreadWatcher> = db::list_watchers(&database).await?
         .into_iter()
@@ -123,7 +122,7 @@ pub(crate) async fn update_watchers(ctx: Context, database: PgPool) -> Result<()
             },
         }
 
-        let threads_content = get_formatted_list(threads, &ctx).await?;
+        let threads_content = threads::get_formatted_list(threads, &ctx).await?;
 
         message.edit(&ctx.http, |msg| msg.embed(|embed|
                 embed.colour(Colour::PURPLE)
