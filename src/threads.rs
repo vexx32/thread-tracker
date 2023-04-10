@@ -302,7 +302,8 @@ pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, ctx: &Contex
                 None => String::from("No replies yet"),
             };
 
-            message.push("• ");
+            // Thread entries in blockquotes
+            message.push_quote("");
 
             if let Some(gc) = &guild_channel {
                 let name = trim_link_name(&gc.name);
