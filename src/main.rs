@@ -34,7 +34,7 @@ This is the command that adds channels and threads to your tracker. After `add`,
 `tt!cat` // `tt!category`
 This command will let you change an already-tracked thread's category. Specify the category name first, and then thread URLs to change those threads' categories. Use `unset` or `none` as the category name to make the thread(s) uncategorised. If you want to specify more than one thread, make sure there's a space between each. Category names cannot contain spaces.
 
-`tt!rm` // `tt!remove`
+`tt!rm` // `tt!remove` // `tt!untrack`
 Use this in conjunction with a channel or thread URL to remove that URL from your list, one or more category names to remove all threads in those categories, or simply `all` to remove all tracked threads.
 
 `tt!replies` // `tt!threads`
@@ -91,7 +91,7 @@ impl Bot {
                     send_error_embed(&ctx.http, channel_id, "Error updating channels' categories", e).await;
                 }
             },
-            "tt!rm" | "tt!remove" => {
+            "tt!rm" | "tt!remove" | "tt!untrack" => {
                 if let Err(e) = threads::remove(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error removing tracked channel(s)", e).await;
                 }
