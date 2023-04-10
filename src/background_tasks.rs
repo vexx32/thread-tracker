@@ -1,4 +1,8 @@
-use std::time::Duration;
+use std::{
+    fmt::Display,
+    time::Duration,
+    future::Future
+};
 
 use chrono::Utc;
 use serenity::{
@@ -10,7 +14,7 @@ use sqlx::PgPool;
 use tracing::{error, info};
 
 use crate::{
-    db,
+    db::{self, Database},
     threads::*,
     watchers::*,
 };
@@ -18,41 +22,67 @@ use crate::{
 const HEARTBEAT_INTERVAL_SECONDS: u32 = 255;
 const WATCHER_UPDATE_INTERVAL_SECONDS: u32 = 120;
 
-pub(crate) async fn run_periodic_tasks(context: &Context, database: &PgPool) {
-    let ctx = context.clone();
+pub(crate) async fn run_periodic_tasks(context: &Context, database: &Database) {
+    spawn_task_loop(
+        &context,
+        &database,
+        Duration::from_secs(HEARTBEAT_INTERVAL_SECONDS.into()),
+        |c, _| heartbeat(c));
 
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECONDS.into()));
+    spawn_result_task_loop(
+        &context,
+        &database,
+        Duration::from_secs(WATCHER_UPDATE_INTERVAL_SECONDS.into()),
+        |c, db| update_watchers(c, db)
+    );
+}
 
-        loop {
-            interval.tick().await;
-            heartbeat(&ctx).await;
-        }
-    });
-
+fn spawn_task_loop<F, Ft>(context: &Context, database: &Database, period: Duration, mut task: F)
+where
+    F: FnMut(Context, Database) -> Ft + Send + 'static,
+    Ft: Future<Output = ()> + Send + 'static,
+{
     let ctx = context.clone();
     let db = database.clone();
-
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(WATCHER_UPDATE_INTERVAL_SECONDS.into()));
+        let mut interval = tokio::time::interval(period);
 
         loop {
             interval.tick().await;
-            if let Err(e) = update_watchers(&ctx, &db).await {
-                error!("Error updating watchers: {}", e);
+            task(ctx.clone(), db.clone()).await;
+        }
+    });
+}
+
+fn spawn_result_task_loop<F, T, U, Ft>(context: &Context, database: &Database, period: Duration, mut task: F)
+where
+    F: FnMut(Context, Database) -> Ft + Send + 'static,
+    Ft: Future<Output = Result<T, U>> + Send + 'static,
+    U: Display,
+{
+    let ctx = context.clone();
+    let db = database.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(period);
+
+        loop {
+            interval.tick().await;
+
+            if let Err(e) = task(ctx.clone(), db.clone()).await {
+                error!("Error running periodic task: {}", e)
             }
         }
     });
 }
 
-pub(crate) async fn heartbeat(ctx: &Context) {
+pub(crate) async fn heartbeat(ctx: Context) {
     ctx.set_presence(Some(Activity::watching("over your threads (tt!help)")), OnlineStatus::Online).await;
     info!("[heartbeat] Keep-alive heartbeat set_presence request completed")
 }
 
-pub(crate) async fn update_watchers(ctx: &Context, database: &PgPool) -> Result<(), anyhow::Error> {
+pub(crate) async fn update_watchers(ctx: Context, database: PgPool) -> Result<(), anyhow::Error> {
     info!("[threadwatch] Updating watchers");
-    let watchers: Vec<ThreadWatcher> = db::list_watchers(database).await?
+    let watchers: Vec<ThreadWatcher> = db::list_watchers(&database).await?
         .into_iter()
         .map(|w| w.into())
         .collect();
@@ -68,7 +98,7 @@ pub(crate) async fn update_watchers(ctx: &Context, database: &PgPool) -> Result<
                     .map_or_else(|| "<unavailable channel>".to_owned(), |gc| gc.name);
 
                 error!("[threadwatch] Could not find message {} in channel {}: {}. Removing watcher.", watcher.message_id, channel_name, e);
-                db::remove_watcher(database, watcher.id).await
+                db::remove_watcher(&database, watcher.id).await
                     .map_err(|e| error!("Failed to remove watcher: {}", e))
                     .ok();
                 continue;
@@ -78,14 +108,14 @@ pub(crate) async fn update_watchers(ctx: &Context, database: &PgPool) -> Result<
         let mut threads: Vec<TrackedThread> = Vec::new();
         match watcher.categories.as_deref() {
             Some("") | None => threads.extend(
-            db::list_threads(database, watcher.guild_id.0, watcher.user_id.0, None).await?
+            db::list_threads(&database, watcher.guild_id.0, watcher.user_id.0, None).await?
                 .into_iter()
                 .map(|t| t.into())
             ),
             Some(cats) => {
                 for category in cats.split(" ") {
                     threads.extend(
-                        db::list_threads(database, watcher.guild_id.0, watcher.user_id.0, Some(category)).await?
+                        db::list_threads(&database, watcher.guild_id.0, watcher.user_id.0, Some(category)).await?
                             .into_iter()
                             .map(|t| t.into())
                     );
@@ -93,9 +123,9 @@ pub(crate) async fn update_watchers(ctx: &Context, database: &PgPool) -> Result<
             },
         }
 
-        let threads_content = get_formatted_list(threads, ctx).await?;
+        let threads_content = get_formatted_list(threads, &ctx).await?;
 
-        message.edit(&ctx, |msg| msg.embed(|embed|
+        message.edit(&ctx.http, |msg| msg.embed(|embed|
                 embed.colour(Colour::PURPLE)
                     .title("Watching threads")
                     .description(threads_content)
