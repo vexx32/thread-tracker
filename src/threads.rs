@@ -284,20 +284,18 @@ pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, ctx: &Contex
 
         for thread in threads {
             // Default behaviour for retriever is to get most recent messages
-            let last_message = thread.channel_id.messages(&ctx.http, |retriever| retriever.limit(1)).await.ok().map(|mut m| m.pop()).flatten();
-            let guild_channel = thread.channel_id.to_channel(&ctx.http).await.map_or(None, |gc| gc.guild());
+            let last_message = thread.channel_id
+                .messages(&ctx.http, |retriever| retriever.limit(1)).await
+                .map_or(None, |mut m| m.pop());
 
             let last_message_author = match last_message {
                 Some(message) => if message.author.bot {
                     message.author.name
                 }
                 else {
-                    match &guild_channel {
-                        Some(gc) => message.author
-                            .nick_in(&ctx.http, gc.guild_id).await
-                            .unwrap_or_else(|| message.author.name),
-                        None => message.author.name,
-                    }
+                    message.author
+                        .nick_in(&ctx.http, thread.guild_id).await
+                        .unwrap_or_else(|| message.author.name)
                 },
                 None => String::from("No replies yet"),
             };
@@ -305,13 +303,16 @@ pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, ctx: &Contex
             // Thread entries in blockquotes
             message.push_quote("");
 
-            if let Some(gc) = &guild_channel {
-                let name = trim_link_name(&gc.name);
-                message.push_named_link(format!("**#{}**", name), format!("https://discord.com/channels/{}/{}", gc.guild_id, gc.id));
-            }
-            else {
-                message.push(thread.channel_id.mention());
-            }
+            let guild_channel = thread.channel_id
+                .to_channel(&ctx.http).await
+                .map_or(None, |c| c.guild());
+            match guild_channel {
+                Some(gc) => {
+                    let name = trim_link_name(&gc.name);
+                    message.push_named_link(format!("**#{}**", name), format!("https://discord.com/channels/{}/{}", gc.guild_id, gc.id))
+                },
+                None => message.push(thread.channel_id.mention()),
+            };
 
             message.push_line(format!(" — {}", last_message_author));
         }
