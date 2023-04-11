@@ -4,7 +4,7 @@ use lazy_static::lazy_static;
 use serenity::{
     model::prelude::*,
     prelude::*,
-    utils::{MessageBuilder, Content, ContentModifier, EmbedMessageBuilding},
+    utils::{MessageBuilder, EmbedMessageBuilding},
 };
 use regex::Regex;
 use tracing::{error, info};
@@ -62,8 +62,8 @@ pub(crate) async fn add<'a>(
         )).into());
     }
 
-    let mut threads_added = String::new();
-    let mut errors = String::new();
+    let mut threads_added = MessageBuilder::new();
+    let mut errors = MessageBuilder::new();
 
     for thread_id in args {
         if let Some(Ok(target_channel_id)) = thread_id.split("/").last().and_then(|x| Some(x.parse())) {
@@ -72,20 +72,20 @@ pub(crate) async fn add<'a>(
                 Ok(_) => {
                     info!("Adding tracked thread {} for user {}", target_channel_id, user_id);
                     match db::add_thread(database, guild_id.0, target_channel_id, user_id.0, category.as_deref()).await {
-                        Ok(true) => threads_added.push_str(&format!("• {:}\n", thread.mention())),
-                        Ok(false) => threads_added.push_str(&format!("• Skipped {:} as it is already being tracked\n", thread.mention())),
-                        Err(e) => errors.push_str(&format!("• Failed to register thread {}: {}\n", thread.mention(), e)),
+                        Ok(true) => threads_added.push("• ").mention(&thread).push_line(""),
+                        Ok(false) => threads_added.push("• Skipped ").mention(&thread).push_line(" as it is already being tracked"),
+                        Err(e) => errors.push("• Failed to register thread ").mention(&thread).push_line_safe(format!(": {}", e)),
                     }
                 },
-                Err(e) => errors.push_str(&format!("• Cannot access channel {}: {}\n", thread.mention(), e)),
-            }
+                Err(e) => errors.push("• Cannot access channel ").mention(&thread).push_line_safe(format!(": {}", e)),
+            };
         }
         else {
-            errors.push_str(&format!("• Could not parse channel ID: {}\n", thread_id));
+            errors.push_line(format!("• Could not parse channel ID: `{}`", thread_id));
         }
     }
 
-    if errors.len() > 0 {
+    if errors.0.len() > 0 {
         error!("Errors handling thread registration:\n{}", errors);
         send_error_embed(&ctx.http, channel_id, "Error adding tracked threads", errors).await;
     }
@@ -116,27 +116,27 @@ pub(crate) async fn set_category(
         None => return Err(MissingArguments(format!("Please provide a category name and a thread or channel URL, such as: `tt!cat category {}`", channel_id.mention())).into()),
     };
 
-    let mut threads_updated = String::new();
-    let mut errors = String::new();
+    let mut threads_updated = MessageBuilder::new();
+    let mut errors = MessageBuilder::new();
 
     for thread_id in args {
         if let Some(Ok(target_channel_id)) = thread_id.split("/").last().and_then(|x| Some(x.parse())) {
             let thread = ChannelId(target_channel_id);
             match thread.to_channel(&ctx.http).await {
                 Ok(_) => match db::update_thread_category(database, guild_id.0, target_channel_id, user_id.0, category.as_deref()).await {
-                    Ok(true) => threads_updated.push_str(&format!("• {}\n", thread.mention())),
-                    Ok(false) => errors.push_str(&format!("• {} is not currently being tracked\n", thread.mention())),
-                    Err(e) => errors.push_str(&format!("• Failed to update thread category for {}: {}\n", thread.mention(), e)),
+                    Ok(true) => threads_updated.push("• ").mention(&thread).push_line(""),
+                    Ok(false) => errors.push("• ").mention(&thread).push_line(" is not currently being tracked"),
+                    Err(e) => errors.push("• Failed to update thread category for ").mention(&thread).push_line_safe(format!(": {}", e)),
                 },
-                Err(e) => errors.push_str(&format!("• Cannot access channel {}: {}\n", thread.mention(), e)),
-            }
+                Err(e) => errors.push("• Cannot access channel ").mention(&thread).push_line(format!(": {}", e)),
+            };
         }
         else {
-            errors.push_str(&format!("• Could not parse channel ID: {}\n", thread_id));
+            errors.push_line(format!("• Could not parse channel ID: {}", thread_id));
         }
     }
 
-    if errors.len() > 0 {
+    if errors.0.len() > 0 {
         error!("Errors updating thread categories:\n{}", errors);
         send_error_embed(&ctx.http, channel_id, "Error updating thread category", errors).await;
     }
@@ -180,33 +180,31 @@ pub(crate) async fn remove(
         return Ok(());
     }
 
-    let mut threads_removed = String::new();
-    let mut errors = String::new();
+    let mut threads_removed = MessageBuilder::new();
+    let mut errors = MessageBuilder::new();
 
     for thread_or_category in args {
         if !URL_REGEX.is_match(thread_or_category) {
             match db::remove_all_threads(database, guild_id.0, user_id.0, Some(thread_or_category)).await {
-                Ok(0) => errors.push_str(&format!("• No threads in category {} to remove", thread_or_category)),
-                Ok(count) => threads_removed.push_str(&format!("• All {} threads in category `{}` removed", count, thread_or_category)),
-                Err(e) => errors.push_str(&format!("• Unable to remove threads in category `{}`: {}", thread_or_category, e)),
-            }
+                Ok(0) => errors.push_line(format!("• No threads in category {} to remove", thread_or_category)),
+                Ok(count) => threads_removed.push_line(format!("• All {} threads in category `{}` removed", count, thread_or_category)),
+                Err(e) => errors.push_line(format!("• Unable to remove threads in category `{}`: {}", thread_or_category, e)),
+            };
         }
         else if let Some(Ok(target_channel_id)) = thread_or_category.split("/").last().and_then(|x| Some(x.parse())) {
             let thread = ChannelId(target_channel_id);
-            match thread.to_channel(&ctx.http).await {
-                Ok(_) => match db::remove_thread(database, guild_id.0, target_channel_id, user_id.0).await {
-                    Ok(_) => threads_removed.push_str(&format!("• {:}\n", thread.mention())),
-                    Err(e) => errors.push_str(&format!("• Failed to unregister thread {}: {}\n", thread.mention(), e)),
-                },
-                Err(e) => errors.push_str(&format!("• Cannot access channel {}: {}\n", thread_or_category, e)),
-            }
+            match db::remove_thread(database, guild_id.0, target_channel_id, user_id.0).await {
+                Ok(0) => errors.push_line(format!("• {} is not currently being tracked", thread.mention())),
+                Ok(_) => threads_removed.push_line(format!("• {:}", thread.mention())),
+                Err(e) => errors.push_line(format!("• Failed to unregister thread {}: {}", thread.mention(), e)),
+            };
         }
         else {
-            errors.push_str(&format!("• Could not parse channel ID: {}\n", thread_or_category));
+            errors.push_line(format!("• Could not parse channel ID: {}", thread_or_category));
         }
     }
 
-    if errors.len() > 0 {
+    if errors.0.len() > 0 {
         error!("Errors handling thread removal:\n{}", errors);
         send_error_embed(&ctx.http, channel_id, "Error removing tracked threads", errors).await;
     }
@@ -263,20 +261,15 @@ pub(crate) async fn send_list_with_title(
 }
 
 pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, ctx: &Context) -> Result<String, SerenityError> {
-    let mut message = MessageBuilder::new();
-    let mut categories: BTreeMap<Option<String>, Vec<TrackedThread>> = BTreeMap::new();
+    use serenity::utils::ContentModifier::*;
 
-    for thread in threads {
-        categories.entry(thread.category.clone()).or_default().push(thread);
-    }
+    let categories = categorise_threads(threads);
+    let mut message = MessageBuilder::new();
 
     for (name, threads) in categories {
         match name {
             Some(n) => {
-                let mut content = Content::from(n);
-                content.apply(&ContentModifier::Bold);
-                content.apply(&ContentModifier::Underline);
-                message.push_line(content)
+                message.push_line(Bold + Underline + n)
                     .push_line("");
             },
             None => {},
@@ -309,7 +302,7 @@ pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, ctx: &Contex
             match guild_channel {
                 Some(gc) => {
                     let name = trim_link_name(&gc.name);
-                    message.push_named_link(format!("**#{}**", name), format!("https://discord.com/channels/{}/{}", gc.guild_id, gc.id))
+                    message.push_named_link(Bold + format!("#{}", name), format!("https://discord.com/channels/{}/{}", gc.guild_id, gc.id))
                 },
                 None => message.push(thread.channel_id.mention()),
             };
@@ -320,12 +313,21 @@ pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, ctx: &Contex
         message.push_line("");
     }
 
-    let mut response = message.build();
-    if response.len() == 0 {
-        response.push_str("No threads are currently being tracked.");
+    if message.0.len() == 0 {
+        message.push_line("No threads are currently being tracked.");
     }
 
-    Ok(response)
+    Ok(message.to_string())
+}
+
+fn categorise_threads(threads: Vec<TrackedThread>) -> BTreeMap<Option<String>, Vec<TrackedThread>> {
+    let mut categories: BTreeMap<Option<String>, Vec<TrackedThread>> = BTreeMap::new();
+
+    for thread in threads {
+        categories.entry(thread.category.clone()).or_default().push(thread);
+    }
+
+    categories
 }
 
 fn trim_link_name(name: &str) -> String {
