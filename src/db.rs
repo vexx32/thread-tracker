@@ -5,16 +5,14 @@ pub(crate) use models::*;
 
 pub(crate) async fn list_watchers(database: &Database) -> Result<Vec<ThreadWatcherRow>, sqlx::Error> {
     sqlx::query_as("SELECT id, user_id, message_id, channel_id, guild_id, categories FROM watchers")
-        .fetch_all(database)
-        .await
+        .fetch_all(database).await
 }
 
 pub(crate) async fn get_watcher(database: &Database, channel_id: u64, message_id: u64) -> Result<Option<ThreadWatcherRow>, sqlx::Error> {
     sqlx::query_as("SELECT id, user_id, message_id, channel_id, guild_id, categories FROM watchers WHERE channel_id = $1 AND message_id = $2")
         .bind(channel_id as i64)
         .bind(message_id as i64)
-        .fetch_optional(database)
-        .await
+        .fetch_optional(database).await
 }
 
 pub(crate) async fn add_watcher(
@@ -31,8 +29,7 @@ pub(crate) async fn add_watcher(
         .bind(channel_id as i64)
         .bind(guild_id as i64)
         .bind(categories)
-        .execute(database)
-        .await?;
+        .execute(database).await?;
 
     Ok(result.rows_affected() > 0)
 }
@@ -43,8 +40,7 @@ pub(crate) async fn remove_watcher(
 ) -> Result<u64, sqlx::Error> {
     let result = sqlx::query("DELETE FROM watchers WHERE id = $1")
         .bind(watcher_id)
-        .execute(database)
-        .await?;
+        .execute(database).await?;
 
     Ok(result.rows_affected())
 }
@@ -67,8 +63,7 @@ pub(crate) async fn add_thread(
         .bind(user_id as i64)
         .bind(guild_id as i64)
         .bind(category)
-        .execute(database)
-        .await?;
+        .execute(database).await?;
 
     Ok(true)
 }
@@ -85,8 +80,7 @@ pub(crate) async fn update_thread_category(
         .bind(guild_id as i64)
         .bind(channel_id as i64)
         .bind(user_id as i64)
-        .execute(database)
-        .await?;
+        .execute(database).await?;
 
     Ok(result.rows_affected() > 0)
 }
@@ -101,8 +95,7 @@ pub(crate) async fn remove_thread(
         .bind(channel_id as i64)
         .bind(user_id as i64)
         .bind(guild_id as i64)
-        .execute(database)
-        .await?;
+        .execute(database).await?;
 
     Ok(result.rows_affected())
 }
@@ -145,8 +138,7 @@ pub(crate) async fn get_thread(database: &Database, guild_id: u64, user_id: u64,
             .bind(user_id as i64)
             .bind(channel_id as i64)
             .bind(guild_id as i64)
-            .fetch_all(database)
-            .await?;
+            .fetch_all(database).await?;
 
     Ok(thread.pop())
 }
