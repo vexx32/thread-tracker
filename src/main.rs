@@ -193,5 +193,7 @@ async fn serenity(
         .await
         .expect("Err creating client");
 
+    client.cache_and_http.cache.set_max_messages(1);
+
     Ok(client.into())
 }
