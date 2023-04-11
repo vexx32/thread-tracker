@@ -1,24 +1,7 @@
-use sqlx::FromRow;
+mod models;
 
-pub use sqlx::PgPool as Database;
-
-#[derive(FromRow)]
-pub(crate) struct TrackedThreadRow {
-    pub id: i32,
-    pub channel_id: i64,
-    pub guild_id: i64,
-    pub category: Option<String>,
-}
-
-#[derive(FromRow)]
-pub(crate) struct ThreadWatcherRow {
-    pub id: i32,
-    pub user_id: i64,
-    pub message_id: i64,
-    pub channel_id: i64,
-    pub guild_id: i64,
-    pub categories: Option<String>,
-}
+pub(crate) use sqlx::PgPool as Database;
+pub(crate) use models::*;
 
 pub(crate) async fn list_watchers(database: &Database) -> Result<Vec<ThreadWatcherRow>, sqlx::Error> {
     sqlx::query_as("SELECT id, user_id, message_id, channel_id, guild_id, categories FROM watchers")
