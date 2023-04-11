@@ -19,8 +19,8 @@ use crate::{
     watchers::ThreadWatcher,
 };
 
-const HEARTBEAT_INTERVAL_SECONDS: u32 = 255;
-const WATCHER_UPDATE_INTERVAL_SECONDS: u32 = 120;
+const HEARTBEAT_INTERVAL_SECONDS: u32 = 295;
+const WATCHER_UPDATE_INTERVAL_SECONDS: u32 = 600;
 
 pub(crate) async fn run_periodic_tasks(context: Arc<Context>, database: Arc<Database>) {
     spawn_task_loop(
