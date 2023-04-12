@@ -17,3 +17,9 @@ pub(crate) struct ThreadWatcherRow {
     pub guild_id: i64,
     pub categories: Option<String>,
 }
+
+#[derive(FromRow)]
+pub(crate) struct MuseRow {
+    pub id: i32,
+    pub muse_name: String,
+}

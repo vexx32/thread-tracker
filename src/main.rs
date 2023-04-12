@@ -17,6 +17,7 @@ mod db;
 mod background_tasks;
 mod threads;
 mod messaging;
+mod muses;
 mod watchers;
 
 use db::Database;
@@ -40,6 +41,15 @@ Use this in conjunction with a channel or thread URL to remove that URL from you
 
 `tt!replies` // `tt!threads`
 This command shows you, in a list, who responded last to each channel, with each category grouped together. Specify one or more category names to list only the threads in those categories.
+
+`tt!addmuse`
+Register a muse name with the bot. Registered muses help the bot differentiate which threads to format differently when listing threads.
+
+`tt!removemuse`
+Remove a registered muse name.
+
+`tt!muses`
+List the currently registered muse names.
 
 `tt!watch`
 This command is similar to `tt!replies`, but once the list has been generated, the bot will periodically re-check the threads and update the same message rather than sending additional messages.
@@ -110,6 +120,21 @@ impl Bot {
             "tt!unwatch" => {
                 if let Err(e) = watchers::remove(args, user_id, channel_id, &ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error removing watcher", e).await;
+                }
+            },
+            "tt!muses" => {
+                if let Err(e) = muses::send_list(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
+                    send_error_embed(&ctx.http, channel_id, "Error finding muses", e).await;
+                }
+            },
+            "tt!addmuse" => {
+                if let Err(e) = muses::add(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
+                    send_error_embed(&ctx.http, channel_id, "Error adding muse", e).await;
+                }
+            },
+            "tt!removemuse" => {
+                if let Err(e) = muses::remove(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
+                    send_error_embed(&ctx.http, channel_id, "Error removing muse", e).await;
                 }
             },
             other => {

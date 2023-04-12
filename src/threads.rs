@@ -12,6 +12,7 @@ use tracing::{error, info};
 use crate::{
     db::{self, Database},
     messaging::*,
+    muses,
 
     CommandError::*,
 };
@@ -255,12 +256,13 @@ pub(crate) async fn send_list_with_title(
         );
     }
 
-    let response = get_formatted_list(threads, ctx).await?;
+    let muses = muses::list(guild_id, user_id, database).await?;
+    let response = get_formatted_list(threads, muses, ctx).await?;
 
     Ok(send_message_embed(&ctx.http, channel_id, embed_title, &response).await?)
 }
 
-pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, ctx: &Context) -> Result<String, SerenityError> {
+pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, muses: Vec<String>, ctx: &Context) -> Result<String, SerenityError> {
     use serenity::utils::ContentModifier::*;
 
     let categories = categorise_threads(threads);
@@ -307,7 +309,12 @@ pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, ctx: &Contex
                 None => message.push(thread.channel_id.mention()),
             };
 
-            message.push_line(format!(" — {}", last_message_author));
+            if muses.iter().any(|m| m.contains(&last_message_author)) {
+                message.push(" — ").push_line(last_message_author);
+            }
+            else {
+                message.push(" — ").push_line(Bold + last_message_author);
+            };
         }
 
         message.push_line("");

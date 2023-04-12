@@ -16,6 +16,7 @@ use tracing::{error, info};
 use crate::{
     db::{self, Database},
     threads::{self, TrackedThread},
+    muses,
     watchers::ThreadWatcher,
 };
 
@@ -119,7 +120,8 @@ pub(crate) async fn update_watchers(ctx: Arc<Context>, database: Arc<Database>) 
             },
         }
 
-        let threads_content = threads::get_formatted_list(threads, &ctx).await?;
+        let muses = muses::list(watcher.guild_id, watcher.user_id, &database).await?;
+        let threads_content = threads::get_formatted_list(threads, muses, &ctx).await?;
 
         message.edit(&ctx.http, |msg| msg.embed(|embed|
                 embed.colour(Colour::PURPLE)

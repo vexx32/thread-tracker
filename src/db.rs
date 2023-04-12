@@ -52,20 +52,19 @@ pub(crate) async fn add_thread(
     user_id: u64,
     category: Option<&str>,
 ) -> Result<bool, sqlx::Error> {
-    let existing_thread = get_thread(database, guild_id, user_id, channel_id).await?;
+    match get_thread(database, guild_id, user_id, channel_id).await? {
+        Some(_) => Ok(false),
+        None => {
+            sqlx::query("INSERT INTO threads (channel_id, user_id, guild_id, category) VALUES ($1, $2, $3, $4)")
+                .bind(channel_id as i64)
+                .bind(user_id as i64)
+                .bind(guild_id as i64)
+                .bind(category)
+                .execute(database).await?;
 
-    if existing_thread.is_some() {
-        return Ok(false);
+            Ok(true)
+        },
     }
-
-    sqlx::query("INSERT INTO threads (channel_id, user_id, guild_id, category) VALUES ($1, $2, $3, $4)")
-        .bind(channel_id as i64)
-        .bind(user_id as i64)
-        .bind(guild_id as i64)
-        .bind(category)
-        .execute(database).await?;
-
-    Ok(true)
 }
 
 pub(crate) async fn update_thread_category(
@@ -127,18 +126,57 @@ pub(crate) async fn list_threads(database: &Database, guild_id: u64, user_id: u6
             .bind(guild_id as i64),
     };
 
-    let threads: Vec<TrackedThreadRow> = query.fetch_all(database).await?;
-
-    Ok(threads)
+    Ok(query.fetch_all(database).await?)
 }
 
 pub(crate) async fn get_thread(database: &Database, guild_id: u64, user_id: u64, channel_id: u64) -> Result<Option<TrackedThreadRow>, sqlx::Error> {
-    let mut thread: Vec<TrackedThreadRow> =
-        sqlx::query_as("SELECT channel_id, category, guild_id, id FROM threads WHERE user_id = $1 AND channel_id = $2 AND guild_id = $3 ORDER BY id")
-            .bind(user_id as i64)
-            .bind(channel_id as i64)
-            .bind(guild_id as i64)
-            .fetch_all(database).await?;
+    Ok(sqlx::query_as("SELECT channel_id, category, guild_id, id FROM threads WHERE user_id = $1 AND channel_id = $2 AND guild_id = $3 ORDER BY id")
+        .bind(user_id as i64)
+        .bind(channel_id as i64)
+        .bind(guild_id as i64)
+        .fetch_optional(database).await?)
+}
 
-    Ok(thread.pop())
+pub(crate) async fn add_muse(database: &Database, guild_id: u64, user_id: u64, muse: &str) -> Result<bool, sqlx::Error> {
+    match get_muse(database, guild_id, user_id, muse).await? {
+        Some(_) => Ok(false),
+        None => {
+            sqlx::query("INSERT INTO muses (muse_name, user_id, guild_id) VALUES ($1, $2, $3)")
+                .bind(muse)
+                .bind(user_id as i64)
+                .bind(guild_id as i64)
+                .execute(database).await?;
+
+            Ok(true)
+        }
+    }
+}
+
+pub(crate) async fn get_muse(database: &Database, guild_id: u64, user_id: u64, muse: &str) -> Result<Option<MuseRow>, sqlx::Error> {
+    Ok(
+        sqlx::query_as("SELECT id, muse_name FROM muses WHERE user_id = $1 AND guild_id = $2 AND muse_name = $3")
+            .bind(user_id as i64)
+            .bind(guild_id as i64)
+            .bind(muse)
+            .fetch_optional(database).await?
+    )
+}
+
+pub(crate) async fn list_muses(database: &Database, guild_id: u64, user_id: u64) -> Result<Vec<MuseRow>, sqlx::Error> {
+    Ok(
+        sqlx::query_as("SELECT id, muse_name FROM muses WHERE user_id = $1 AND guild_id = $2")
+            .bind(user_id as i64)
+            .bind(guild_id as i64)
+            .fetch_all(database).await?
+    )
+}
+
+pub(crate) async fn remove_muse(database: &Database, guild_id: u64, user_id: u64, muse: &str) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query("DELETE FROM muses WHERE muse_name = $1 AND user_id = $2 AND guild_id = $3")
+        .bind(muse)
+        .bind(user_id as i64)
+        .bind(guild_id as i64)
+        .execute(database).await?;
+
+    Ok(result.rows_affected())
 }

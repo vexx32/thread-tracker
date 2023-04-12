@@ -14,3 +14,10 @@ CREATE TABLE IF NOT EXISTS watchers (
     message_id BIGINT NOT NULL,
     categories varchar(200) NULL
 );
+
+CREATE TABLE IF NOT EXISTS muses (
+    id serial PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    guild_id BIGINT NOT NULL,
+    muse_name varchar(100) NOT NULL
+);
