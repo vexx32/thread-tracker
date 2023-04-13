@@ -2603,6 +2603,7 @@ dependencies = [
  "chrono",
  "lazy_static",
  "postgres",
+ "rand",
  "regex",
  "serde",
  "serenity",

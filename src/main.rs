@@ -42,8 +42,11 @@ Use this in conjunction with a channel or thread URL to remove that URL from you
 `tt!replies` // `tt!threads`
 This command shows you, in a list, who responded last to each channel, with each category grouped together. Specify one or more category names to list only the threads in those categories.
 
+`tt!random` // `tt!rng`
+Finds a random tracked thread that was last replied to by someone other than you.
+
 `tt!addmuse`
-Register a muse name with the bot. Registered muses help the bot differentiate which threads to format differently when listing threads.
+Register a muse name. Registered muses determine which respondents should be considered you when using bots like Tupper. Thread Tracker will list the last respondent to a thread in bold if it is not you or a registered muse.
 
 `tt!removemuse`
 Remove a registered muse name.
@@ -90,6 +93,7 @@ impl Bot {
                 if let Err(e) = error_on_additional_arguments(args) {
                     send_error_embed(&ctx.http, channel_id, "Too many arguments", e).await;
                 };
+
                 help_message(channel_id, &ctx).await;
             },
             "tt!add" | "tt!track" => {
@@ -112,6 +116,15 @@ impl Bot {
                     send_error_embed(&ctx.http, channel_id, "Error retrieving thread list", e).await;
                 }
             },
+            "tt!random" | "tt!rng" => {
+                if let Err(e) = error_on_additional_arguments(args) {
+                    send_error_embed(&ctx.http, channel_id, "Too many arguments", e).await;
+                }
+
+                if let Err(e) = threads::send_random_thread(user_id, guild_id, channel_id, &ctx, &self.database).await {
+                    send_error_embed(&ctx.http, channel_id, "Error retrieving a random thread", e).await;
+                }
+            },
             "tt!watch" => {
                 if let Err(e) = watchers::add(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error adding watcher", e).await;
@@ -123,7 +136,11 @@ impl Bot {
                 }
             },
             "tt!muses" => {
-                if let Err(e) = muses::send_list(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
+                if let Err(e) = error_on_additional_arguments(args) {
+                    send_error_embed(&ctx.http, channel_id, "Too many arguments", e).await;
+                }
+
+                if let Err(e) = muses::send_list(guild_id, user_id, channel_id, &ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error finding muses", e).await;
                 }
             },

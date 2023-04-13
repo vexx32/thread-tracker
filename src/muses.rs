@@ -75,17 +75,14 @@ pub(crate) async fn remove(
 }
 
 pub(crate) async fn send_list(
-    args: Vec<&str>,
     guild_id: GuildId,
     user_id: UserId,
     channel_id: ChannelId,
     ctx: &Context,
     database: &Database
 ) -> anyhow::Result<()> {
-    error_on_additional_arguments(args)?;
-
     let mut result = MessageBuilder::new();
-    let muses = list(guild_id, user_id, database).await?;
+    let muses = list(guild_id, user_id, database, ctx).await?;
 
     result.push("Muses registered for ").mention(&user_id).push_line(":");
 
@@ -102,11 +99,14 @@ pub(crate) async fn send_list(
     Ok(())
 }
 
-pub(crate) async fn list(guild_id: GuildId, user_id: UserId, database: &Database) -> anyhow::Result<Vec<String>> {
-    Ok(
-        db::list_muses(database, guild_id.0, user_id.0).await?
-            .into_iter()
-            .map(|m| m.muse_name)
-            .collect()
-    )
+pub(crate) async fn list(guild_id: GuildId, user_id: UserId, database: &Database, context: &Context) -> anyhow::Result<Vec<String>> {
+    let user = user_id.to_user(&context.http).await?;
+    let mut muses: Vec<String> = db::list_muses(database, guild_id.0, user_id.0).await?
+        .into_iter()
+        .map(|m| m.muse_name)
+        .collect();
+
+    muses.push(user.nick_in(&context.http, guild_id).await.unwrap_or(user.name));
+
+    Ok(muses)
 }
