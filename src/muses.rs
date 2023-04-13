@@ -11,7 +11,7 @@ use crate::{
     CommandError::*,
 
     db::{self, Database},
-    messaging::{send_success_embed, send_error_embed}, error_on_additional_arguments,
+    messaging::{send_success_embed, send_error_embed},
 };
 
 pub(crate) async fn add<'a>(
