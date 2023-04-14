@@ -100,10 +100,10 @@ pub(crate) async fn send_list(
 }
 
 pub(crate) async fn list(guild_id: GuildId, user_id: UserId, database: &Database) -> anyhow::Result<Vec<String>> {
-    let muses: Vec<String> = db::list_muses(database, guild_id.0, user_id.0).await?
-        .into_iter()
-        .map(|m| m.muse_name)
-        .collect();
-
-    Ok(muses)
+    Ok(
+        db::list_muses(database, guild_id.0, user_id.0).await?
+            .into_iter()
+            .map(|m| m.muse_name)
+            .collect()
+    )
 }

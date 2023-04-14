@@ -18,6 +18,7 @@ mod background_tasks;
 mod threads;
 mod messaging;
 mod muses;
+mod todos;
 mod watchers;
 
 use db::Database;
@@ -42,9 +43,6 @@ Use this in conjunction with a channel or thread URL to remove that URL from you
 `tt!replies` // `tt!threads`
 This command shows you, in a list, who responded last to each channel, with each category grouped together. Specify one or more category names to list only the threads in those categories.
 
-`tt!random` // `tt!rng`
-Finds a random tracked thread that was last replied to by someone other than you.
-
 `tt!addmuse`
 Register a muse name. Registered muses determine which respondents should be considered you when using bots like Tupper. Thread Tracker will list the last respondent to a thread in bold if it is not you or a registered muse.
 
@@ -53,6 +51,18 @@ Remove a registered muse name.
 
 `tt!muses`
 List the currently registered muse names.
+
+`tt!random` // `tt!rng`
+Finds a random tracked thread that was last replied to by someone other than you.
+
+`tt!todolist`
+List all todo-list entries.
+
+`tt!todo`
+Adds a todo-list item.
+
+`tt!done`
+Crosses off and removes a todo-list item.
 
 `tt!watch`
 This command is similar to `tt!replies`, but once the list has been generated, the bot will periodically re-check the threads and update the same message rather than sending additional messages.
@@ -86,10 +96,11 @@ impl Bot {
         guild_id: GuildId,
         user_id: UserId,
         command: &str,
-        args: Vec<&str>
+        args: &str,
     ) {
         match command {
             "tt!help" => {
+                let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = error_on_additional_arguments(args) {
                     send_error_embed(&ctx.http, channel_id, "Too many arguments", e).await;
                 };
@@ -97,26 +108,31 @@ impl Bot {
                 help_message(channel_id, ctx).await;
             },
             "tt!add" | "tt!track" => {
+                let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = threads::add(args, guild_id, user_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error adding tracked channel(s): {:}", e).await;
                 }
             },
             "tt!cat" | "tt!category" => {
+                let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = threads::set_category(args, guild_id, user_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error updating channels' categories", e).await;
                 }
             },
             "tt!rm" | "tt!remove" | "tt!untrack" => {
+                let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = threads::remove(args, guild_id, user_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error removing tracked channel(s)", e).await;
                 }
             },
             "tt!replies" | "tt!threads" => {
+                let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = threads::send_list(args, guild_id, user_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error retrieving thread list", e).await;
                 }
             },
             "tt!random" | "tt!rng" => {
+                let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = error_on_additional_arguments(args) {
                     send_error_embed(&ctx.http, channel_id, "Too many arguments", e).await;
                 }
@@ -126,16 +142,19 @@ impl Bot {
                 }
             },
             "tt!watch" => {
+                let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = watchers::add(args, guild_id, user_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error adding watcher", e).await;
                 }
             },
             "tt!unwatch" => {
+                let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = watchers::remove(args, user_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error removing watcher", e).await;
                 }
             },
             "tt!muses" => {
+                let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = error_on_additional_arguments(args) {
                     send_error_embed(&ctx.http, channel_id, "Too many arguments", e).await;
                 }
@@ -145,13 +164,30 @@ impl Bot {
                 }
             },
             "tt!addmuse" => {
+                let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = muses::add(args, guild_id, user_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error adding muse", e).await;
                 }
             },
             "tt!removemuse" => {
+                let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = muses::remove(args, guild_id, user_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error removing muse", e).await;
+                }
+            },
+            "tt!todo" => {
+                if let Err(e) = todos::add(args, guild_id, user_id, channel_id, ctx, &self.database).await {
+                    send_error_embed(&ctx.http, channel_id, "Error adding todo", e).await;
+                }
+            },
+            "tt!done" => {
+                if let Err(e) = todos::remove(args, guild_id, user_id, channel_id, ctx, &self.database).await {
+                    send_error_embed(&ctx.http, channel_id, "Error removing todo", e).await;
+                }
+            },
+            "tt!todolist" => {
+                if let Err(e) = todos::send_list(guild_id, user_id, channel_id, ctx, &self.database).await {
+                    send_error_embed(&ctx.http, channel_id, "Error getting todo list", e).await;
                 }
             },
             other => {
@@ -180,10 +216,9 @@ impl EventHandler for Bot {
             return;
         }
 
-        let mut command_args = msg.content.split_ascii_whitespace();
-        if let Some(command) = command_args.next() {
+        if let Some(command) = msg.content.split_ascii_whitespace().next() {
             info!("[command] processing command `{}` from user `{}`", msg.content, author_id);
-            self.process_command(&ctx, channel_id, guild_id, author_id, command, command_args.collect()).await;
+            self.process_command(&ctx, channel_id, guild_id, author_id, command, msg.content.replace(command, "").trim_start()).await;
         }
     }
 

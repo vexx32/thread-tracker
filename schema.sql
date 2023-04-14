@@ -21,3 +21,10 @@ CREATE TABLE IF NOT EXISTS muses (
     guild_id BIGINT NOT NULL,
     muse_name varchar(100) NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS todos (
+    id serial PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    guild_id BIGINT NOT NULL,
+    content varchar(300) NOT NULL
+);

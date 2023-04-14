@@ -23,3 +23,9 @@ pub(crate) struct MuseRow {
     pub id: i32,
     pub muse_name: String,
 }
+
+#[derive(FromRow)]
+pub(crate) struct TodoRow {
+    pub id: i32,
+    pub content: String,
+}
