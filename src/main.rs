@@ -167,11 +167,12 @@ impl EventHandler for Bot {
     async fn message(&self, ctx: Context, msg: Message) {
         let author_id = msg.author.id;
         let channel_id = msg.channel_id;
-        let guild_id = if let Some(guild_channel) = channel_id.to_channel(&ctx.http).await.ok().and_then(|response| response.guild()) {
+        let guild_id = if let Ok(Channel::Guild(guild_channel)) = channel_id.to_channel(&ctx.http).await {
             guild_channel.guild_id
         }
         else {
             error!("Error: Not currently in a server.");
+            send_error_embed(&ctx.http, channel_id, "No direct messages please", "Sorry, Titi is only designed to work in a server currently.").await;
             return;
         };
 
