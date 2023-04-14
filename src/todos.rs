@@ -23,19 +23,19 @@ pub(crate) async fn add<'a>(
     database: &Database
 ) -> anyhow::Result<()> {
     if entry.trim().is_empty() {
-        return Err(MissingArguments(String::from("Please provide a todo entry, such as: `tt!todo write X a starter`")).into());
+        return Err(MissingArguments(String::from("Please provide a to do entry, such as: `tt!todo write X a starter`")).into());
     }
 
     let mut result = MessageBuilder::new();
-    result.push("Todo list entry ").push(Italic + entry);
+    result.push("To do list entry ").push(Italic + entry);
     match db::add_todo(database, guild_id.0, user_id.0, entry).await? {
         true => {
             result.push_line(" added successfully.");
-            send_success_embed(&ctx.http, channel_id, "Todo added", result).await;
+            send_success_embed(&ctx.http, channel_id, "To do list entry added", result).await;
         },
         false => {
             result.push(" was not added as it is already present.");
-            send_error_embed(&ctx.http, channel_id, "Error adding todo", result).await;
+            send_error_embed(&ctx.http, channel_id, "Error adding to do list entry", result).await;
         },
     };
 
@@ -55,15 +55,15 @@ pub(crate) async fn remove(
     }
 
     let mut result = MessageBuilder::new();
-    result.push("Todo list entry ").push(Italic + entry);
+    result.push("To do list entry ").push(Italic + entry);
     match db::remove_todo(database, guild_id.0, user_id.0, entry).await? {
         0 => {
             result.push_line(" was not found.");
-            send_error_embed(&ctx.http, channel_id, "Error removing todo", result).await;
+            send_error_embed(&ctx.http, channel_id, "Error removing to do list entry", result).await;
         },
         _ => {
             result.push_line(" was successfully removed.");
-            send_success_embed(&ctx.http, channel_id, "Todo removed", result).await;
+            send_success_embed(&ctx.http, channel_id, "To do list entry removed", result).await;
         },
     };
 
@@ -80,17 +80,18 @@ pub(crate) async fn send_list(
     let mut result = MessageBuilder::new();
     let todos = list(guild_id, user_id, database).await?;
 
-    result.mention(&user_id).push_line("'s todo list:");
+    if !todos.is_empty() {
+        result.mention(&user_id).push_line("'s to do list:");
 
-    for item in todos {
-        result.push_line(format!("• {}", item));
+        for item in todos {
+            result.push_line(format!("• {}", item));
+        }
+    }
+    else {
+        result.push_line("There is nothing on your to do list.");
     }
 
-    if result.0.is_empty() {
-        result.push_line("There is nothing on your todo list.");
-    }
-
-    send_success_embed(&ctx.http, channel_id, "Todo list", result).await;
+    send_success_embed(&ctx.http, channel_id, "To Do list", result).await;
 
     Ok(())
 }

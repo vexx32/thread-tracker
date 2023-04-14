@@ -52,23 +52,23 @@ Remove a registered muse name.
 `tt!muses`
 List the currently registered muse names.
 
-`tt!random` // `tt!rng`
-Finds a random tracked thread that was last replied to by someone other than you.
-
-`tt!todolist`
-List all todo-list entries.
-
-`tt!todo`
-Adds a todo-list item.
-
-`tt!done`
-Crosses off and removes a todo-list item.
-
 `tt!watch`
 This command is similar to `tt!replies`, but once the list has been generated, the bot will periodically re-check the threads and update the same message rather than sending additional messages.
 
 `tt!unwatch`
 Copy the message URL from an existing watcher message (with the title "Watching threads") and use it with this command to remove the watcher and its associated message.
+
+`tt!random` // `tt!rng`
+Finds a random tracked thread that was last replied to by someone other than you.
+
+`tt!todolist`
+List all to do-list entries.
+
+`tt!todo`
+Adds a to do-list item.
+
+`tt!done`
+Crosses off and removes a to do-list item.
 "#;
 
 #[derive(Debug, Error)]
@@ -177,17 +177,17 @@ impl Bot {
             },
             "tt!todo" => {
                 if let Err(e) = todos::add(args, guild_id, user_id, channel_id, ctx, &self.database).await {
-                    send_error_embed(&ctx.http, channel_id, "Error adding todo", e).await;
+                    send_error_embed(&ctx.http, channel_id, "Error adding to do-list item", e).await;
                 }
             },
             "tt!done" => {
                 if let Err(e) = todos::remove(args, guild_id, user_id, channel_id, ctx, &self.database).await {
-                    send_error_embed(&ctx.http, channel_id, "Error removing todo", e).await;
+                    send_error_embed(&ctx.http, channel_id, "Error removing to do-list item", e).await;
                 }
             },
             "tt!todolist" => {
                 if let Err(e) = todos::send_list(guild_id, user_id, channel_id, ctx, &self.database).await {
-                    send_error_embed(&ctx.http, channel_id, "Error getting todo list", e).await;
+                    send_error_embed(&ctx.http, channel_id, "Error getting to do-list", e).await;
                 }
             },
             other => {
