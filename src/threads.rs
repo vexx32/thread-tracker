@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use lazy_static::lazy_static;
-use rand::seq::SliceRandom;
+use rand::Rng;
 use serenity::{
     model::prelude::*,
     prelude::*,
@@ -257,10 +257,37 @@ pub(crate) async fn send_list_with_title(
         );
     }
 
-    let muses = muses::list(guild_id, user_id, database, context).await?;
-    let response = get_formatted_list(threads, muses, context).await?;
+    let muses = muses::list(guild_id, user_id, database).await?;
+    let response = get_formatted_list(threads, muses, user_id, context).await?;
 
     Ok(send_message_embed(&context.http, channel_id, embed_title, &response).await?)
+}
+
+pub(crate) async fn get_random_thread(user_id: UserId, guild_id: GuildId, database: &Database, context: &Context) -> anyhow::Result<Option<(String, TrackedThread)>> {
+    let muses = muses::list(guild_id, user_id, database).await?;
+    let mut pending_threads = Vec::new();
+
+    for thread in db::list_threads(database, guild_id.0, user_id.0, None).await?.into_iter().map(|t| t.into()) {
+        let last_message_author = get_last_responder(&thread, context).await;
+        match last_message_author {
+            Some(user) => {
+                let last_author_name = get_nick_or_name(&user, guild_id, context).await;
+                if user.id != user_id && !muses.contains(&last_author_name) {
+                    pending_threads.push((last_author_name, thread));
+                }
+            },
+            None => pending_threads.push((String::from("No replies yet"), thread)),
+        }
+    }
+
+    if pending_threads.is_empty() {
+        Ok(None)
+    }
+    else {
+        let mut rng = rand::thread_rng();
+        let index = rng.gen_range(0..pending_threads.len());
+        Ok(Some(pending_threads.remove(index)))
+    }
 }
 
 pub(crate) async fn send_random_thread(
@@ -270,26 +297,9 @@ pub(crate) async fn send_random_thread(
     context: &Context,
     database: &Database
 ) -> anyhow::Result<()> {
-    let muses = muses::list(guild_id, user_id, database, context).await?;
-    let mut pending_threads = Vec::new();
-
-    for thread in db::list_threads(database, guild_id.0, user_id.0, None).await?.into_iter().map(|t| t.into()) {
-        let last_message_author = get_last_responder(&thread, context).await;
-        if !muses.contains(&last_message_author) {
-            pending_threads.push((last_message_author, thread));
-        }
-    }
-
     let mut message = MessageBuilder::new();
 
-    // This scope is required as `rng` must be dropped before an .await point below,
-    // so we have to force it to go out of scope.
-    let chosen_thread = {
-        let mut rng = rand::thread_rng();
-        pending_threads.choose(&mut rng)
-    };
-
-    match chosen_thread {
+    match get_random_thread(user_id, guild_id, database, context).await? {
         None => {
             message.push("Congrats! You don't seem to have any threads that are waiting on your reply! :tada:");
             log_send_errors(send_message_embed(&context.http, channel_id, "No waiting threads", message).await);
@@ -307,7 +317,7 @@ pub(crate) async fn send_random_thread(
             }
 
             message.push_line("");
-            message.push_quote(get_thread_link(thread, context).await).push(" — ").push_line(Bold + last_author);
+            message.push_quote(get_thread_link(&thread, context).await).push(" — ").push_line(Bold + last_author);
 
             log_send_errors(send_message_embed(&context.http, channel_id, "Random thread", message).await);
         },
@@ -316,7 +326,7 @@ pub(crate) async fn send_random_thread(
     Ok(())
 }
 
-pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, muses: Vec<String>, ctx: &Context) -> Result<String, SerenityError> {
+pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, muses: Vec<String>, user_id: UserId, ctx: &Context) -> Result<String, SerenityError> {
     let categories = categorise_threads(threads);
     let mut message = MessageBuilder::new();
 
@@ -330,13 +340,18 @@ pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, muses: Vec<S
             let last_message_author = get_last_responder(&thread, ctx).await;
 
             // Thread entries in blockquotes
-            message.push_quote(get_thread_link(&thread, ctx).await);
-
-            if muses.contains(&last_message_author) {
-                message.push(" — ").push_line(last_message_author);
-            }
-            else {
-                message.push(" — ").push_line(Bold + last_message_author);
+            message.push_quote(get_thread_link(&thread, ctx).await).push(" — ");
+            match last_message_author {
+                Some(user) => {
+                    let last_author_name = get_nick_or_name(&user, thread.guild_id, ctx).await;
+                    if user.id == user_id || muses.contains(&last_author_name) {
+                        message.push_line(last_author_name)
+                    }
+                    else {
+                        message.push_line(Bold + last_author_name)
+                    }
+                },
+                None => message.push(Bold + "No replies yet"),
             };
         }
 
@@ -370,22 +385,22 @@ fn trim_link_name(name: &str) -> String {
     }
 }
 
-async fn get_last_responder(thread: &TrackedThread, context: &Context) -> String {
+async fn get_last_responder(thread: &TrackedThread, context: &Context) -> Option<User> {
     // Default behaviour for retriever is to get most recent messages
     let last_message = thread.channel_id
         .messages(&context.http, |retriever| retriever.limit(1)).await
         .map_or(None, |mut m| m.pop());
 
-    match last_message {
-        Some(message) => if message.author.bot {
-            message.author.name
-        }
-        else {
-            message.author
-                .nick_in(&context.http, thread.guild_id).await
-                .unwrap_or(message.author.name)
-        },
-        None => String::from("No replies yet"),
+    last_message.map(|m| m.author)
+}
+
+async fn get_nick_or_name(user: &User, guild_id: GuildId, context: &Context) -> String {
+    if user.bot {
+        user.name.clone()
+    }
+    else {
+        user.nick_in(&context.http, guild_id).await
+            .unwrap_or(user.name.clone())
     }
 }
 
