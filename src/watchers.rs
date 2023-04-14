@@ -57,7 +57,7 @@ pub(crate) async fn add(
     database: &Database,
 ) -> anyhow::Result<()> {
     info!("[threadwatch] Adding watcher for user {}, categories {:?}", user_id, args);
-    let arguments = if args.len() > 0 {
+    let arguments = if !args.is_empty() {
         Some(args.join(" "))
     }
     else {
@@ -108,15 +108,18 @@ pub(crate) async fn remove(
 }
 
 fn parse_message_link(link: &str) -> Result<(u64, u64)> {
-    let mut message_url_fragments = link.split('/').rev();
-    let mut result: [u64; 2] = [0, 0];
+    let mut result: Vec<u64> = Vec::with_capacity(2);
+    let message_url_fragments = link.split('/')
+        .rev()
+        .take(2)
+        .map(|s| s.parse().ok());
 
-    for index in 0..2 {
-        match message_url_fragments.next().and_then(|s| s.parse().ok()) {
-            Some(n) => result[index] = n,
+    for parsed in message_url_fragments {
+        match parsed {
+            Some(n) => result.push(n),
             None => return Err(NotFound(format!("Could not parse message ID from `{}`", link))),
         }
     }
 
-    return Ok((result[0], result[1]));
+    Ok((result[0], result[1]))
 }

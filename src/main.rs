@@ -26,7 +26,7 @@ use messaging::*;
 
 use CommandError::*;
 
-const HELP_MESSAGE: &'static str = r#"
+const HELP_MESSAGE: &str = r#"
 `tt!help`
 This is the command that reaches this help message. You can use it if you ever have any questions about the current functionality of Thread Tracker. To report bugs or make feature requests, go to: <https://github.com/vexx32/thread-tracker>
 
@@ -94,25 +94,25 @@ impl Bot {
                     send_error_embed(&ctx.http, channel_id, "Too many arguments", e).await;
                 };
 
-                help_message(channel_id, &ctx).await;
+                help_message(channel_id, ctx).await;
             },
             "tt!add" | "tt!track" => {
-                if let Err(e) = threads::add(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
+                if let Err(e) = threads::add(args, guild_id, user_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error adding tracked channel(s): {:}", e).await;
                 }
             },
             "tt!cat" | "tt!category" => {
-                if let Err(e) = threads::set_category(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
+                if let Err(e) = threads::set_category(args, guild_id, user_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error updating channels' categories", e).await;
                 }
             },
             "tt!rm" | "tt!remove" | "tt!untrack" => {
-                if let Err(e) = threads::remove(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
+                if let Err(e) = threads::remove(args, guild_id, user_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error removing tracked channel(s)", e).await;
                 }
             },
             "tt!replies" | "tt!threads" => {
-                if let Err(e) = threads::send_list(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
+                if let Err(e) = threads::send_list(args, guild_id, user_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error retrieving thread list", e).await;
                 }
             },
@@ -121,17 +121,17 @@ impl Bot {
                     send_error_embed(&ctx.http, channel_id, "Too many arguments", e).await;
                 }
 
-                if let Err(e) = threads::send_random_thread(user_id, guild_id, channel_id, &ctx, &self.database).await {
+                if let Err(e) = threads::send_random_thread(user_id, guild_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error retrieving a random thread", e).await;
                 }
             },
             "tt!watch" => {
-                if let Err(e) = watchers::add(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
+                if let Err(e) = watchers::add(args, guild_id, user_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error adding watcher", e).await;
                 }
             },
             "tt!unwatch" => {
-                if let Err(e) = watchers::remove(args, user_id, channel_id, &ctx, &self.database).await {
+                if let Err(e) = watchers::remove(args, user_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error removing watcher", e).await;
                 }
             },
@@ -140,17 +140,17 @@ impl Bot {
                     send_error_embed(&ctx.http, channel_id, "Too many arguments", e).await;
                 }
 
-                if let Err(e) = muses::send_list(guild_id, user_id, channel_id, &ctx, &self.database).await {
+                if let Err(e) = muses::send_list(guild_id, user_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error finding muses", e).await;
                 }
             },
             "tt!addmuse" => {
-                if let Err(e) = muses::add(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
+                if let Err(e) = muses::add(args, guild_id, user_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error adding muse", e).await;
                 }
             },
             "tt!removemuse" => {
-                if let Err(e) = muses::remove(args, guild_id, user_id, channel_id, &ctx, &self.database).await {
+                if let Err(e) = muses::remove(args, guild_id, user_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error removing muse", e).await;
                 }
             },
@@ -198,7 +198,7 @@ async fn help_message(channel_id: ChannelId, ctx: &Context) {
 }
 
 fn error_on_additional_arguments(unrecognised_args: Vec<&str>) -> Result<(), CommandError> {
-    if unrecognised_args.len() > 0 {
+    if !unrecognised_args.is_empty() {
         return Err(UnrecognisedArguments(unrecognised_args.join(", ")));
     }
 

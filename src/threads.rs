@@ -68,12 +68,12 @@ pub(crate) async fn add<'a>(
     let mut errors = MessageBuilder::new();
 
     for thread_id in args {
-        if let Some(Ok(target_channel_id)) = thread_id.split("/").last().and_then(|x| Some(x.parse())) {
+        if let Some(Ok(target_channel_id)) = thread_id.split('/').last().map(|x| x.parse()) {
             let thread = ChannelId(target_channel_id);
             match thread.to_channel(&ctx.http).await {
                 Ok(_) => {
                     info!("Adding tracked thread {} for user {}", target_channel_id, user_id);
-                    match db::add_thread(database, guild_id.0, target_channel_id, user_id.0, category.as_deref()).await {
+                    match db::add_thread(database, guild_id.0, target_channel_id, user_id.0, category).await {
                         Ok(true) => threads_added.push("• ").mention(&thread).push_line(""),
                         Ok(false) => threads_added.push("• Skipped ").mention(&thread).push_line(" as it is already being tracked"),
                         Err(e) => errors.push("• Failed to register thread ").mention(&thread).push_line_safe(format!(": {}", e)),
@@ -87,7 +87,7 @@ pub(crate) async fn add<'a>(
         }
     }
 
-    if errors.0.len() > 0 {
+    if !errors.0.is_empty() {
         error!("Errors handling thread registration:\n{}", errors);
         send_error_embed(&ctx.http, channel_id, "Error adding tracked threads", errors).await;
     }
@@ -122,10 +122,10 @@ pub(crate) async fn set_category(
     let mut errors = MessageBuilder::new();
 
     for thread_id in args {
-        if let Some(Ok(target_channel_id)) = thread_id.split("/").last().and_then(|x| Some(x.parse())) {
+        if let Some(Ok(target_channel_id)) = thread_id.split('/').last().map(|x| x.parse()) {
             let thread = ChannelId(target_channel_id);
             match thread.to_channel(&ctx.http).await {
-                Ok(_) => match db::update_thread_category(database, guild_id.0, target_channel_id, user_id.0, category.as_deref()).await {
+                Ok(_) => match db::update_thread_category(database, guild_id.0, target_channel_id, user_id.0, category).await {
                     Ok(true) => threads_updated.push("• ").mention(&thread).push_line(""),
                     Ok(false) => errors.push("• ").mention(&thread).push_line(" is not currently being tracked"),
                     Err(e) => errors.push("• Failed to update thread category for ").mention(&thread).push_line_safe(format!(": {}", e)),
@@ -138,7 +138,7 @@ pub(crate) async fn set_category(
         }
     }
 
-    if errors.0.len() > 0 {
+    if !errors.0.is_empty() {
         error!("Errors updating thread categories:\n{}", errors);
         send_error_embed(&ctx.http, channel_id, "Error updating thread category", errors).await;
     }
@@ -193,7 +193,7 @@ pub(crate) async fn remove(
                 Err(e) => errors.push_line(format!("• Unable to remove threads in category `{}`: {}", thread_or_category, e)),
             };
         }
-        else if let Some(Ok(target_channel_id)) = thread_or_category.split("/").last().and_then(|x| Some(x.parse())) {
+        else if let Some(Ok(target_channel_id)) = thread_or_category.split('/').last().map(|x| x.parse()) {
             let thread = ChannelId(target_channel_id);
             match db::remove_thread(database, guild_id.0, target_channel_id, user_id.0).await {
                 Ok(0) => errors.push_line(format!("• {} is not currently being tracked", thread.mention())),
@@ -206,7 +206,7 @@ pub(crate) async fn remove(
         }
     }
 
-    if errors.0.len() > 0 {
+    if !errors.0.is_empty() {
         error!("Errors handling thread removal:\n{}", errors);
         send_error_embed(&ctx.http, channel_id, "Error removing tracked threads", errors).await;
     }
@@ -321,12 +321,9 @@ pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, muses: Vec<S
     let mut message = MessageBuilder::new();
 
     for (name, threads) in categories {
-        match name {
-            Some(n) => {
-                message.push_line(Bold + Underline + n)
-                    .push_line("");
-            },
-            None => {},
+        if let Some(n) = name {
+            message.push_line(Bold + Underline + n)
+                .push_line("");
         }
 
         for thread in threads {
@@ -346,7 +343,7 @@ pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, muses: Vec<S
         message.push_line("");
     }
 
-    if message.0.len() == 0 {
+    if message.0.is_empty() {
         message.push_line("No threads are currently being tracked.");
     }
 
@@ -386,7 +383,7 @@ async fn get_last_responder(thread: &TrackedThread, context: &Context) -> String
         else {
             message.author
                 .nick_in(&context.http, thread.guild_id).await
-                .unwrap_or_else(|| message.author.name)
+                .unwrap_or(message.author.name)
         },
         None => String::from("No replies yet"),
     }

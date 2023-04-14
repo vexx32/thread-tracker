@@ -31,10 +31,10 @@ pub(crate) async fn run_periodic_tasks(context: Arc<Context>, database: Arc<Data
         |c, _| heartbeat(c));
 
     spawn_result_task_loop(
-        context.clone(),
-        database.clone(),
+        context,
+        database,
         Duration::from_secs(WATCHER_UPDATE_INTERVAL_SECONDS.into()),
-        |c, db| update_watchers(c, db)
+        update_watchers
     );
 }
 
@@ -110,7 +110,7 @@ pub(crate) async fn update_watchers(ctx: Arc<Context>, database: Arc<Database>) 
                 .map(|t| t.into())
             ),
             Some(cats) => {
-                for category in cats.split(" ") {
+                for category in cats.split(' ') {
                     threads.extend(
                         db::list_threads(&database, watcher.guild_id.0, watcher.user_id.0, Some(category)).await?
                             .into_iter()
@@ -123,14 +123,18 @@ pub(crate) async fn update_watchers(ctx: Arc<Context>, database: Arc<Database>) 
         let muses = muses::list(watcher.guild_id, watcher.user_id, &database, &ctx).await?;
         let threads_content = threads::get_formatted_list(threads, muses, &ctx).await?;
 
-        message.edit(&ctx.http, |msg| msg.embed(|embed|
+        let edit_result = message.edit(
+            &ctx.http,
+            |msg| msg.embed(|embed|
                 embed.colour(Colour::PURPLE)
                     .title("Watching threads")
                     .description(threads_content)
-                    .footer(|footer| footer.text(format!("Last updated: {}", Utc::now())))))
-            .await
-            .err()
-            .map(|e| error!("Could not edit message: {}", e));
+                    .footer(|footer| footer.text(format!("Last updated: {}", Utc::now())))
+            )
+        ).await;
+        if let Err(e) = edit_result {
+            error!("Could not edit message: {}", e);
+        }
     }
 
     Ok(())

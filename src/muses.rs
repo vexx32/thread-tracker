@@ -22,7 +22,7 @@ pub(crate) async fn add<'a>(
     ctx: &Context,
     database: &Database
 ) -> anyhow::Result<()> {
-    if args.len() == 0 {
+    if args.is_empty() {
         return Err(MissingArguments(String::from("Please provide a muse name, such as: `tt!addmuse Annie Grey`")).into());
     }
 
@@ -52,7 +52,7 @@ pub(crate) async fn remove(
     ctx: &Context,
     database: &Database
 ) -> anyhow::Result<()> {
-    if args.len() == 0 {
+    if args.is_empty() {
         return Err(MissingArguments(String::from("Please provide a muse name, such as: `tt!removemuse Annie Grey`")).into());
     }
 
@@ -90,7 +90,7 @@ pub(crate) async fn send_list(
         result.push_line(format!("• {}", muse));
     }
 
-    if result.0.len() == 0 {
+    if result.0.is_empty() {
         result.push_line("You have not registered any muses yet.");
     }
 
