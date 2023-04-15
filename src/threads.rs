@@ -334,7 +334,7 @@ pub(crate) async fn get_formatted_list(
     todos: BTreeMap<Option<String>, Vec<Todo>>,
     muses: Vec<String>,
     user_id: UserId,
-    ctx: &Context
+    context: &Context
 ) -> Result<String, SerenityError> {
     let categories = categorise_threads(threads);
     let mut message = MessageBuilder::new();
@@ -346,27 +346,12 @@ pub(crate) async fn get_formatted_list(
         }
 
         for thread in threads {
-            let last_message_author = get_last_responder(&thread, ctx).await;
-
-            // Thread entries in blockquotes
-            message.push_quote(get_thread_link(&thread, ctx).await).push(" — ");
-            match last_message_author {
-                Some(user) => {
-                    let last_author_name = get_nick_or_name(&user, thread.guild_id, ctx).await;
-                    if user.id == user_id || muses.contains(&last_author_name) {
-                        message.push_line(last_author_name)
-                    }
-                    else {
-                        message.push_line(Bold + last_author_name)
-                    }
-                },
-                None => message.push(Bold + "No replies yet"),
-            };
+            push_thread_line(&mut message, &thread, context, user_id, &muses).await;
         }
 
         if let Some(todos) = todos.get(&name) {
             for todo in todos {
-                message.push_quote_line(&todo.content);
+                todos::push_todo_line(&mut message, todo);
             }
         }
 
@@ -427,4 +412,32 @@ async fn get_thread_link(thread: &TrackedThread, context: &Context) -> MessageBu
     };
 
     link
+}
+
+async fn push_thread_line<'a>(
+    message: &'a mut MessageBuilder,
+    thread: &TrackedThread,
+    context: &Context,
+    user_id: UserId,
+    muses: &[String],
+) -> &'a mut MessageBuilder {
+    let last_message_author = get_last_responder(thread, context).await;
+
+    // Thread entries in blockquotes
+    message.push_quote("• ")
+        .push(get_thread_link(thread, context).await)
+        .push(" — ");
+
+    match last_message_author {
+        Some(user) => {
+            let last_author_name = get_nick_or_name(&user, thread.guild_id, context).await;
+            if user.id == user_id || muses.contains(&last_author_name) {
+                message.push_line(last_author_name)
+            }
+            else {
+                message.push_line(Bold + last_author_name)
+            }
+        },
+        None => message.push(Bold + "No replies yet"),
+    }
 }

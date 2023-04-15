@@ -116,30 +116,30 @@ pub(crate) async fn send_list(
     };
 
 
-    let mut result = MessageBuilder::new();
+    let mut message = MessageBuilder::new();
 
     if !todos.is_empty() {
         let categories = categorise(todos);
-        result.mention(&user_id).push_line("'s to do list:");
+        message.mention(&user_id).push_line("'s to do list:");
 
         for (name, todos) in categories {
             if let Some(n) = name {
-                result.push_line(Bold + Underline + n)
+                message.push_line(Bold + Underline + n)
                     .push_line("");
             }
 
             for item in todos {
-                result.push_line(format!("• {}", &item.content));
+                push_todo_line(&mut message, &item);
             }
 
-            result.push_line("");
+            message.push_line("");
         }
     }
     else {
-        result.push_line("There is nothing on your to do list.");
+        message.push_line("There is nothing on your to do list.");
     }
 
-    send_success_embed(&ctx.http, channel_id, "To Do list", result).await;
+    send_success_embed(&ctx.http, channel_id, "To Do list", message).await;
 
     Ok(())
 }
@@ -169,4 +169,8 @@ async fn enumerate(database: &Database, guild_id: GuildId, user_id: UserId, cate
             .into_iter()
             .map(|t| t.into())
     )
+}
+
+pub(crate) fn push_todo_line<'a>(message: &'a mut MessageBuilder, todo: &Todo) -> &'a mut MessageBuilder {
+    message.push_quote_line(format!("• {}", &todo.content))
 }

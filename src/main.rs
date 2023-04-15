@@ -220,7 +220,7 @@ impl EventHandler for Bot {
 
         if let Some(command) = msg.content.split_ascii_whitespace().next() {
             info!("[command] processing command `{}` from user `{}`", msg.content, author_id);
-            self.process_command(&ctx, channel_id, guild_id, author_id, command, &msg.content[command.len()..].trim_start()).await;
+            self.process_command(&ctx, channel_id, guild_id, author_id, command, msg.content[command.len()..].trim_start()).await;
         }
     }
 
