@@ -19,6 +19,7 @@ mod threads;
 mod messaging;
 mod muses;
 mod todos;
+mod utils;
 mod watchers;
 
 use db::Database;
@@ -41,7 +42,7 @@ This command will let you change an already-tracked thread's category. Specify t
 Use this in conjunction with a channel or thread URL to remove that URL from your list, one or more category names to remove all threads in those categories, or simply `all` to remove all tracked threads.
 
 `tt!replies` // `tt!threads`
-This command shows you, in a list, who responded last to each channel, with each category grouped together. Specify one or more category names to list only the threads in those categories.
+This command shows you, in a list, who responded last to each channel, with each category grouped together along with any to do-list items in those categories. Specify one or more category names to list only the threads and to do-list items in those categories.
 
 `tt!addmuse`
 Register a muse name. Registered muses determine which respondents should be considered you when using bots like Tupper. Thread Tracker will list the last respondent to a thread in bold if it is not you or a registered muse.
@@ -61,11 +62,11 @@ Copy the message URL from an existing watcher message (with the title "Watching 
 `tt!random` // `tt!rng`
 Finds a random tracked thread that was last replied to by someone other than you.
 
-`tt!todolist`
+`tt!todos` // `tt!todolist`
 List all to do-list entries.
 
 `tt!todo`
-Adds a to do-list item.
+Adds a to do-list item. Optionally specify a category as `!categoryname` before the to do-list entry itself, for example: `tt!todo !mycategory do the thing`
 
 `tt!done`
 Crosses off and removes a to do-list item.
@@ -185,8 +186,9 @@ impl Bot {
                     send_error_embed(&ctx.http, channel_id, "Error removing to do-list item", e).await;
                 }
             },
-            "tt!todolist" => {
-                if let Err(e) = todos::send_list(guild_id, user_id, channel_id, ctx, &self.database).await {
+            "tt!todos" | "tt!todolist" => {
+                let args = args.split_ascii_whitespace().collect();
+                if let Err(e) = todos::send_list(args, guild_id, user_id, channel_id, ctx, &self.database).await {
                     send_error_embed(&ctx.http, channel_id, "Error getting to do-list", e).await;
                 }
             },
@@ -218,7 +220,7 @@ impl EventHandler for Bot {
 
         if let Some(command) = msg.content.split_ascii_whitespace().next() {
             info!("[command] processing command `{}` from user `{}`", msg.content, author_id);
-            self.process_command(&ctx, channel_id, guild_id, author_id, command, msg.content.replace(command, "").trim_start()).await;
+            self.process_command(&ctx, channel_id, guild_id, author_id, command, &msg.content[command.len()..].trim_start()).await;
         }
     }
 

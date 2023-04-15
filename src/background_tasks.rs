@@ -17,6 +17,7 @@ use crate::{
     db::{self, Database},
     threads::{self, TrackedThread},
     muses,
+    todos,
     watchers::ThreadWatcher,
 };
 
@@ -121,7 +122,8 @@ pub(crate) async fn update_watchers(ctx: Arc<Context>, database: Arc<Database>) 
         }
 
         let muses = muses::list(watcher.guild_id, watcher.user_id, &database).await?;
-        let threads_content = threads::get_formatted_list(threads, muses, watcher.user_id, &ctx).await?;
+        let todos = todos::categorise(todos::list(&database, watcher.guild_id, watcher.user_id, None).await?);
+        let threads_content = threads::get_formatted_list(threads, todos, muses, watcher.user_id, &ctx).await?;
 
         let edit_result = message.edit(
             &ctx.http,

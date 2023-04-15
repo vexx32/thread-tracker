@@ -183,13 +183,15 @@ pub(crate) async fn add_todo(
     database: &Database,
     guild_id: u64,
     user_id: u64,
-    content: &str
+    content: &str,
+    category: Option<&str>,
 ) -> Result<bool> {
     match get_todo(database, guild_id, user_id, content).await? {
         Some(_) => Ok(false),
         None => {
-            sqlx::query("INSERT INTO todos (content, user_id, guild_id) VALUES ($1, $2, $3)")
+            sqlx::query("INSERT INTO todos (content, category, user_id, guild_id) VALUES ($1, $2, $3, $4)")
                 .bind(content)
+                .bind(category)
                 .bind(user_id as i64)
                 .bind(guild_id as i64)
                 .execute(database).await?;
@@ -203,9 +205,9 @@ pub(crate) async fn get_todo(
     database: &Database,
     guild_id: u64,
     user_id: u64,
-    content: &str
+    content: &str,
 ) -> Result<Option<TodoRow>> {
-    sqlx::query_as("SELECT id, content FROM todos WHERE user_id = $1 AND guild_id = $2 AND content = $3")
+    sqlx::query_as("SELECT id, content, category FROM todos WHERE user_id = $1 AND guild_id = $2 AND content = $3")
         .bind(user_id as i64)
         .bind(guild_id as i64)
         .bind(content)
@@ -215,10 +217,16 @@ pub(crate) async fn get_todo(
 pub(crate) async fn list_todos(
     database: &Database,
     guild_id: u64,
-    user_id: u64
+    user_id: u64,
+    category: Option<&str>,
 ) -> Result<Vec<TodoRow>> {
-    sqlx::query_as("SELECT id, content FROM todos WHERE user_id = $1 AND guild_id = $2")
-        .bind(user_id as i64)
+    let query = match category {
+        Some(cat) => sqlx::query_as("SELECT id, content, category FROM todos WHERE category = $1 user_id = $2 AND guild_id = $3")
+            .bind(cat),
+        None => sqlx::query_as("SELECT id, content, category FROM todos WHERE user_id = $1 AND guild_id = $2"),
+    };
+
+    query.bind(user_id as i64)
         .bind(guild_id as i64)
         .fetch_all(database).await
 }
@@ -227,7 +235,7 @@ pub(crate) async fn remove_todo(
     database: &Database,
     guild_id: u64,
     user_id: u64,
-    content: &str
+    content: &str,
 ) -> Result<u64> {
     let result = sqlx::query("DELETE FROM todos WHERE content = $1 AND user_id = $2 AND guild_id = $3")
         .bind(content)

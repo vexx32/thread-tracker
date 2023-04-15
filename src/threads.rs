@@ -14,6 +14,8 @@ use crate::{
     db::{self, Database},
     messaging::*,
     muses,
+    todos::{self, Todo},
+    utils::*,
 
     CommandError::*,
 };
@@ -258,7 +260,8 @@ pub(crate) async fn send_list_with_title(
     }
 
     let muses = muses::list(guild_id, user_id, database).await?;
-    let response = get_formatted_list(threads, muses, user_id, context).await?;
+    let todos = todos::categorise(todos::list(database, guild_id, user_id, None).await?);
+    let response = get_formatted_list(threads, todos, muses, user_id, context).await?;
 
     Ok(send_message_embed(&context.http, channel_id, embed_title, &response).await?)
 }
@@ -326,12 +329,18 @@ pub(crate) async fn send_random_thread(
     Ok(())
 }
 
-pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, muses: Vec<String>, user_id: UserId, ctx: &Context) -> Result<String, SerenityError> {
+pub(crate) async fn get_formatted_list(
+    threads: Vec<TrackedThread>,
+    todos: BTreeMap<Option<String>, Vec<Todo>>,
+    muses: Vec<String>,
+    user_id: UserId,
+    ctx: &Context
+) -> Result<String, SerenityError> {
     let categories = categorise_threads(threads);
     let mut message = MessageBuilder::new();
 
     for (name, threads) in categories {
-        if let Some(n) = name {
+        if let Some(n) = &name {
             message.push_line(Bold + Underline + n)
                 .push_line("");
         }
@@ -355,6 +364,12 @@ pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, muses: Vec<S
             };
         }
 
+        if let Some(todos) = todos.get(&name) {
+            for todo in todos {
+                message.push_quote_line(&todo.content);
+            }
+        }
+
         message.push_line("");
     }
 
@@ -366,13 +381,7 @@ pub(crate) async fn get_formatted_list(threads: Vec<TrackedThread>, muses: Vec<S
 }
 
 fn categorise_threads(threads: Vec<TrackedThread>) -> BTreeMap<Option<String>, Vec<TrackedThread>> {
-    let mut categories: BTreeMap<Option<String>, Vec<TrackedThread>> = BTreeMap::new();
-
-    for thread in threads {
-        categories.entry(thread.category.clone()).or_default().push(thread);
-    }
-
-    categories
+    partition_into_map(threads, |t| t.category.clone())
 }
 
 fn trim_link_name(name: &str) -> String {

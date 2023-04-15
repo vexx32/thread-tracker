@@ -28,4 +28,5 @@ pub(crate) struct MuseRow {
 pub(crate) struct TodoRow {
     pub id: i32,
     pub content: String,
+    pub category: Option<String>,
 }

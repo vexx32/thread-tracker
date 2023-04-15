@@ -26,5 +26,8 @@ CREATE TABLE IF NOT EXISTS todos (
     id serial PRIMARY KEY,
     user_id BIGINT NOT NULL,
     guild_id BIGINT NOT NULL,
-    content varchar(300) NOT NULL
+    content varchar(300) NOT NULL,
+    category varchar(100) NULL
 );
+
+ALTER TABLE todos ADD COLUMN IF NOT EXISTS category varchar(100);
