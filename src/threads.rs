@@ -350,12 +350,13 @@ pub(crate) async fn get_formatted_list(
 
     // Uncategorised todos at the end of the list
     if let Some(todos) = todos.get(&None) {
-        message.push_line("")
-            .push_line(Bold + Italic + Underline + "To Do")
-            .push_line("");
+        if !todos.is_empty() {
+            message.push_line(Bold + Italic + Underline + "To Do")
+                .push_line("");
 
-        for todo in todos {
-            todos::push_todo_line(&mut message, todo);
+            for todo in todos {
+                todos::push_todo_line(&mut message, todo);
+            }
         }
     }
 
