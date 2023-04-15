@@ -187,6 +187,16 @@ pub(crate) async fn add_todo(
     category: Option<&str>,
 ) -> Result<bool> {
     match get_todo(database, guild_id, user_id, content).await? {
+        Some(t) if t.category.as_deref() != category => {
+            sqlx::query("UPDATE todos SET category = $1 WHERE user_id = $2 AND guild_id = $3 AND content = $4")
+                .bind(category)
+                .bind(user_id as i64)
+                .bind(guild_id as i64)
+                .bind(content)
+                .execute(database).await?;
+
+            Ok(true)
+        },
         Some(_) => Ok(false),
         None => {
             sqlx::query("INSERT INTO todos (content, category, user_id, guild_id) VALUES ($1, $2, $3, $4)")
