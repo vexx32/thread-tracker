@@ -255,3 +255,22 @@ pub(crate) async fn remove_todo(
 
     Ok(result.rows_affected())
 }
+
+pub(crate) async fn remove_all_todos(
+    database: &Database,
+    guild_id: u64,
+    user_id: u64,
+    category: Option<&str>,
+) -> Result<u64> {
+    let query = match category {
+        Some(cat) => sqlx::query("DELETE FROM todos WHERE category = $1 AND user_id = $2 AND guild_id = $3")
+            .bind(cat),
+        None => sqlx::query("DELETE FROM todos WHERE user_id = $1 AND guild_id = $2"),
+    };
+
+    let result = query.bind(user_id as i64)
+        .bind(guild_id as i64)
+        .execute(database).await?;
+
+    Ok(result.rows_affected())
+}

@@ -11,9 +11,11 @@ use serenity::{
 
 use crate::{
     CommandError::*,
+    error_on_additional_arguments,
 
     db::{self, Database},
-    messaging::{send_success_embed, send_error_embed}, utils::partition_into_map,
+    messaging::{send_success_embed, send_error_embed},
+    utils::partition_into_map,
 };
 
 pub(crate) struct Todo {
@@ -85,20 +87,49 @@ pub(crate) async fn remove(
     ctx: &Context,
     database: &Database
 ) -> anyhow::Result<()> {
-    if entry.trim().is_empty() {
-        return Err(MissingArguments(String::from("Please provide a todo entry to remove, such as: `tt!done write X a starter`")).into());
+    let mut entry = entry.trim();
+    if entry.is_empty() {
+        return Err(MissingArguments(String::from(
+            "Please provide a todo entry or category to remove, such as: `tt!done write X a starter` or: `tt!done !category`, or simply `tt!done !all`"
+        )).into());
     }
 
-    let mut result = MessageBuilder::new();
-    result.push("To do list entry ").push(Italic + entry);
-    match db::remove_todo(database, guild_id.0, user_id.0, entry).await? {
-        0 => {
-            result.push_line(" was not found.");
-            send_error_embed(&ctx.http, channel_id, "Error removing to do list entry", result).await;
+    let category = match entry.split_ascii_whitespace().next() {
+        Some(cat) if cat.starts_with('!') => {
+            entry = entry[cat.len()..].trim();
+            // After a category name / !all, no more arguments are recognised / allowed.
+            error_on_additional_arguments(entry.trim().split_ascii_whitespace().collect())?;
+
+            Some(&cat[1..])
         },
-        _ => {
-            result.push_line(" was successfully removed.");
-            send_success_embed(&ctx.http, channel_id, "To do list entry removed", result).await;
+        _ => None,
+    };
+
+    let mut message = MessageBuilder::new();
+
+    let result = match category {
+        Some("all") => {
+            message.push("To do-list entries were ");
+            db::remove_all_todos(database, guild_id.0, user_id.0, None).await?
+        },
+        Some(cat) => {
+            message.push(format!("To do list entries in category `{}` were ", cat));
+            db::remove_all_todos(database, guild_id.0, user_id.0, Some(cat)).await?
+        },
+        None => {
+            message.push("To do list entry was ").push(Italic + entry);
+            db::remove_todo(database, guild_id.0, user_id.0, entry).await?
+        },
+    };
+
+    match result {
+        0 => {
+            message.push_line(" not found.");
+            send_error_embed(&ctx.http, channel_id, "Error updating to do-list", message).await;
+        },
+        num => {
+            message.push_line(format!(" successfully removed. {} entries deleted.", num));
+            send_success_embed(&ctx.http, channel_id, "To do-list updated", message).await;
         },
     };
 
