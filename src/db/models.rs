@@ -2,6 +2,7 @@ use sqlx::FromRow;
 
 #[derive(FromRow)]
 pub(crate) struct TrackedThreadRow {
+    #[allow(dead_code)]
     pub id: i32,
     pub channel_id: i64,
     pub guild_id: i64,
@@ -20,12 +21,14 @@ pub(crate) struct ThreadWatcherRow {
 
 #[derive(FromRow)]
 pub(crate) struct MuseRow {
+    #[allow(dead_code)]
     pub id: i32,
     pub muse_name: String,
 }
 
 #[derive(FromRow)]
 pub(crate) struct TodoRow {
+    #[allow(dead_code)]
     pub id: i32,
     pub content: String,
     pub category: Option<String>,

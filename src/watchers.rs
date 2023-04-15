@@ -1,16 +1,13 @@
-use serenity::{
-    model::prelude::*,
-    prelude::*,
-};
+use serenity::model::prelude::*;
 use thiserror::Error;
 use tracing::{error, info};
 
 use crate::{
     db::{self, Database},
     threads,
-    messaging::*,
 
     CommandError::*,
+    EventData,
 };
 
 use WatcherError::*;
@@ -50,13 +47,10 @@ enum WatcherError {
 
 pub(crate) async fn add(
     args: Vec<&str>,
-    guild_id: GuildId,
-    user_id: UserId,
-    channel_id: ChannelId,
-    ctx: &Context,
+    event_data: &EventData,
     database: &Database,
 ) -> anyhow::Result<()> {
-    info!("[threadwatch] Adding watcher for user {}, categories {:?}", user_id, args);
+    info!("[threadwatch] Adding watcher for user {}, categories {:?}", event_data.user_id, args);
     let arguments = if !args.is_empty() {
         Some(args.join(" "))
     }
@@ -64,17 +58,15 @@ pub(crate) async fn add(
         None
     };
 
-    let message = threads::send_list_with_title(args, guild_id, user_id, channel_id, "Watching threads", ctx, database).await?;
-    db::add_watcher(database, user_id.0, message.id.0, channel_id.0, guild_id.0, arguments.as_deref()).await?;
+    let message = threads::send_list_with_title(args, "Watching threads", event_data, database).await?;
+    db::add_watcher(database, event_data.user_id.0, message.id.0, event_data.channel_id.0, event_data.guild_id.0, arguments.as_deref()).await?;
 
     Ok(())
 }
 
 pub(crate) async fn remove(
     args: Vec<&str>,
-    user_id: UserId,
-    channel_id: ChannelId,
-    ctx: &Context,
+    event_data: &EventData,
     database: &Database,
 ) -> anyhow::Result<()> {
     let mut args = args.into_iter().peekable();
@@ -82,7 +74,7 @@ pub(crate) async fn remove(
         return Err(MissingArguments(String::from("Please provide a message URL to a watcher message, such as: `tt!unwatch <message url>`.")).into());
     }
 
-    info!("Removing watcher for user {}, categories {:?}", user_id, args);
+    info!("Removing watcher for user {}, categories {:?}", event_data.user_id, args);
 
     let message_url = args.next().unwrap();
     let (watcher_message_id, watcher_channel_id) = parse_message_link(message_url)?;
@@ -92,15 +84,15 @@ pub(crate) async fn remove(
         None => return Err(NotFound(format!("Could not find a watcher for the target message: `{}`", message_url)).into()),
     };
 
-    if watcher.user_id != user_id {
-        return Err(NotAllowed(format!("User {} does not own the watcher.", user_id)).into());
+    if watcher.user_id != event_data.user_id {
+        return Err(NotAllowed(format!("User {} does not own the watcher.", event_data.user_id)).into());
     }
 
     match db::remove_watcher(database, watcher.id).await? {
         0 => error!("Watcher should have been present in the database, but was missing when removal was attempted: {:?}", watcher),
         _ => {
-            send_success_embed(&ctx.http, channel_id, "Watcher removed", "Watcher successfully removed.").await;
-            ctx.http.get_message(watcher.channel_id.0, watcher.message_id.0).await?.delete(&ctx.http).await?;
+            event_data.reply_context().send_success_embed("Watcher removed", "Watcher successfully removed.").await;
+            event_data.http().get_message(watcher.channel_id.0, watcher.message_id.0).await?.delete(event_data.http()).await?;
         }
     }
 

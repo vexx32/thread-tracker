@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use lazy_static::lazy_static;
 use rand::Rng;
 use serenity::{
+    http::{Http, CacheHttp},
     model::prelude::*,
     prelude::*,
     utils::{MessageBuilder, EmbedMessageBuilding, ContentModifier::*},
@@ -17,7 +18,7 @@ use crate::{
     todos::{self, Todo},
     utils::*,
 
-    CommandError::*,
+    CommandError::*, EventData,
 };
 
 lazy_static!{
@@ -28,7 +29,6 @@ pub(crate) struct TrackedThread {
     pub channel_id: ChannelId,
     pub category: Option<String>,
     pub guild_id: GuildId,
-    pub id: i32,
 }
 
 impl From<db::TrackedThreadRow> for TrackedThread {
@@ -37,17 +37,13 @@ impl From<db::TrackedThreadRow> for TrackedThread {
             channel_id: ChannelId(thread.channel_id as u64),
             category: thread.category,
             guild_id: GuildId(thread.guild_id as u64),
-            id: thread.id,
         }
     }
 }
 
-pub(crate) async fn add<'a>(
+pub(crate) async fn add(
     args: Vec<&str>,
-    guild_id: GuildId,
-    user_id: UserId,
-    channel_id: ChannelId,
-    ctx: &Context,
+    event_data: &EventData,
     database: &Database
 ) -> Result<(), anyhow::Error> {
     let mut args = args.into_iter().peekable();
@@ -62,7 +58,7 @@ pub(crate) async fn add<'a>(
     if args.peek().is_none() {
         return Err(MissingArguments(format!(
             "Please provide a thread or channel URL, such as: `tt!add {channel}`, optionally alongside a category name: `tt!add category {channel}`",
-            channel = channel_id.mention()
+            channel = event_data.channel_id.mention()
         )).into());
     }
 
@@ -72,10 +68,10 @@ pub(crate) async fn add<'a>(
     for thread_id in args {
         if let Some(Ok(target_channel_id)) = thread_id.split('/').last().map(|x| x.parse()) {
             let thread = ChannelId(target_channel_id);
-            match thread.to_channel(&ctx.http).await {
+            match thread.to_channel(event_data.http()).await {
                 Ok(_) => {
-                    info!("Adding tracked thread {} for user {}", target_channel_id, user_id);
-                    match db::add_thread(database, guild_id.0, target_channel_id, user_id.0, category).await {
+                    info!("Adding tracked thread {} for user {}", target_channel_id, event_data.user_id);
+                    match db::add_thread(database, event_data.guild_id.0, target_channel_id, event_data.user_id.0, category).await {
                         Ok(true) => threads_added.push("• ").mention(&thread).push_line(""),
                         Ok(false) => threads_added.push("• Skipped ").mention(&thread).push_line(" as it is already being tracked"),
                         Err(e) => errors.push("• Failed to register thread ").mention(&thread).push_line_safe(format!(": {}", e)),
@@ -89,9 +85,10 @@ pub(crate) async fn add<'a>(
         }
     }
 
+    let reply_context = event_data.reply_context();
     if !errors.0.is_empty() {
         error!("Errors handling thread registration:\n{}", errors);
-        send_error_embed(&ctx.http, channel_id, "Error adding tracked threads", errors).await;
+        reply_context.send_error_embed("Error adding tracked threads", errors).await;
     }
 
     let title = match category {
@@ -99,17 +96,14 @@ pub(crate) async fn add<'a>(
         None => "Tracked threads added".to_owned(),
     };
 
-    send_success_embed(&ctx.http, channel_id, title, threads_added).await;
+    reply_context.send_success_embed(title, threads_added).await;
 
     Ok(())
 }
 
 pub(crate) async fn set_category(
     args: Vec<&str>,
-    guild_id: GuildId,
-    user_id: UserId,
-    channel_id: ChannelId,
-    ctx: &Context,
+    event_data: &EventData,
     database: &Database
 ) -> Result<(), anyhow::Error> {
     let mut args = args.into_iter().peekable();
@@ -117,7 +111,7 @@ pub(crate) async fn set_category(
     let category = match args.next() {
         Some("unset" | "none") => None,
         Some(cat) => Some(cat),
-        None => return Err(MissingArguments(format!("Please provide a category name and a thread or channel URL, such as: `tt!cat category {}`", channel_id.mention())).into()),
+        None => return Err(MissingArguments(format!("Please provide a category name and a thread or channel URL, such as: `tt!cat category {}`", event_data.channel_id.mention())).into()),
     };
 
     let mut threads_updated = MessageBuilder::new();
@@ -126,8 +120,8 @@ pub(crate) async fn set_category(
     for thread_id in args {
         if let Some(Ok(target_channel_id)) = thread_id.split('/').last().map(|x| x.parse()) {
             let thread = ChannelId(target_channel_id);
-            match thread.to_channel(&ctx.http).await {
-                Ok(_) => match db::update_thread_category(database, guild_id.0, target_channel_id, user_id.0, category).await {
+            match thread.to_channel(event_data.http()).await {
+                Ok(_) => match db::update_thread_category(database, event_data.guild_id.0, target_channel_id, event_data.user_id.0, category).await {
                     Ok(true) => threads_updated.push("• ").mention(&thread).push_line(""),
                     Ok(false) => errors.push("• ").mention(&thread).push_line(" is not currently being tracked"),
                     Err(e) => errors.push("• Failed to update thread category for ").mention(&thread).push_line_safe(format!(": {}", e)),
@@ -140,9 +134,10 @@ pub(crate) async fn set_category(
         }
     }
 
+    let reply_context = event_data.reply_context();
     if !errors.0.is_empty() {
         error!("Errors updating thread categories:\n{}", errors);
-        send_error_embed(&ctx.http, channel_id, "Error updating thread category", errors).await;
+        reply_context.send_error_embed("Error updating thread category", errors).await;
     }
 
     let title = match category {
@@ -150,35 +145,27 @@ pub(crate) async fn set_category(
         None => String::from("Tracked threads' categories removed"),
     };
 
-    send_success_embed(&ctx.http, channel_id, title, threads_updated).await;
+    reply_context.send_success_embed(title, threads_updated).await;
 
     Ok(())
 }
 
-pub(crate) async fn remove(
-    args: Vec<&str>,
-    guild_id: GuildId,
-    user_id: UserId,
-    channel_id: ChannelId,
-    ctx: &Context,
-    database: &Database
-) -> Result<(), anyhow::Error> {
+pub(crate) async fn remove(args: Vec<&str>, event_data: &EventData, database: &Database) -> Result<(), anyhow::Error> {
     let mut args = args.into_iter().peekable();
 
     if args.peek().is_none() {
         return Err(MissingArguments(format!(
             "Please provide a thread or channel URL, for example: `tt!remove {:}` -- or use `tt!remove all` to untrack all threads.",
-            channel_id.mention()
+            event_data.channel_id.mention()
         )).into());
     }
 
+    let reply_context = event_data.reply_context();
     if let Some(&"all") = args.peek() {
-        db::remove_all_threads(database, guild_id.0, user_id.0, None).await?;
-        send_success_embed(
-            &ctx.http,
-            channel_id,
+        db::remove_all_threads(database, event_data.guild_id.0, event_data.user_id.0, None).await?;
+        reply_context.send_success_embed(
             "Tracked threads removed",
-            &format!("All registered threads for user {:} removed.", user_id.mention())
+            &format!("All registered threads for user {:} removed.", event_data.user_id.mention())
         ).await;
 
         return Ok(());
@@ -189,7 +176,7 @@ pub(crate) async fn remove(
 
     for thread_or_category in args {
         if !URL_REGEX.is_match(thread_or_category) {
-            match db::remove_all_threads(database, guild_id.0, user_id.0, Some(thread_or_category)).await {
+            match db::remove_all_threads(database, event_data.guild_id.0, event_data.user_id.0, Some(thread_or_category)).await {
                 Ok(0) => errors.push_line(format!("• No threads in category {} to remove", thread_or_category)),
                 Ok(count) => threads_removed.push_line(format!("• All {} threads in category `{}` removed", count, thread_or_category)),
                 Err(e) => errors.push_line(format!("• Unable to remove threads in category `{}`: {}", thread_or_category, e)),
@@ -197,7 +184,7 @@ pub(crate) async fn remove(
         }
         else if let Some(Ok(target_channel_id)) = thread_or_category.split('/').last().map(|x| x.parse()) {
             let thread = ChannelId(target_channel_id);
-            match db::remove_thread(database, guild_id.0, target_channel_id, user_id.0).await {
+            match db::remove_thread(database, event_data.guild_id.0, target_channel_id, event_data.user_id.0).await {
                 Ok(0) => errors.push_line(format!("• {} is not currently being tracked", thread.mention())),
                 Ok(_) => threads_removed.push_line(format!("• {:}", thread.mention())),
                 Err(e) => errors.push_line(format!("• Failed to unregister thread {}: {}", thread.mention(), e)),
@@ -210,32 +197,26 @@ pub(crate) async fn remove(
 
     if !errors.0.is_empty() {
         error!("Errors handling thread removal:\n{}", errors);
-        send_error_embed(&ctx.http, channel_id, "Error removing tracked threads", errors).await;
+        reply_context.send_error_embed("Error removing tracked threads", errors).await;
     }
 
-    send_success_embed(&ctx.http, channel_id, "Tracked threads removed", threads_removed).await;
+    reply_context.send_success_embed("Tracked threads removed", threads_removed).await;
 
     Ok(())
 }
 
 pub(crate) async fn send_list(
     args: Vec<&str>,
-    guild_id: GuildId,
-    user_id: UserId,
-    channel_id: ChannelId,
-    ctx: &Context,
+    event_data: &EventData,
     database: &Database
 ) -> Result<Message, anyhow::Error> {
-    send_list_with_title(args, guild_id, user_id, channel_id, "Currently tracked threads", ctx, database).await
+    send_list_with_title(args, "Currently tracked threads", event_data, database).await
 }
 
 pub(crate) async fn send_list_with_title(
     args: Vec<&str>,
-    guild_id: GuildId,
-    user_id: UserId,
-    channel_id: ChannelId,
-    embed_title: impl ToString,
-    context: &Context,
+    title: impl ToString,
+    event_data: &EventData,
     database: &Database
 ) -> Result<Message, anyhow::Error> {
     let mut args = args.into_iter().peekable();
@@ -245,7 +226,7 @@ pub(crate) async fn send_list_with_title(
     if args.peek().is_some() {
         for category in args {
             threads.extend(
-                db::list_threads(database, guild_id.0, user_id.0, Some(category)).await?
+                db::list_threads(database, event_data.guild_id.0, event_data.user_id.0, Some(category)).await?
                     .into_iter()
                     .map(|t| t.into())
             );
@@ -253,29 +234,30 @@ pub(crate) async fn send_list_with_title(
     }
     else {
         threads.extend(
-            db::list_threads(database, guild_id.0, user_id.0, None).await?
+            db::list_threads(database, event_data.guild_id.0, event_data.user_id.0, None).await?
                 .into_iter()
                 .map(|t| t.into())
         );
     }
 
-    let muses = muses::list(guild_id, user_id, database).await?;
-    let todos = todos::categorise(todos::list(database, guild_id, user_id, None).await?);
-    let response = get_formatted_list(threads, todos, muses, user_id, context).await?;
+    let user = event_data.user();
+    let muses = muses::list(database, &user).await?;
+    let todos = todos::categorise(todos::list(database, &user, None).await?);
+    let message = get_formatted_list(threads, todos, muses, event_data.user_id, &event_data.context).await?;
 
-    Ok(send_message_embed(&context.http, channel_id, embed_title, &response).await?)
+    Ok(event_data.reply_context().send_message_embed(title, message).await?)
 }
 
-pub(crate) async fn get_random_thread(user_id: UserId, guild_id: GuildId, database: &Database, context: &Context) -> anyhow::Result<Option<(String, TrackedThread)>> {
-    let muses = muses::list(guild_id, user_id, database).await?;
+pub(crate) async fn get_random_thread(event_data: &EventData, database: &Database) -> anyhow::Result<Option<(String, TrackedThread)>> {
+    let muses = muses::list(database, &event_data.user()).await?;
     let mut pending_threads = Vec::new();
 
-    for thread in db::list_threads(database, guild_id.0, user_id.0, None).await?.into_iter().map(|t| t.into()) {
-        let last_message_author = get_last_responder(&thread, context).await;
+    for thread in db::list_threads(database, event_data.guild_id.0, event_data.user_id.0, None).await?.into_iter().map(|t| t.into()) {
+        let last_message_author = get_last_responder(&thread, event_data.http()).await;
         match last_message_author {
             Some(user) => {
-                let last_author_name = get_nick_or_name(&user, guild_id, context).await;
-                if user.id != user_id && !muses.contains(&last_author_name) {
+                let last_author_name = get_nick_or_name(&user, event_data.guild_id, event_data.http()).await;
+                if user.id != event_data.user_id && !muses.contains(&last_author_name) {
                     pending_threads.push((last_author_name, thread));
                 }
             },
@@ -293,19 +275,14 @@ pub(crate) async fn get_random_thread(user_id: UserId, guild_id: GuildId, databa
     }
 }
 
-pub(crate) async fn send_random_thread(
-    user_id: UserId,
-    guild_id: GuildId,
-    channel_id: ChannelId,
-    context: &Context,
-    database: &Database
-) -> anyhow::Result<()> {
+pub(crate) async fn send_random_thread(event_data: &EventData, database: &Database) -> anyhow::Result<()> {
     let mut message = MessageBuilder::new();
+    let reply_context = event_data.reply_context();
 
-    match get_random_thread(user_id, guild_id, database, context).await? {
+    match get_random_thread(event_data, database).await? {
         None => {
             message.push("Congrats! You don't seem to have any threads that are waiting on your reply! :tada:");
-            log_send_errors(send_message_embed(&context.http, channel_id, "No waiting threads", message).await);
+            log_send_errors(reply_context.send_message_embed("No waiting threads", message).await);
         },
         Some((last_author, thread)) => {
             message.push("Titi has chosen... this thread");
@@ -320,9 +297,9 @@ pub(crate) async fn send_random_thread(
             }
 
             message.push_line("");
-            message.push_quote(get_thread_link(&thread, context).await).push(" — ").push_line(Bold + last_author);
+            message.push_quote(get_thread_link(&thread, event_data.http()).await).push(" — ").push_line(Bold + last_author);
 
-            log_send_errors(send_message_embed(&context.http, channel_id, "Random thread", message).await);
+            log_send_errors(reply_context.send_message_embed("Random thread", message).await);
         },
     };
 
@@ -403,29 +380,29 @@ fn trim_link_name(name: &str) -> String {
     }
 }
 
-async fn get_last_responder(thread: &TrackedThread, context: &Context) -> Option<User> {
+async fn get_last_responder(thread: &TrackedThread, http: impl AsRef<Http>) -> Option<User> {
     // Default behaviour for retriever is to get most recent messages
     let last_message = thread.channel_id
-        .messages(&context.http, |retriever| retriever.limit(1)).await
+        .messages(http, |retriever| retriever.limit(1)).await
         .map_or(None, |mut m| m.pop());
 
     last_message.map(|m| m.author)
 }
 
-async fn get_nick_or_name(user: &User, guild_id: GuildId, context: &Context) -> String {
+async fn get_nick_or_name(user: &User, guild_id: GuildId, cache_http: impl CacheHttp) -> String {
     if user.bot {
         user.name.clone()
     }
     else {
-        user.nick_in(&context.http, guild_id).await
+        user.nick_in(cache_http, guild_id).await
             .unwrap_or(user.name.clone())
     }
 }
 
-async fn get_thread_link(thread: &TrackedThread, context: &Context) -> MessageBuilder {
+async fn get_thread_link(thread: &TrackedThread, cache_http: impl CacheHttp) -> MessageBuilder {
     let mut link = MessageBuilder::new();
     let guild_channel = thread.channel_id
-        .to_channel(&context.http).await
+        .to_channel(cache_http).await
         .map_or(None, |c| c.guild());
     match guild_channel {
         Some(gc) => {

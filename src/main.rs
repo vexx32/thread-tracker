@@ -6,7 +6,7 @@ use serenity::{
         gateway::Ready,
         prelude::*,
     },
-    prelude::*,
+    prelude::*, http::Http,
 };
 use shuttle_secrets::SecretStore;
 use sqlx::Executor;
@@ -84,143 +84,180 @@ pub(crate) enum CommandError {
     UnknownCommand(String),
 }
 
-struct Bot
+struct ThreadTrackerBot
 {
     database: Database,
 }
 
-impl Bot {
+struct GuildUser {
+    user_id: UserId,
+    guild_id: GuildId,
+}
+
+impl From<&EventData> for GuildUser {
+    fn from(value: &EventData) -> Self {
+        Self {
+            user_id: value.user_id,
+            guild_id: value.guild_id,
+        }
+    }
+}
+
+struct EventData {
+    user_id: UserId,
+    guild_id: GuildId,
+    channel_id: ChannelId,
+    context: Context,
+}
+
+impl EventData {
+    fn http(&self) -> &Http {
+        &self.context.http
+    }
+
+    fn reply_context(&self) -> ReplyContext {
+        self.into()
+    }
+
+    fn user(&self) -> GuildUser {
+        self.into()
+    }
+}
+
+impl ThreadTrackerBot {
     async fn process_command(
         &self,
-        ctx: &Context,
-        channel_id: ChannelId,
-        guild_id: GuildId,
-        user_id: UserId,
+        event_data: EventData,
         command: &str,
         args: &str,
     ) {
+        let reply_context = event_data.reply_context();
         match command {
             "tt!help" => {
                 let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = error_on_additional_arguments(args) {
-                    send_error_embed(&ctx.http, channel_id, "Too many arguments", e).await;
+                    reply_context.send_error_embed("Too many arguments", e).await;
                 };
 
-                help_message(channel_id, ctx).await;
+                help_message(reply_context).await;
             },
             "tt!add" | "tt!track" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = threads::add(args, guild_id, user_id, channel_id, ctx, &self.database).await {
-                    send_error_embed(&ctx.http, channel_id, "Error adding tracked channel(s): {:}", e).await;
+                if let Err(e) = threads::add(args, &event_data, &self.database).await {
+                    reply_context.send_error_embed("Error adding tracked channel(s): {:}", e).await;
                 }
             },
             "tt!cat" | "tt!category" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = threads::set_category(args, guild_id, user_id, channel_id, ctx, &self.database).await {
-                    send_error_embed(&ctx.http, channel_id, "Error updating channels' categories", e).await;
+                if let Err(e) = threads::set_category(args, &event_data, &self.database).await {
+                    reply_context.send_error_embed("Error updating channels' categories", e).await;
                 }
             },
             "tt!rm" | "tt!remove" | "tt!untrack" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = threads::remove(args, guild_id, user_id, channel_id, ctx, &self.database).await {
-                    send_error_embed(&ctx.http, channel_id, "Error removing tracked channel(s)", e).await;
+                if let Err(e) = threads::remove(args, &event_data, &self.database).await {
+                    reply_context.send_error_embed("Error removing tracked channel(s)", e).await;
                 }
             },
             "tt!replies" | "tt!threads" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = threads::send_list(args, guild_id, user_id, channel_id, ctx, &self.database).await {
-                    send_error_embed(&ctx.http, channel_id, "Error retrieving thread list", e).await;
+                if let Err(e) = threads::send_list(args, &event_data, &self.database).await {
+                    reply_context.send_error_embed("Error retrieving thread list", e).await;
                 }
             },
             "tt!random" | "tt!rng" => {
                 let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = error_on_additional_arguments(args) {
-                    send_error_embed(&ctx.http, channel_id, "Too many arguments", e).await;
+                    reply_context.send_error_embed("Too many arguments", e).await;
                 }
 
-                if let Err(e) = threads::send_random_thread(user_id, guild_id, channel_id, ctx, &self.database).await {
-                    send_error_embed(&ctx.http, channel_id, "Error retrieving a random thread", e).await;
+                if let Err(e) = threads::send_random_thread(&event_data, &self.database).await {
+                    reply_context.send_error_embed("Error retrieving a random thread", e).await;
                 }
             },
             "tt!watch" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = watchers::add(args, guild_id, user_id, channel_id, ctx, &self.database).await {
-                    send_error_embed(&ctx.http, channel_id, "Error adding watcher", e).await;
+                if let Err(e) = watchers::add(args, &event_data, &self.database).await {
+                    reply_context.send_error_embed("Error adding watcher", e).await;
                 }
             },
             "tt!unwatch" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = watchers::remove(args, user_id, channel_id, ctx, &self.database).await {
-                    send_error_embed(&ctx.http, channel_id, "Error removing watcher", e).await;
+                if let Err(e) = watchers::remove(args, &event_data, &self.database).await {
+                    reply_context.send_error_embed("Error removing watcher", e).await;
                 }
             },
             "tt!muses" => {
                 let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = error_on_additional_arguments(args) {
-                    send_error_embed(&ctx.http, channel_id, "Too many arguments", e).await;
+                    reply_context.send_error_embed("Too many arguments", e).await;
                 }
 
-                if let Err(e) = muses::send_list(guild_id, user_id, channel_id, ctx, &self.database).await {
-                    send_error_embed(&ctx.http, channel_id, "Error finding muses", e).await;
+                if let Err(e) = muses::send_list(&event_data, &self.database).await {
+                    reply_context.send_error_embed("Error finding muses", e).await;
                 }
             },
             "tt!addmuse" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = muses::add(args, guild_id, user_id, channel_id, ctx, &self.database).await {
-                    send_error_embed(&ctx.http, channel_id, "Error adding muse", e).await;
+                if let Err(e) = muses::add(args, &event_data, &self.database).await {
+                    reply_context.send_error_embed("Error adding muse", e).await;
                 }
             },
             "tt!removemuse" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = muses::remove(args, guild_id, user_id, channel_id, ctx, &self.database).await {
-                    send_error_embed(&ctx.http, channel_id, "Error removing muse", e).await;
+                if let Err(e) = muses::remove(args, &event_data, &self.database).await {
+                    reply_context.send_error_embed("Error removing muse", e).await;
                 }
             },
             "tt!todo" => {
-                if let Err(e) = todos::add(args, guild_id, user_id, channel_id, ctx, &self.database).await {
-                    send_error_embed(&ctx.http, channel_id, "Error adding to do-list item", e).await;
+                if let Err(e) = todos::add(args, &event_data, &self.database).await {
+                    reply_context.send_error_embed("Error adding to do-list item", e).await;
                 }
             },
             "tt!done" => {
-                if let Err(e) = todos::remove(args, guild_id, user_id, channel_id, ctx, &self.database).await {
-                    send_error_embed(&ctx.http, channel_id, "Error removing to do-list item", e).await;
+                if let Err(e) = todos::remove(args, &event_data, &self.database).await {
+                    reply_context.send_error_embed("Error removing to do-list item", e).await;
                 }
             },
             "tt!todos" | "tt!todolist" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = todos::send_list(args, guild_id, user_id, channel_id, ctx, &self.database).await {
-                    send_error_embed(&ctx.http, channel_id, "Error getting to do-list", e).await;
+                if let Err(e) = todos::send_list(args, &event_data, &self.database).await {
+                    reply_context.send_error_embed("Error getting to do-list", e).await;
                 }
             },
             other => {
                 info!("Unknown command received: {}", other);
-                send_error_embed(&ctx.http, channel_id, "Unknown command", UnknownCommand(String::from(other))).await;
+                reply_context.send_error_embed("Unknown command", UnknownCommand(String::from(other))).await;
             }
         }
     }
 }
 
 #[async_trait]
-impl EventHandler for Bot {
-    async fn message(&self, ctx: Context, msg: Message) {
-        let author_id = msg.author.id;
+impl EventHandler for ThreadTrackerBot {
+    async fn message(&self, context: Context, msg: Message) {
+        let user_id = msg.author.id;
         let channel_id = msg.channel_id;
-        let guild_id = if let Ok(Channel::Guild(guild_channel)) = channel_id.to_channel(&ctx.http).await {
+        let guild_id = if let Ok(Channel::Guild(guild_channel)) = channel_id.to_channel(&context.http).await {
             guild_channel.guild_id
         }
         else {
             error!("Error: Not currently in a server.");
-            send_error_embed(&ctx.http, channel_id, "No direct messages please", "Sorry, Titi is only designed to work in a server currently.").await;
+
+            ReplyContext::new(channel_id, &context.http)
+                .send_error_embed("No direct messages please", "Sorry, Titi is only designed to work in a server currently.").await;
             return;
         };
+
+        let event_data = EventData { user_id, guild_id, channel_id, context };
 
         if !msg.content.starts_with("tt!") {
             return;
         }
 
         if let Some(command) = msg.content.split_ascii_whitespace().next() {
-            info!("[command] processing command `{}` from user `{}`", msg.content, author_id);
-            self.process_command(&ctx, channel_id, guild_id, author_id, command, msg.content[command.len()..].trim_start()).await;
+            info!("[command] processing command `{}` from user `{}`", msg.content, user_id);
+            self.process_command(event_data, command, msg.content[command.len()..].trim_start()).await;
         }
     }
 
@@ -231,8 +268,8 @@ impl EventHandler for Bot {
     }
 }
 
-async fn help_message(channel_id: ChannelId, ctx: &Context) {
-    log_send_errors(send_message_embed(&ctx.http, channel_id, "Thread Tracker help", HELP_MESSAGE).await);
+async fn help_message(reply_context: ReplyContext) {
+    log_send_errors(reply_context.send_message_embed("Thread Tracker help", HELP_MESSAGE).await);
 }
 
 fn error_on_additional_arguments(unrecognised_args: Vec<&str>) -> Result<(), CommandError> {
@@ -267,7 +304,7 @@ async fn serenity(
     // Set gateway intents, which decides what events the bot will be notified about
     let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
 
-    let bot = Bot { database: pool };
+    let bot = ThreadTrackerBot { database: pool };
     let client = Client::builder(&token, intents)
         .event_handler(bot)
         .await

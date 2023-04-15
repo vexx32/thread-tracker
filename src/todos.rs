@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 
 use serenity::{
-    model::prelude::*,
-    prelude::*,
     utils::{
         ContentModifier::*,
         MessageBuilder,
@@ -14,8 +12,7 @@ use crate::{
     error_on_additional_arguments,
 
     db::{self, Database},
-    messaging::{send_success_embed, send_error_embed},
-    utils::partition_into_map,
+    utils::partition_into_map, EventData, GuildUser,
 };
 
 pub(crate) struct Todo {
@@ -32,14 +29,7 @@ impl From<db::TodoRow> for Todo {
     }
 }
 
-pub(crate) async fn add<'a>(
-    args: &str,
-    guild_id: GuildId,
-    user_id: UserId,
-    channel_id: ChannelId,
-    ctx: &Context,
-    database: &Database
-) -> anyhow::Result<()> {
+pub(crate) async fn add<'a>(args: &str, event_data: &EventData, database: &Database) -> anyhow::Result<()> {
     let mut entry = args.trim();
     if entry.is_empty() {
         return Err(MissingArguments(String::from("Please provide a to do entry, such as: `tt!todo write X a starter`")).into());
@@ -56,9 +46,10 @@ pub(crate) async fn add<'a>(
         _ => None,
     };
 
+    let reply_context = event_data.reply_context();
     let mut result = MessageBuilder::new();
     result.push("To do list entry ").push(Italic + entry);
-    match db::add_todo(database, guild_id.0, user_id.0, entry, category).await? {
+    match db::add_todo(database, event_data.guild_id.0, event_data.user_id.0, entry, category).await? {
         true => {
             if let Some(c) = category {
                 result.push(" added to category ")
@@ -68,25 +59,18 @@ pub(crate) async fn add<'a>(
             else {
                 result.push_line(" added successfully.");
             }
-            send_success_embed(&ctx.http, channel_id, "To do list entry added", result).await;
+            reply_context.send_success_embed("To do list entry added", result).await;
         },
         false => {
             result.push(" was not added as it is already present.");
-            send_error_embed(&ctx.http, channel_id, "Error adding to do list entry", result).await;
+            reply_context.send_error_embed("Error adding to do list entry", result).await;
         },
     };
 
     Ok(())
 }
 
-pub(crate) async fn remove(
-    entry: &str,
-    guild_id: GuildId,
-    user_id: UserId,
-    channel_id: ChannelId,
-    ctx: &Context,
-    database: &Database,
-) -> anyhow::Result<()> {
+pub(crate) async fn remove(entry: &str, event_data: &EventData, database: &Database) -> anyhow::Result<()> {
     let mut entry = entry.trim();
     if entry.is_empty() {
         return Err(MissingArguments(String::from(
@@ -110,47 +94,41 @@ pub(crate) async fn remove(
     let result = match category {
         Some("all") => {
             message.push("To do-list entries were ");
-            db::remove_all_todos(database, guild_id.0, user_id.0, None).await?
+            db::remove_all_todos(database, event_data.guild_id.0, event_data.user_id.0, None).await?
         },
         Some(cat) => {
             message.push(format!("To do list entries in category `{}` were ", cat));
-            db::remove_all_todos(database, guild_id.0, user_id.0, Some(cat)).await?
+            db::remove_all_todos(database, event_data.guild_id.0, event_data.user_id.0, Some(cat)).await?
         },
         None => {
             message.push("To do list entry was ").push(Italic + entry);
-            db::remove_todo(database, guild_id.0, user_id.0, entry).await?
+            db::remove_todo(database, event_data.guild_id.0, event_data.user_id.0, entry).await?
         },
     };
 
+    let reply_context = event_data.reply_context();
     match result {
         0 => {
             message.push_line(" not found.");
-            send_error_embed(&ctx.http, channel_id, "Error updating to do-list", message).await;
+            reply_context.send_error_embed("Error updating to do-list", message).await;
         },
         num => {
             message.push_line(format!(" successfully removed. {} entries deleted.", num));
-            send_success_embed(&ctx.http, channel_id, "To do-list updated", message).await;
+            reply_context.send_success_embed("To do-list updated", message).await;
         },
     };
 
     Ok(())
 }
 
-pub(crate) async fn send_list(
-    args: Vec<&str>,
-    guild_id: GuildId,
-    user_id: UserId,
-    channel_id: ChannelId,
-    ctx: &Context,
-    database: &Database
-) -> anyhow::Result<()> {
+pub(crate) async fn send_list(args: Vec<&str>, event_data: &EventData, database: &Database) -> anyhow::Result<()> {
     let mut args = args.into_iter().peekable();
 
     let todos = if args.peek().is_some() {
-        list(database, guild_id, user_id, Some(args.collect())).await?
+        list(database, &event_data.user(), Some(args.collect())).await?
     }
     else {
-        list(database, guild_id, user_id, None).await?
+        list(database, &event_data.user(), None).await?
     };
 
 
@@ -158,7 +136,7 @@ pub(crate) async fn send_list(
 
     if !todos.is_empty() {
         let categories = categorise(todos);
-        message.mention(&user_id).push_line("'s to do list:");
+        message.mention(&event_data.user_id).push_line("'s to do list:");
 
         for (name, todos) in categories {
             if let Some(n) = name {
@@ -177,7 +155,7 @@ pub(crate) async fn send_list(
         message.push_line("There is nothing on your to do list.");
     }
 
-    send_success_embed(&ctx.http, channel_id, "To Do list", message).await;
+    event_data.reply_context().send_success_embed("To Do list", message).await;
 
     Ok(())
 }
@@ -186,24 +164,24 @@ pub(crate) fn categorise(todos: Vec<Todo>) -> BTreeMap<Option<String>, Vec<Todo>
     partition_into_map(todos, |t| t.category.clone())
 }
 
-pub(crate) async fn list(database: &Database, guild_id: GuildId, user_id: UserId, categories: Option<Vec<&str>>) -> anyhow::Result<Vec<Todo>> {
+pub(crate) async fn list(database: &Database, user: &GuildUser, categories: Option<Vec<&str>>) -> anyhow::Result<Vec<Todo>> {
     let mut result = Vec::new();
 
     match categories {
         Some(cats) => {
             for category in cats {
-                result.extend(enumerate(database, guild_id, user_id, Some(category)).await?);
+                result.extend(enumerate(database, user, Some(category)).await?);
             }
         },
-        None => result.extend(enumerate(database, guild_id, user_id, None).await?),
+        None => result.extend(enumerate(database, user, None).await?),
     }
 
     Ok(result)
 }
 
-async fn enumerate(database: &Database, guild_id: GuildId, user_id: UserId, category: Option<&str>) -> anyhow::Result<impl Iterator<Item = Todo>> {
+async fn enumerate(database: &Database, user: &GuildUser, category: Option<&str>) -> anyhow::Result<impl Iterator<Item = Todo>> {
     Ok(
-        db::list_todos(database, guild_id.0, user_id.0, category).await?
+        db::list_todos(database, user.guild_id.0, user.user_id.0, category).await?
             .into_iter()
             .map(|t| t.into())
     )
