@@ -85,7 +85,7 @@ pub(crate) async fn remove(
     user_id: UserId,
     channel_id: ChannelId,
     ctx: &Context,
-    database: &Database
+    database: &Database,
 ) -> anyhow::Result<()> {
     let mut entry = entry.trim();
     if entry.is_empty() {
