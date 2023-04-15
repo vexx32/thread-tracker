@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use lazy_static::lazy_static;
 use rand::Rng;
@@ -336,20 +336,32 @@ pub(crate) async fn get_formatted_list(
     user_id: UserId,
     context: &Context
 ) -> Result<String, SerenityError> {
-    let categories = categorise_threads(threads);
+    let threads = categorise(threads);
     let mut message = MessageBuilder::new();
 
-    for (name, threads) in categories {
-        if let Some(n) = &name {
+    let mut categories = BTreeSet::new();
+    for key in threads.keys() {
+        categories.insert(key);
+    }
+
+    for key in todos.keys() {
+        categories.insert(key);
+    }
+
+    for name in categories {
+        if let Some(n) = name {
             message.push_line(Bold + Underline + n)
                 .push_line("");
         }
 
-        for thread in threads {
-            push_thread_line(&mut message, &thread, context, user_id, &muses).await;
+        if let Some(threads) = threads.get(name) {
+            for thread in threads {
+                push_thread_line(&mut message, thread, context, user_id, &muses).await;
+            }
         }
 
-        if let Some(todos) = todos.get(&name) {
+        if let Some(todos) = todos.get(name) {
+            message.push_line(Bold + Italic + Underline + "To Do");
             for todo in todos {
                 todos::push_todo_line(&mut message, todo);
             }
@@ -365,7 +377,7 @@ pub(crate) async fn get_formatted_list(
     Ok(message.to_string())
 }
 
-fn categorise_threads(threads: Vec<TrackedThread>) -> BTreeMap<Option<String>, Vec<TrackedThread>> {
+fn categorise(threads: Vec<TrackedThread>) -> BTreeMap<Option<String>, Vec<TrackedThread>> {
     partition_into_map(threads, |t| t.category.clone())
 }
 

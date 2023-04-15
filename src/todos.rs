@@ -58,7 +58,14 @@ pub(crate) async fn add<'a>(
     result.push("To do list entry ").push(Italic + entry);
     match db::add_todo(database, guild_id.0, user_id.0, entry, category).await? {
         true => {
-            result.push_line(" added successfully.");
+            if let Some(c) = category {
+                result.push(" added to category ")
+                    .push(Bold + Underline + c)
+                    .push_line(" successfully.");
+            }
+            else {
+                result.push_line(" added successfully.");
+            }
             send_success_embed(&ctx.http, channel_id, "To do list entry added", result).await;
         },
         false => {
