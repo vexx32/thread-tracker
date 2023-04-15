@@ -361,18 +361,25 @@ pub(crate) async fn get_formatted_list(
         }
 
         if let Some(todos) = todos.get(name) {
-            if name.is_none() {
-                message.push_line("")
-                    .push_line(Bold + Italic + Underline + "To Do")
-                    .push_line("");
-            }
-
-            for todo in todos {
-                todos::push_todo_line(&mut message, todo);
+            if name.is_some() {
+                for todo in todos {
+                    todos::push_todo_line(&mut message, todo);
+                }
             }
         }
 
         message.push_line("");
+    }
+
+    // Uncategorised todos at the end of the list
+    if let Some(todos) = todos.get(&None) {
+        message.push_line("")
+            .push_line(Bold + Italic + Underline + "To Do")
+            .push_line("");
+
+        for todo in todos {
+            todos::push_todo_line(&mut message, todo);
+        }
     }
 
     if message.0.is_empty() {
