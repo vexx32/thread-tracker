@@ -361,7 +361,12 @@ pub(crate) async fn get_formatted_list(
         }
 
         if let Some(todos) = todos.get(name) {
-            message.push_quote_line(Bold + Italic + Underline + "To Do");
+            if name.is_none() {
+                message.push_line("")
+                    .push_line(Bold + Italic + Underline + "To Do")
+                    .push_line("");
+            }
+
             for todo in todos {
                 todos::push_todo_line(&mut message, todo);
             }
