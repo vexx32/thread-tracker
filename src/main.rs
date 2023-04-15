@@ -69,7 +69,7 @@ List all to do-list entries.
 Adds a to do-list item. Optionally specify a category as `!categoryname` before the to do-list entry itself, for example: `tt!todo !mycategory do the thing`
 
 `tt!done`
-Crosses off and removes a to do-list item.
+Crosses off and removes a to do-list item. Add `!categoryname` to remove all entries from that category, or `!all` to remove all to do entries.
 "#;
 
 #[derive(Debug, Error)]
