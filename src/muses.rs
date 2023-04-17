@@ -64,13 +64,14 @@ pub(crate) async fn send_list(event_data: &EventData, database: &Database) -> an
     let mut result = MessageBuilder::new();
     let muses = list(database, &event_data.user()).await?;
 
-    result.push("Muses registered for ").mention(&event_data.user_id).push_line(":");
+    if !muses.is_empty() {
+        result.push("Muses registered for ").mention(&event_data.user_id).push_line(":");
 
-    for muse in muses {
-        result.push_line(format!("• {}", muse));
+        for muse in muses {
+            result.push_line(format!("• {}", muse));
+        }
     }
-
-    if result.0.is_empty() {
+    else {
         result.push_line("You have not registered any muses yet.");
     }
 
