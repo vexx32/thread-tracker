@@ -60,7 +60,7 @@ This command is similar to `tt!replies`, but once the list has been generated, t
 Copy the message URL from an existing watcher message (with the title "Watching threads") and use it with this command to remove the watcher and its associated message.
 
 `tt!random` // `tt!rng`
-Finds a random tracked thread that was last replied to by someone other than you.
+Finds a random tracked thread that was last replied to by someone other than you. Optionally, provide a category name to limit the selection to that category.
 
 `tt!todos` // `tt!todolist`
 List all to do-list entries.
@@ -167,11 +167,7 @@ impl ThreadTrackerBot {
             },
             "tt!random" | "tt!rng" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = error_on_additional_arguments(args) {
-                    reply_context.send_error_embed("Too many arguments", e).await;
-                }
-
-                if let Err(e) = threads::send_random_thread(&event_data, &self.database).await {
+                if let Err(e) = threads::send_random_thread(args, &event_data, &self.database).await {
                     reply_context.send_error_embed("Error retrieving a random thread", e).await;
                 }
             },

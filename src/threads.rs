@@ -13,6 +13,7 @@ use tracing::{error, info};
 
 use crate::{
     db::{self, Database},
+    error_on_additional_arguments,
     messaging::*,
     muses,
     todos::{self, Todo},
@@ -248,11 +249,11 @@ pub(crate) async fn send_list_with_title(
     Ok(event_data.reply_context().send_message_embed(title, message).await?)
 }
 
-pub(crate) async fn get_random_thread(event_data: &EventData, database: &Database) -> anyhow::Result<Option<(String, TrackedThread)>> {
+pub(crate) async fn get_random_thread(category: Option<&str>, event_data: &EventData, database: &Database) -> anyhow::Result<Option<(String, TrackedThread)>> {
     let muses = muses::list(database, &event_data.user()).await?;
     let mut pending_threads = Vec::new();
 
-    for thread in db::list_threads(database, event_data.guild_id.0, event_data.user_id.0, None).await?.into_iter().map(|t| t.into()) {
+    for thread in db::list_threads(database, event_data.guild_id.0, event_data.user_id.0, category).await?.into_iter().map(|t| t.into()) {
         let last_message_author = get_last_responder(&thread, event_data.http()).await;
         match last_message_author {
             Some(user) => {
@@ -275,11 +276,16 @@ pub(crate) async fn get_random_thread(event_data: &EventData, database: &Databas
     }
 }
 
-pub(crate) async fn send_random_thread(event_data: &EventData, database: &Database) -> anyhow::Result<()> {
+pub(crate) async fn send_random_thread(mut args: Vec<&str>, event_data: &EventData, database: &Database) -> anyhow::Result<()> {
     let mut message = MessageBuilder::new();
     let reply_context = event_data.reply_context();
 
-    match get_random_thread(event_data, database).await? {
+    let category = args.pop();
+    if let Err(e) = error_on_additional_arguments(args) {
+        reply_context.send_error_embed("Too many arguments", e).await;
+    }
+
+    match get_random_thread(category, event_data, database).await? {
         None => {
             message.push("Congrats! You don't seem to have any threads that are waiting on your reply! :tada:");
             log_send_errors(reply_context.send_message_embed("No waiting threads", message).await);
