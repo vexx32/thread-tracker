@@ -231,7 +231,7 @@ pub(crate) async fn list_todos(
     category: Option<&str>,
 ) -> Result<Vec<TodoRow>> {
     let query = match category {
-        Some(cat) => sqlx::query_as("SELECT id, content, category FROM todos WHERE category = $1 user_id = $2 AND guild_id = $3")
+        Some(cat) => sqlx::query_as("SELECT id, content, category FROM todos WHERE category = $1 AND user_id = $2 AND guild_id = $3")
             .bind(cat),
         None => sqlx::query_as("SELECT id, content, category FROM todos WHERE user_id = $1 AND guild_id = $2"),
     };
