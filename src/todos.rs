@@ -173,7 +173,7 @@ pub(crate) async fn list(database: &Database, user: &GuildUser, categories: Opti
     match categories {
         Some(cats) => {
             for category in cats {
-                result.extend(enumerate(database, user, Some(category)).await?);
+                result.extend(enumerate(database, user, Some(category.trim_start_matches('!'))).await?);
             }
         },
         None => result.extend(enumerate(database, user, None).await?),
