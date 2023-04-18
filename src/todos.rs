@@ -31,9 +31,6 @@ impl From<db::TodoRow> for Todo {
 
 pub(crate) async fn add<'a>(args: &str, event_data: &EventData, database: &Database) -> anyhow::Result<()> {
     let mut entry = args.trim();
-    if entry.is_empty() {
-        return Err(MissingArguments(String::from("Please provide a to do entry, such as: `tt!todo write X a starter`")).into());
-    }
 
     let category = match entry.split_ascii_whitespace().next() {
         Some(s) if s.starts_with('!') => {
@@ -45,6 +42,12 @@ pub(crate) async fn add<'a>(args: &str, event_data: &EventData, database: &Datab
         },
         _ => None,
     };
+
+    if entry.is_empty() {
+        let category_string = category.map(|s| format!(" !{}", s))
+            .unwrap_or(String::new());
+        return Err(MissingArguments(format!("Please provide a to do entry, such as: `tt!todo{} write X a starter`", category_string)).into());
+    }
 
     let reply_context = event_data.reply_context();
     let mut result = MessageBuilder::new();
