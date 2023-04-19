@@ -221,39 +221,34 @@ pub(crate) async fn send_list_with_title(
     database: &Database
 ) -> Result<Message, anyhow::Error> {
     let mut args = args.into_iter().peekable();
+    let user = event_data.user();
 
     let mut threads: Vec<TrackedThread> = Vec::new();
+    let mut todos: Vec<Todo> = Vec::new();
 
     if args.peek().is_some() {
         for category in args {
-            threads.extend(
-                db::list_threads(database, event_data.guild_id.0, event_data.user_id.0, Some(category)).await?
-                    .into_iter()
-                    .map(|t| t.into())
-            );
+            threads.extend(enumerate(database, &user, Some(category)).await?);
+            todos.extend(todos::enumerate(database, &user, Some(category)).await?);
         }
     }
     else {
-        threads.extend(
-            db::list_threads(database, event_data.guild_id.0, event_data.user_id.0, None).await?
-                .into_iter()
-                .map(|t| t.into())
-        );
+        threads.extend(enumerate(database, &user, None).await?);
+        todos.extend(todos::enumerate(database, &user, None).await?);
     }
 
-    let user = event_data.user();
     let muses = muses::list(database, &user).await?;
-    let todos = todos::categorise(todos::list(database, &user, None).await?);
     let message = get_formatted_list(threads, todos, muses, event_data.user_id, &event_data.context).await?;
 
     Ok(event_data.reply_context().send_message_embed(title, message).await?)
 }
 
 pub(crate) async fn get_random_thread(category: Option<&str>, event_data: &EventData, database: &Database) -> anyhow::Result<Option<(String, TrackedThread)>> {
-    let muses = muses::list(database, &event_data.user()).await?;
+    let user = event_data.user();
+    let muses = muses::list(database, &user).await?;
     let mut pending_threads = Vec::new();
 
-    for thread in db::list_threads(database, event_data.guild_id.0, event_data.user_id.0, category).await?.into_iter().map(|t| t.into()) {
+    for thread in enumerate(database, &user, category).await? {
         let last_message_author = get_last_responder(&thread, event_data.http()).await;
         match last_message_author {
             Some(user) => {
@@ -314,12 +309,14 @@ pub(crate) async fn send_random_thread(mut args: Vec<&str>, event_data: &EventDa
 
 pub(crate) async fn get_formatted_list(
     threads: Vec<TrackedThread>,
-    todos: BTreeMap<Option<String>, Vec<Todo>>,
+    todos: Vec<Todo>,
     muses: Vec<String>,
     user_id: UserId,
     context: &Context
 ) -> Result<String, SerenityError> {
     let threads = categorise(threads);
+    let todos = todos::categorise(todos);
+
     let mut message = MessageBuilder::new();
 
     let mut categories = BTreeSet::new();
@@ -448,4 +445,12 @@ async fn push_thread_line<'a>(
         },
         None => message.push(Bold + "No replies yet"),
     }
+}
+
+pub(crate) async fn enumerate(database: &Database, user: &GuildUser, category: Option<&str>) -> anyhow::Result<impl Iterator<Item = TrackedThread>> {
+    Ok(
+        db::list_threads(database, user.guild_id.0, user.user_id.0, category).await?
+            .into_iter()
+            .map(|t| t.into())
+    )
 }

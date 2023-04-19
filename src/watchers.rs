@@ -7,7 +7,7 @@ use crate::{
     threads,
 
     CommandError::*,
-    EventData,
+    EventData, utils::GuildUser,
 };
 
 use WatcherError::*;
@@ -22,6 +22,12 @@ pub(crate) struct ThreadWatcher {
     pub user_id: UserId,
     pub id: i32,
     pub categories: Option<String>,
+}
+
+impl ThreadWatcher {
+    pub fn user(&self) -> GuildUser {
+        self.into()
+    }
 }
 
 impl From<db::ThreadWatcherRow> for ThreadWatcher {

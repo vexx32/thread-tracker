@@ -182,7 +182,7 @@ pub(crate) async fn list(database: &Database, user: &GuildUser, categories: Opti
     Ok(result)
 }
 
-async fn enumerate(database: &Database, user: &GuildUser, category: Option<&str>) -> anyhow::Result<impl Iterator<Item = Todo>> {
+pub(crate) async fn enumerate(database: &Database, user: &GuildUser, category: Option<&str>) -> anyhow::Result<impl Iterator<Item = Todo>> {
     Ok(
         db::list_todos(database, user.guild_id.0, user.user_id.0, category).await?
             .into_iter()

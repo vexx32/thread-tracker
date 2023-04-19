@@ -17,8 +17,7 @@ use crate::{
     db::{self, Database},
     threads::{self, TrackedThread},
     muses,
-    todos,
-    utils::GuildUser,
+    todos::{self, Todo},
     watchers::ThreadWatcher,
 };
 
@@ -124,27 +123,25 @@ pub(crate) async fn update_watchers(context: Arc<Context>, database: Arc<Databas
             },
         };
 
+        let user = watcher.user();
+
         let mut threads: Vec<TrackedThread> = Vec::new();
+        let mut todos: Vec<Todo> = Vec::new();
+
         match watcher.categories.as_deref() {
-            Some("") | None => threads.extend(
-            db::list_threads(&database, watcher.guild_id.0, watcher.user_id.0, None).await?
-                .into_iter()
-                .map(|t| t.into())
-            ),
+            Some("") | None => {
+                threads.extend(threads::enumerate(&database, &user, None).await?);
+                todos.extend(todos::enumerate(&database, &user, None).await?);
+            },
             Some(cats) => {
                 for category in cats.split(' ') {
-                    threads.extend(
-                        db::list_threads(&database, watcher.guild_id.0, watcher.user_id.0, Some(category)).await?
-                            .into_iter()
-                            .map(|t| t.into())
-                    );
+                    threads.extend(threads::enumerate(&database, &user, Some(category)).await?);
+                    todos.extend(todos::enumerate(&database, &user, Some(category)).await?);
                 }
             },
         }
 
-        let user = GuildUser { user_id: watcher.user_id, guild_id: watcher.guild_id };
         let muses = muses::list(&database, &user).await?;
-        let todos = todos::categorise(todos::list(&database, &user, None).await?);
         let threads_content = threads::get_formatted_list(threads, todos, muses, watcher.user_id, &context).await?;
 
         let edit_result = message.edit(

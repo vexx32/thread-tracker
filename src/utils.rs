@@ -7,7 +7,7 @@ use serenity::{
 
 use crate::{
     messaging::ReplyContext,
-    CommandError::{self, *}
+    CommandError::{self, *}, watchers::ThreadWatcher
 };
 
 /// Wrapper struct to simplify passing around user/guild ID pair.
@@ -18,6 +18,15 @@ pub(crate) struct GuildUser {
 
 impl From<&EventData> for GuildUser {
     fn from(value: &EventData) -> Self {
+        Self {
+            user_id: value.user_id,
+            guild_id: value.guild_id,
+        }
+    }
+}
+
+impl From<&ThreadWatcher> for GuildUser {
+    fn from(value: &ThreadWatcher) -> Self {
         Self {
             user_id: value.user_id,
             guild_id: value.guild_id,
