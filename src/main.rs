@@ -1,4 +1,4 @@
-use anyhow::{anyhow};
+use anyhow::anyhow;
 use serenity::{
     async_trait,
     model::{
@@ -6,7 +6,7 @@ use serenity::{
         gateway::Ready,
         prelude::*,
     },
-    prelude::*, http::Http,
+    prelude::*,
 };
 use shuttle_secrets::SecretStore;
 use sqlx::Executor;
@@ -22,9 +22,10 @@ mod todos;
 mod utils;
 mod watchers;
 
-use db::Database;
 use background_tasks::*;
+use db::Database;
 use messaging::*;
+use utils::{EventData, error_on_additional_arguments};
 
 use CommandError::*;
 
@@ -84,53 +85,22 @@ pub(crate) enum CommandError {
     UnknownCommand(String),
 }
 
+/// Primary bot state struct that will be passed to all event handlers.
 struct ThreadTrackerBot
 {
+    /// Postgres database pool
     database: Database,
 }
 
-struct GuildUser {
-    user_id: UserId,
-    guild_id: GuildId,
-}
-
-impl From<&EventData> for GuildUser {
-    fn from(value: &EventData) -> Self {
-        Self {
-            user_id: value.user_id,
-            guild_id: value.guild_id,
-        }
-    }
-}
-
-struct EventData {
-    user_id: UserId,
-    guild_id: GuildId,
-    channel_id: ChannelId,
-    context: Context,
-}
-
-impl EventData {
-    fn http(&self) -> &Http {
-        &self.context.http
-    }
-
-    fn reply_context(&self) -> ReplyContext {
-        self.into()
-    }
-
-    fn user(&self) -> GuildUser {
-        self.into()
-    }
-}
-
 impl ThreadTrackerBot {
-    async fn process_command(
-        &self,
-        event_data: EventData,
-        command: &str,
-        args: &str,
-    ) {
+    /// Handles processing commands received by the bot.
+    ///
+    /// ### Arguments
+    ///
+    /// - `event_data` - information about the context and metadata of the message that triggered the command.
+    /// - `command` - string slice containing the command keyword, which should start with `tt!`
+    /// - `args` - string slice containing the rest of the message that follows the command
+    async fn process_command(&self, event_data: EventData, command: &str, args: &str) {
         let reply_context = event_data.reply_context();
         match command {
             "tt!help" => {
@@ -264,23 +234,20 @@ impl EventHandler for ThreadTrackerBot {
     }
 }
 
+/// Sends the bot's help message to the channel.
+///
+/// ### Arguments
+///
+/// - `reply_context` - the bot context and channel to reply to
 async fn help_message(reply_context: ReplyContext) {
     log_send_errors(reply_context.send_message_embed("Thread Tracker help", HELP_MESSAGE).await);
-}
-
-fn error_on_additional_arguments(unrecognised_args: Vec<&str>) -> Result<(), CommandError> {
-    if !unrecognised_args.is_empty() {
-        return Err(UnrecognisedArguments(unrecognised_args.join(", ")));
-    }
-
-    Ok(())
 }
 
 #[shuttle_runtime::main]
 async fn serenity(
     #[shuttle_shared_db::Postgres(
         //local_uri = "postgres://postgres:{secrets.PASSWORD}@localhost:16695/postgres"
-    )] pool: Database,
+    )] database: Database,
     #[shuttle_secrets::Secrets] secret_store: SecretStore,
 ) -> shuttle_serenity::ShuttleSerenity {
     use anyhow::Context;
@@ -288,19 +255,20 @@ async fn serenity(
     // Get the discord token set in `Secrets.toml`
     let token = if let Some(token) = secret_store.get("DISCORD_TOKEN") {
         token
-    } else {
+    }
+    else {
         return Err(anyhow!("'DISCORD_TOKEN' was not found").into());
     };
 
     // Run the schema migration
-    pool.execute(include_str!("../schema.sql"))
+    database.execute(include_str!("../schema.sql"))
         .await
         .context("failed to run migrations")?;
 
     // Set gateway intents, which decides what events the bot will be notified about
     let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
 
-    let bot = ThreadTrackerBot { database: pool };
+    let bot = ThreadTrackerBot { database };
     let client = Client::builder(&token, intents)
         .event_handler(bot)
         .await

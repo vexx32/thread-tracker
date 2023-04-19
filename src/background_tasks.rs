@@ -15,16 +15,17 @@ use tracing::{error, info};
 
 use crate::{
     db::{self, Database},
-    GuildUser,
     threads::{self, TrackedThread},
     muses,
     todos,
+    utils::GuildUser,
     watchers::ThreadWatcher,
 };
 
 const HEARTBEAT_INTERVAL_SECONDS: u32 = 295;
 const WATCHER_UPDATE_INTERVAL_SECONDS: u32 = 600;
 
+/// Core task spawning function. Creates a set of periodically recurring tasks on their own threads.
 pub(crate) async fn run_periodic_tasks(context: Arc<Context>, database: Arc<Database>) {
     spawn_task_loop(
         context.clone(),
@@ -40,6 +41,14 @@ pub(crate) async fn run_periodic_tasks(context: Arc<Context>, database: Arc<Data
     );
 }
 
+/// Spawns a task which loops indefinitely, with a wait period between each iteration.
+///
+/// ### Arguments
+///
+/// - `context` - the bot's serenity context
+/// - `database` - the bot's database connection
+/// - `period` - the length of time between each task run
+/// - `task` - the Future representing the task to run
 fn spawn_task_loop<F, Ft>(context: Arc<Context>, database: Arc<Database>, period: Duration, mut task: F)
 where
     F: FnMut(Arc<Context>, Arc<Database>) -> Ft + Send + 'static,
@@ -55,6 +64,15 @@ where
     });
 }
 
+/// Spawns a task which loops indefinitely, with a wait period between each iteration. If the task
+/// errors, ensures the error is logged.
+///
+/// ### Arguments
+///
+/// - `context` - the bot's serenity context
+/// - `database` - the bot's database connection
+/// - `period` - the length of time between each task run
+/// - `task` - the Future representing the task to run
 fn spawn_result_task_loop<F, T, U, Ft>(context: Arc<Context>, database: Arc<Database>, period: Duration, mut task: F)
 where
     F: FnMut(Arc<Context>, Arc<Database>) -> Ft + Send + 'static,
@@ -74,12 +92,14 @@ where
     });
 }
 
+/// Performs a set_presence request to ensure the Activity is set correctly.
 pub(crate) async fn heartbeat(ctx: Arc<Context>) {
     ctx.set_presence(Some(Activity::watching("over your threads (tt!help)")), OnlineStatus::Online).await;
     info!("[heartbeat] Keep-alive heartbeat set_presence request completed")
 }
 
-pub(crate) async fn update_watchers(ctx: Arc<Context>, database: Arc<Database>) -> Result<(), anyhow::Error> {
+/// Updates all recorded watchers and edits their referenced messages with the new content.
+pub(crate) async fn update_watchers(context: Arc<Context>, database: Arc<Database>) -> Result<(), anyhow::Error> {
     info!("[threadwatch] Updating watchers");
     let watchers: Vec<ThreadWatcher> = db::list_watchers(&database).await?
         .into_iter()
@@ -88,11 +108,11 @@ pub(crate) async fn update_watchers(ctx: Arc<Context>, database: Arc<Database>) 
 
     for watcher in watchers {
         info!("[threadwatch] Updating watcher {:?}", watcher);
-        let mut message = match ctx.http.get_message(watcher.channel_id.0, watcher.message_id.0).await {
+        let mut message = match context.http.get_message(watcher.channel_id.0, watcher.message_id.0).await {
             Ok(m) => m,
             Err(e) => {
                 let channel_name = watcher.channel_id
-                    .to_channel(&ctx.http).await
+                    .to_channel(&context.http).await
                     .map_or(None, |c| c.guild())
                     .map_or_else(|| "<unavailable channel>".to_owned(), |gc| gc.name);
 
@@ -125,10 +145,10 @@ pub(crate) async fn update_watchers(ctx: Arc<Context>, database: Arc<Database>) 
         let user = GuildUser { user_id: watcher.user_id, guild_id: watcher.guild_id };
         let muses = muses::list(&database, &user).await?;
         let todos = todos::categorise(todos::list(&database, &user, None).await?);
-        let threads_content = threads::get_formatted_list(threads, todos, muses, watcher.user_id, &ctx).await?;
+        let threads_content = threads::get_formatted_list(threads, todos, muses, watcher.user_id, &context).await?;
 
         let edit_result = message.edit(
-            &ctx.http,
+            &context.http,
             |msg| msg.embed(|embed|
                 embed.colour(Colour::PURPLE)
                     .title("Watching threads")
@@ -137,6 +157,8 @@ pub(crate) async fn update_watchers(ctx: Arc<Context>, database: Arc<Database>) 
             )
         ).await;
         if let Err(e) = edit_result {
+            // If we return here, an error updating one watcher message would prevent the rest from being updated.
+            // Simply log these instead.
             error!("Could not edit message: {}", e);
         }
     }

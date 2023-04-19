@@ -9,7 +9,7 @@ use crate::{
     CommandError::*,
 
     db::{self, Database},
-    EventData, GuildUser,
+    utils::{EventData, GuildUser},
 };
 
 pub(crate) async fn add<'a>(args: Vec<&str>, event_data: &EventData, database: &Database) -> anyhow::Result<()> {
