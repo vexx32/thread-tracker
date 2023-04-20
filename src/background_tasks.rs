@@ -142,7 +142,7 @@ pub(crate) async fn update_watchers(context: Arc<Context>, database: Arc<Databas
         }
 
         let muses = muses::list(&database, &user).await?;
-        let threads_content = threads::get_formatted_list(threads, todos, muses, watcher.user_id, &context).await?;
+        let threads_content = threads::get_formatted_list(threads, todos, muses, &watcher.user(), &context).await?;
 
         let edit_result = message.edit(
             &context.http,

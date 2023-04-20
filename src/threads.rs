@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use lazy_static::lazy_static;
 use rand::Rng;
@@ -40,6 +40,14 @@ impl From<db::TrackedThreadRow> for TrackedThread {
             guild_id: GuildId(thread.guild_id as u64),
         }
     }
+}
+
+pub(crate) async fn enumerate(database: &Database, user: &GuildUser, category: Option<&str>) -> anyhow::Result<impl Iterator<Item = TrackedThread>> {
+    Ok(
+        db::list_threads(database, user.guild_id.0, user.user_id.0, category).await?
+            .into_iter()
+            .map(|t| t.into())
+    )
 }
 
 pub(crate) async fn add(
@@ -238,7 +246,7 @@ pub(crate) async fn send_list_with_title(
     }
 
     let muses = muses::list(database, &user).await?;
-    let message = get_formatted_list(threads, todos, muses, event_data.user_id, &event_data.context).await?;
+    let message = get_formatted_list(threads, todos, muses, &user, &event_data.context).await?;
 
     Ok(event_data.reply_context().send_message_embed(title, message).await?)
 }
@@ -298,7 +306,7 @@ pub(crate) async fn send_random_thread(mut args: Vec<&str>, event_data: &EventDa
             }
 
             message.push_line("");
-            message.push_quote(get_thread_link(&thread, event_data.http()).await).push(" — ").push_line(Bold + last_author);
+            message.push_quote(get_thread_link(&thread, None, event_data.http()).await).push(" — ").push_line(Bold + last_author);
 
             log_send_errors(reply_context.send_message_embed("Random thread", message).await);
         },
@@ -311,11 +319,16 @@ pub(crate) async fn get_formatted_list(
     threads: Vec<TrackedThread>,
     todos: Vec<Todo>,
     muses: Vec<String>,
-    user_id: UserId,
+    user: &GuildUser,
     context: &Context
 ) -> Result<String, SerenityError> {
     let threads = categorise(threads);
     let todos = todos::categorise(todos);
+
+    let guild_threads: HashMap<ChannelId, String> = user.guild_id.get_active_threads(context.http()).await?
+        .threads.into_iter()
+        .map(|t| (t.id, t.name))
+        .collect();
 
     let mut message = MessageBuilder::new();
 
@@ -336,7 +349,7 @@ pub(crate) async fn get_formatted_list(
 
         if let Some(threads) = threads.get(name) {
             for thread in threads {
-                push_thread_line(&mut message, thread, context, user_id, &muses).await;
+                push_thread_line(&mut message, thread, &guild_threads, context, user.user_id, &muses).await;
             }
         }
 
@@ -403,34 +416,24 @@ async fn get_nick_or_name(user: &User, guild_id: GuildId, cache_http: impl Cache
     }
 }
 
-async fn get_thread_link(thread: &TrackedThread, cache_http: impl CacheHttp) -> MessageBuilder {
-    let mut link = MessageBuilder::new();
-    let guild_channel = thread.channel_id
-        .to_channel(cache_http).await
-        .map_or(None, |c| c.guild());
-    match guild_channel {
-        Some(gc) => {
-            let name = trim_link_name(&gc.name);
-            link.push_named_link(Bold + format!("#{}", name), format!("https://discord.com/channels/{}/{}", gc.guild_id, gc.id))
-        },
-        None => link.push(thread.channel_id.mention()),
-    };
-
-    link
-}
-
 async fn push_thread_line<'a>(
     message: &'a mut MessageBuilder,
     thread: &TrackedThread,
+    guild_threads: &HashMap<ChannelId, String>,
     context: &Context,
     user_id: UserId,
     muses: &[String],
 ) -> &'a mut MessageBuilder {
     let last_message_author = get_last_responder(thread, context).await;
 
+    let link = get_thread_link(
+        thread,
+        guild_threads.get(&thread.channel_id).cloned(),
+        context,
+    ).await;
     // Thread entries in blockquotes
     message.push_quote("• ")
-        .push(get_thread_link(thread, context).await)
+        .push(link)
         .push(" — ");
 
     match last_message_author {
@@ -447,10 +450,34 @@ async fn push_thread_line<'a>(
     }
 }
 
-pub(crate) async fn enumerate(database: &Database, user: &GuildUser, category: Option<&str>) -> anyhow::Result<impl Iterator<Item = TrackedThread>> {
-    Ok(
-        db::list_threads(database, user.guild_id.0, user.user_id.0, category).await?
-            .into_iter()
-            .map(|t| t.into())
-    )
+async fn get_thread_link(thread: &TrackedThread, name: Option<String>, cache_http: impl CacheHttp) -> MessageBuilder {
+    let mut link = MessageBuilder::new();
+    let channel_name = name.or(get_thread_name(thread, cache_http).await);
+
+    match channel_name {
+        Some(n) => {
+            let name = trim_link_name(&n);
+            link.push_named_link(Bold + format!("#{}", name), format!("https://discord.com/channels/{}/{}", thread.guild_id, thread.channel_id))
+        },
+        None => link.push(thread.channel_id.mention()),
+    };
+
+    link
+}
+
+async fn get_thread_name(thread: &TrackedThread, cache_http: impl CacheHttp) -> Option<String> {
+    let name = if let Some(cache) = cache_http.cache() {
+        thread.channel_id.name(cache).await
+    }
+    else { None };
+
+    if let Some(n) = name {
+        Some(n)
+    }
+    else {
+        thread.channel_id
+            .to_channel(cache_http).await
+            .map_or(None, |c| c.guild())
+            .map(|gc| gc.name)
+    }
 }
