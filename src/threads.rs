@@ -367,7 +367,7 @@ pub(crate) async fn get_formatted_list(
     // Uncategorised todos at the end of the list
     if let Some(todos) = todos.get(&None) {
         if !todos.is_empty() {
-            message.push_line(Bold + Italic + Underline + "To Do")
+            message.push_line(Bold + Underline + "To Do")
                 .push_line("");
 
             for todo in todos {
