@@ -9,15 +9,16 @@ use crate::{
     CommandError::*,
 
     db::{self, Database},
-    utils::{EventData, GuildUser},
+    utils::{EventData, GuildUser}, ThreadTrackerBot,
 };
 
-pub(crate) async fn add<'a>(args: Vec<&str>, event_data: &EventData, database: &Database) -> anyhow::Result<()> {
+pub(crate) async fn add<'a>(args: Vec<&str>, event_data: &EventData, bot: &ThreadTrackerBot) -> anyhow::Result<()> {
     if args.is_empty() {
         return Err(MissingArguments(String::from("Please provide a muse name, such as: `tt!addmuse Annie Grey`")).into());
     }
 
     let reply_context = event_data.reply_context();
+    let (database, message_cache) = (&bot.database, &bot.message_cache);
     let muse_name = args.join(" ");
 
     let mut result = MessageBuilder::new();
@@ -25,42 +26,45 @@ pub(crate) async fn add<'a>(args: Vec<&str>, event_data: &EventData, database: &
     match db::add_muse(database, event_data.guild_id.0, event_data.user_id.0, &muse_name).await? {
         true => {
             result.push_line(" added successfully.");
-            reply_context.send_success_embed("Muse added", result).await;
+            reply_context.send_success_embed("Muse added", result, message_cache).await;
         },
         false => {
             result.push(" is already known for ").mention(&event_data.user_id).push_line(".");
-            reply_context.send_error_embed("Error adding muse", result).await;
+            reply_context.send_error_embed("Error adding muse", result, message_cache).await;
         },
     };
 
     Ok(())
 }
 
-pub(crate) async fn remove(args: Vec<&str>, event_data: &EventData, database: &Database) -> anyhow::Result<()> {
+pub(crate) async fn remove(args: Vec<&str>, event_data: &EventData, bot: &ThreadTrackerBot) -> anyhow::Result<()> {
     if args.is_empty() {
         return Err(MissingArguments(String::from("Please provide a muse name, such as: `tt!removemuse Annie Grey`")).into());
     }
 
     let muse_name = args.join(" ");
     let reply_context = event_data.reply_context();
+    let (database, message_cache) = (&bot.database, &bot.message_cache);
 
     let mut result = MessageBuilder::new();
     result.push("Muse ").push(Italic + &muse_name);
     match db::remove_muse(database, event_data.guild_id.0, event_data.user_id.0, &muse_name).await? {
         0 => {
             result.push_line(" was not found.");
-            reply_context.send_error_embed("Error removing muse", result).await;
+            reply_context.send_error_embed("Error removing muse", result, message_cache).await;
         },
         _ => {
             result.push_line(" was successfully removed.");
-            reply_context.send_success_embed("Muse removed", result).await;
+            reply_context.send_success_embed("Muse removed", result, message_cache).await;
         },
     };
 
     Ok(())
 }
 
-pub(crate) async fn send_list(event_data: &EventData, database: &Database) -> anyhow::Result<()> {
+pub(crate) async fn send_list(event_data: &EventData, bot: &ThreadTrackerBot) -> anyhow::Result<()> {
+    let (database, message_cache) = (&bot.database, &bot.message_cache);
+
     let mut result = MessageBuilder::new();
     let muses = list(database, &event_data.user()).await?;
 
@@ -75,7 +79,7 @@ pub(crate) async fn send_list(event_data: &EventData, database: &Database) -> an
         result.push_line("You have not registered any muses yet.");
     }
 
-    event_data.reply_context().send_success_embed("Registered muses", result).await;
+    event_data.reply_context().send_success_embed("Registered muses", result, message_cache).await;
 
     Ok(())
 }

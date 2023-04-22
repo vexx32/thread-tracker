@@ -3,11 +3,12 @@ use thiserror::Error;
 use tracing::{error, info};
 
 use crate::{
-    db::{self, Database},
+    db,
     threads,
 
     CommandError::*,
-    EventData, utils::GuildUser,
+    EventData, utils::{GuildUser, ChannelMessage},
+    ThreadTrackerBot,
 };
 
 use WatcherError::*;
@@ -27,6 +28,10 @@ pub(crate) struct ThreadWatcher {
 impl ThreadWatcher {
     pub fn user(&self) -> GuildUser {
         self.into()
+    }
+
+    pub fn message(&self) -> ChannelMessage {
+        (self.channel_id, self.message_id).into()
     }
 }
 
@@ -54,7 +59,7 @@ enum WatcherError {
 pub(crate) async fn add(
     args: Vec<&str>,
     event_data: &EventData,
-    database: &Database,
+    bot: &ThreadTrackerBot,
 ) -> anyhow::Result<()> {
     info!("[threadwatch] Adding watcher for user {}, categories {:?}", event_data.user_id, args);
     let arguments = if !args.is_empty() {
@@ -64,8 +69,8 @@ pub(crate) async fn add(
         None
     };
 
-    let message = threads::send_list_with_title(args, "Watching threads", event_data, database).await?;
-    db::add_watcher(database, event_data.user_id.0, message.id.0, event_data.channel_id.0, event_data.guild_id.0, arguments.as_deref()).await?;
+    let message = threads::send_list_with_title(args, "Watching threads", event_data, bot).await?;
+    db::add_watcher(&bot.database, event_data.user_id.0, message.id.0, event_data.channel_id.0, event_data.guild_id.0, arguments.as_deref()).await?;
 
     Ok(())
 }
@@ -73,7 +78,7 @@ pub(crate) async fn add(
 pub(crate) async fn remove(
     args: Vec<&str>,
     event_data: &EventData,
-    database: &Database,
+    bot: &ThreadTrackerBot,
 ) -> anyhow::Result<()> {
     let mut args = args.into_iter().peekable();
     if args.peek().is_none() {
@@ -84,6 +89,7 @@ pub(crate) async fn remove(
 
     let message_url = args.next().unwrap();
     let (watcher_message_id, watcher_channel_id) = parse_message_link(message_url)?;
+    let (database, message_cache) = (&bot.database, &bot.message_cache);
 
     let watcher: ThreadWatcher = match db::get_watcher(database, watcher_channel_id, watcher_message_id).await? {
         Some(w) => w.into(),
@@ -97,8 +103,11 @@ pub(crate) async fn remove(
     match db::remove_watcher(database, watcher.id).await? {
         0 => error!("Watcher should have been present in the database, but was missing when removal was attempted: {:?}", watcher),
         _ => {
-            event_data.reply_context().send_success_embed("Watcher removed", "Watcher successfully removed.").await;
-            event_data.http().get_message(watcher.channel_id.0, watcher.message_id.0).await?.delete(event_data.http()).await?;
+            event_data.reply_context().send_success_embed("Watcher removed", "Watcher successfully removed.", message_cache).await;
+            let message = message_cache.get_or_else(
+                &watcher.message(),
+                || event_data.http().get_message(watcher.channel_id.0, watcher.message_id.0)).await?;
+            message.delete(event_data.http()).await?;
         }
     }
 

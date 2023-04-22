@@ -56,6 +56,24 @@ impl EventData {
     }
 }
 
+#[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
+pub(crate) struct ChannelMessage {
+    pub channel_id: ChannelId,
+    pub message_id: MessageId
+}
+
+impl From<(MessageId, ChannelId)> for ChannelMessage {
+    fn from((message_id, channel_id): (MessageId, ChannelId)) -> Self {
+        Self { message_id, channel_id }
+    }
+}
+
+impl From<(ChannelId, MessageId)> for ChannelMessage {
+    fn from((channel_id, message_id): (ChannelId, MessageId)) -> Self {
+        Self { channel_id, message_id }
+    }
+}
+
 /// Returns a `BTreeMap` which maps a derived key from `key_function` to a `Vec<TValue>` which contains the values that produced that key.
 ///
 /// ### Arguments

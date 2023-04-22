@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, future::Future};
 
 use serenity::{
     http::Http,
@@ -7,6 +7,8 @@ use serenity::{
     utils::Colour,
 };
 use tracing::{error, info};
+
+use crate::cache::MessageCache;
 
 pub(crate) struct ReplyContext
 {
@@ -29,12 +31,12 @@ impl ReplyContext {
         }).await
     }
 
-    pub(crate) async fn send_success_embed(&self, title: impl ToString, body: impl ToString) {
-        log_send_errors(self.send_embed(title, body, Some(Colour::FABLED_PINK)).await);
+    pub(crate) async fn send_success_embed(&self, title: impl ToString, body: impl ToString, message_cache: &MessageCache) {
+        log_send_errors(self.send_embed(title, body, Some(Colour::FABLED_PINK)), message_cache).await;
     }
 
-    pub(crate) async fn send_error_embed(&self, title: impl ToString, body: impl ToString) {
-        log_send_errors(self.send_embed(title, body, Some(Colour::DARK_ORANGE)).await);
+    pub(crate) async fn send_error_embed(&self, title: impl ToString, body: impl ToString, message_cache: &MessageCache) {
+        log_send_errors(self.send_embed(title, body, Some(Colour::DARK_ORANGE)), message_cache).await;
     }
 
     pub(crate) async fn send_message_embed(&self, title: impl ToString, body: impl ToString) -> Result<Message, SerenityError> {
@@ -51,8 +53,11 @@ impl From<&crate::EventData> for ReplyContext {
     }
 }
 
-pub(crate) fn log_send_errors(result: Result<Message, SerenityError>) {
-    if let Err(err) = result {
-        error!("Error sending message: {:?}", err);
-    }
+pub(crate) async fn log_send_errors(task: impl Future<Output = Result<Message, SerenityError>>, message_cache: &MessageCache) {
+    match task.await {
+        Ok(msg) => {
+            message_cache.store((msg.id, msg.channel_id).into(), msg).await;
+        },
+        Err(err) => error!("Error sending message: {:?}", err),
+    };
 }

@@ -1,9 +1,9 @@
 use anyhow::anyhow;
+use cache::MessageCache;
 use serenity::{
     async_trait,
     model::{
         channel::Message,
-        gateway::Ready,
         prelude::*,
     },
     prelude::*,
@@ -13,6 +13,7 @@ use sqlx::Executor;
 use thiserror::Error;
 use tracing::{error, info};
 
+mod cache;
 mod db;
 mod background_tasks;
 mod threads;
@@ -90,9 +91,18 @@ struct ThreadTrackerBot
 {
     /// Postgres database pool
     database: Database,
+    message_cache: MessageCache,
 }
 
 impl ThreadTrackerBot {
+    /// Create a new bot instance.
+    fn new(database: Database) -> Self {
+        Self {
+            database,
+            message_cache: MessageCache::new(),
+        }
+    }
+
     /// Handles processing commands received by the bot.
     ///
     /// ### Arguments
@@ -106,94 +116,94 @@ impl ThreadTrackerBot {
             "tt!help" => {
                 let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = error_on_additional_arguments(args) {
-                    reply_context.send_error_embed("Too many arguments", e).await;
+                    reply_context.send_error_embed("Too many arguments", e, &self.message_cache).await;
                 };
 
-                help_message(reply_context).await;
+                help_message(reply_context, &self.message_cache).await;
             },
             "tt!add" | "tt!track" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = threads::add(args, &event_data, &self.database).await {
-                    reply_context.send_error_embed("Error adding tracked channel(s): {:}", e).await;
+                if let Err(e) = threads::add(args, &event_data, self).await {
+                    reply_context.send_error_embed("Error adding tracked channel(s): {:}", e, &self.message_cache).await;
                 }
             },
             "tt!cat" | "tt!category" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = threads::set_category(args, &event_data, &self.database).await {
-                    reply_context.send_error_embed("Error updating channels' categories", e).await;
+                if let Err(e) = threads::set_category(args, &event_data, self).await {
+                    reply_context.send_error_embed("Error updating channels' categories", e, &self.message_cache).await;
                 }
             },
             "tt!rm" | "tt!remove" | "tt!untrack" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = threads::remove(args, &event_data, &self.database).await {
-                    reply_context.send_error_embed("Error removing tracked channel(s)", e).await;
+                if let Err(e) = threads::remove(args, &event_data, self).await {
+                    reply_context.send_error_embed("Error removing tracked channel(s)", e, &self.message_cache).await;
                 }
             },
             "tt!replies" | "tt!threads" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = threads::send_list(args, &event_data, &self.database).await {
-                    reply_context.send_error_embed("Error retrieving thread list", e).await;
+                if let Err(e) = threads::send_list(args, &event_data, self).await {
+                    reply_context.send_error_embed("Error retrieving thread list", e, &self.message_cache).await;
                 }
             },
             "tt!random" | "tt!rng" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = threads::send_random_thread(args, &event_data, &self.database).await {
-                    reply_context.send_error_embed("Error retrieving a random thread", e).await;
+                if let Err(e) = threads::send_random_thread(args, &event_data, self).await {
+                    reply_context.send_error_embed("Error retrieving a random thread", e, &self.message_cache).await;
                 }
             },
             "tt!watch" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = watchers::add(args, &event_data, &self.database).await {
-                    reply_context.send_error_embed("Error adding watcher", e).await;
+                if let Err(e) = watchers::add(args, &event_data, self).await {
+                    reply_context.send_error_embed("Error adding watcher", e, &self.message_cache).await;
                 }
             },
             "tt!unwatch" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = watchers::remove(args, &event_data, &self.database).await {
-                    reply_context.send_error_embed("Error removing watcher", e).await;
+                if let Err(e) = watchers::remove(args, &event_data, self).await {
+                    reply_context.send_error_embed("Error removing watcher", e, &self.message_cache).await;
                 }
             },
             "tt!muses" => {
                 let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = error_on_additional_arguments(args) {
-                    reply_context.send_error_embed("Too many arguments", e).await;
+                    reply_context.send_error_embed("Too many arguments", e, &self.message_cache).await;
                 }
 
-                if let Err(e) = muses::send_list(&event_data, &self.database).await {
-                    reply_context.send_error_embed("Error finding muses", e).await;
+                if let Err(e) = muses::send_list(&event_data, self).await {
+                    reply_context.send_error_embed("Error finding muses", e, &self.message_cache).await;
                 }
             },
             "tt!addmuse" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = muses::add(args, &event_data, &self.database).await {
-                    reply_context.send_error_embed("Error adding muse", e).await;
+                if let Err(e) = muses::add(args, &event_data, self).await {
+                    reply_context.send_error_embed("Error adding muse", e, &self.message_cache).await;
                 }
             },
             "tt!removemuse" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = muses::remove(args, &event_data, &self.database).await {
-                    reply_context.send_error_embed("Error removing muse", e).await;
+                if let Err(e) = muses::remove(args, &event_data, self).await {
+                    reply_context.send_error_embed("Error removing muse", e, &self.message_cache).await;
                 }
             },
             "tt!todo" => {
-                if let Err(e) = todos::add(args, &event_data, &self.database).await {
-                    reply_context.send_error_embed("Error adding to do-list item", e).await;
+                if let Err(e) = todos::add(args, &event_data, self).await {
+                    reply_context.send_error_embed("Error adding to do-list item", e, &self.message_cache).await;
                 }
             },
             "tt!done" => {
-                if let Err(e) = todos::remove(args, &event_data, &self.database).await {
-                    reply_context.send_error_embed("Error removing to do-list item", e).await;
+                if let Err(e) = todos::remove(args, &event_data, self).await {
+                    reply_context.send_error_embed("Error removing to do-list item", e, &self.message_cache).await;
                 }
             },
             "tt!todos" | "tt!todolist" => {
                 let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = todos::send_list(args, &event_data, &self.database).await {
-                    reply_context.send_error_embed("Error getting to do-list", e).await;
+                if let Err(e) = todos::send_list(args, &event_data, self).await {
+                    reply_context.send_error_embed("Error getting to do-list", e, &self.message_cache).await;
                 }
             },
             other => {
                 info!("Unknown command received: {}", other);
-                reply_context.send_error_embed("Unknown command", UnknownCommand(String::from(other))).await;
+                reply_context.send_error_embed("Unknown command", UnknownCommand(String::from(other)), &self.message_cache).await;
             }
         }
     }
@@ -201,6 +211,10 @@ impl ThreadTrackerBot {
 
 #[async_trait]
 impl EventHandler for ThreadTrackerBot {
+    async fn reaction_add(&self, context: Context, reaction: Reaction)  {
+
+    }
+
     async fn message(&self, context: Context, msg: Message) {
         let user_id = msg.author.id;
         let channel_id = msg.channel_id;
@@ -211,7 +225,7 @@ impl EventHandler for ThreadTrackerBot {
             error!("Error: Not currently in a server.");
 
             ReplyContext::new(channel_id, &context.http)
-                .send_error_embed("No direct messages please", "Sorry, Titi is only designed to work in a server currently.").await;
+                .send_error_embed("No direct messages please", "Sorry, Titi is only designed to work in a server currently.", &self.message_cache).await;
             return;
         };
 
@@ -230,7 +244,7 @@ impl EventHandler for ThreadTrackerBot {
     async fn ready(&self, ctx: Context, ready: Ready) {
         info!("{} is connected!", ready.user.name);
 
-        run_periodic_tasks(ctx.into(), self.database.clone().into()).await;
+        run_periodic_tasks(ctx.into(), self).await;
     }
 }
 
@@ -239,8 +253,8 @@ impl EventHandler for ThreadTrackerBot {
 /// ### Arguments
 ///
 /// - `reply_context` - the bot context and channel to reply to
-async fn help_message(reply_context: ReplyContext) {
-    log_send_errors(reply_context.send_message_embed("Thread Tracker help", HELP_MESSAGE).await);
+async fn help_message(reply_context: ReplyContext, message_cache: &MessageCache) {
+    log_send_errors(reply_context.send_message_embed("Thread Tracker help", HELP_MESSAGE), message_cache).await;
 }
 
 #[shuttle_runtime::main]
@@ -268,7 +282,7 @@ async fn serenity(
     // Set gateway intents, which decides what events the bot will be notified about
     let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
 
-    let bot = ThreadTrackerBot { database };
+    let bot = ThreadTrackerBot::new(database);
     let client = Client::builder(&token, intents)
         .event_handler(bot)
         .await

@@ -12,7 +12,7 @@ use crate::{
     error_on_additional_arguments,
 
     db::{self, Database},
-    utils::*,
+    utils::*, ThreadTrackerBot,
 };
 
 pub(crate) struct Todo {
@@ -29,7 +29,7 @@ impl From<db::TodoRow> for Todo {
     }
 }
 
-pub(crate) async fn add<'a>(args: &str, event_data: &EventData, database: &Database) -> anyhow::Result<()> {
+pub(crate) async fn add<'a>(args: &str, event_data: &EventData, bot: &ThreadTrackerBot) -> anyhow::Result<()> {
     let mut entry = args.trim();
 
     let category = match entry.split_ascii_whitespace().next() {
@@ -49,7 +49,9 @@ pub(crate) async fn add<'a>(args: &str, event_data: &EventData, database: &Datab
         return Err(MissingArguments(format!("Please provide a to do entry, such as: `tt!todo{} write X a starter`", category_string)).into());
     }
 
+    let (database, message_cache) = (&bot.database, &bot.message_cache);
     let reply_context = event_data.reply_context();
+
     let mut result = MessageBuilder::new();
     result.push("To do list entry ").push(Italic + entry);
     match db::add_todo(database, event_data.guild_id.0, event_data.user_id.0, entry, category).await? {
@@ -62,18 +64,18 @@ pub(crate) async fn add<'a>(args: &str, event_data: &EventData, database: &Datab
             else {
                 result.push_line(" added successfully.");
             }
-            reply_context.send_success_embed("To do list entry added", result).await;
+            reply_context.send_success_embed("To do list entry added", result, message_cache).await;
         },
         false => {
             result.push(" was not added as it is already present.");
-            reply_context.send_error_embed("Error adding to do list entry", result).await;
+            reply_context.send_error_embed("Error adding to do list entry", result, message_cache).await;
         },
     };
 
     Ok(())
 }
 
-pub(crate) async fn remove(entry: &str, event_data: &EventData, database: &Database) -> anyhow::Result<()> {
+pub(crate) async fn remove(entry: &str, event_data: &EventData, bot: &ThreadTrackerBot) -> anyhow::Result<()> {
     let mut entry = entry.trim();
     if entry.is_empty() {
         return Err(MissingArguments(String::from(
@@ -92,6 +94,7 @@ pub(crate) async fn remove(entry: &str, event_data: &EventData, database: &Datab
         _ => None,
     };
 
+    let (database, message_cache) = (&bot.database, &bot.message_cache);
     let mut message = MessageBuilder::new();
 
     let result = match category {
@@ -113,19 +116,20 @@ pub(crate) async fn remove(entry: &str, event_data: &EventData, database: &Datab
     match result {
         0 => {
             message.push_line(" not found.");
-            reply_context.send_error_embed("Error updating to do-list", message).await;
+            reply_context.send_error_embed("Error updating to do-list", message, message_cache).await;
         },
         num => {
             message.push_line(format!(" successfully removed. {} entries deleted.", num));
-            reply_context.send_success_embed("To do-list updated", message).await;
+            reply_context.send_success_embed("To do-list updated", message, message_cache).await;
         },
     };
 
     Ok(())
 }
 
-pub(crate) async fn send_list(args: Vec<&str>, event_data: &EventData, database: &Database) -> anyhow::Result<()> {
+pub(crate) async fn send_list(args: Vec<&str>, event_data: &EventData, bot: &ThreadTrackerBot) -> anyhow::Result<()> {
     let mut args = args.into_iter().peekable();
+    let (database, message_cache) = (&bot.database, &bot.message_cache);
 
     let todos = if args.peek().is_some() {
         list(database, &event_data.user(), Some(args.collect())).await?
@@ -158,7 +162,7 @@ pub(crate) async fn send_list(args: Vec<&str>, event_data: &EventData, database:
         message.push_line("There is nothing on your to do list.");
     }
 
-    event_data.reply_context().send_success_embed("To Do list", message).await;
+    event_data.reply_context().send_success_embed("To Do list", message, message_cache).await;
 
     Ok(())
 }

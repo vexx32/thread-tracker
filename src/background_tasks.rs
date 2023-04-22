@@ -18,25 +18,33 @@ use crate::{
     threads::{self, TrackedThread},
     muses,
     todos::{self, Todo},
-    watchers::ThreadWatcher,
+    watchers::ThreadWatcher, ThreadTrackerBot, cache::MessageCache,
 };
 
-const HEARTBEAT_INTERVAL_SECONDS: u32 = 295;
-const WATCHER_UPDATE_INTERVAL_SECONDS: u32 = 600;
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(295);
+const WATCHER_UPDATE_INTERVAL: Duration = Duration::from_secs(600);
+const CACHE_TRIM_INTERVAL: Duration = Duration::from_secs(2995);
 
 /// Core task spawning function. Creates a set of periodically recurring tasks on their own threads.
-pub(crate) async fn run_periodic_tasks(context: Arc<Context>, database: Arc<Database>) {
+pub(crate) async fn run_periodic_tasks(context: Arc<Context>, bot: &ThreadTrackerBot) {
+    let c = Arc::clone(&context);
     spawn_task_loop(
-        context.clone(),
-        database.clone(),
-        Duration::from_secs(HEARTBEAT_INTERVAL_SECONDS.into()),
-        |c, _| heartbeat(c));
+        HEARTBEAT_INTERVAL,
+        move || heartbeat(Arc::clone(&c))
+    );
 
+    let c = Arc::clone(&context);
+    let d = Arc::new(bot.database.clone());
+    let m = Arc::new(bot.message_cache.clone());
     spawn_result_task_loop(
-        context,
-        database,
-        Duration::from_secs(WATCHER_UPDATE_INTERVAL_SECONDS.into()),
-        update_watchers
+        WATCHER_UPDATE_INTERVAL,
+        move || update_watchers(Arc::clone(&c), Arc::clone(&d), Arc::clone(&m))
+    );
+
+    let c = Arc::new(bot.message_cache.clone());
+    spawn_task_loop(
+        CACHE_TRIM_INTERVAL,
+        move || purge_expired_cache_entries(Arc::clone(&c))
     );
 }
 
@@ -44,13 +52,11 @@ pub(crate) async fn run_periodic_tasks(context: Arc<Context>, database: Arc<Data
 ///
 /// ### Arguments
 ///
-/// - `context` - the bot's serenity context
-/// - `database` - the bot's database connection
 /// - `period` - the length of time between each task run
 /// - `task` - the Future representing the task to run
-fn spawn_task_loop<F, Ft>(context: Arc<Context>, database: Arc<Database>, period: Duration, mut task: F)
+fn spawn_task_loop<F, Ft>(period: Duration, mut task: F)
 where
-    F: FnMut(Arc<Context>, Arc<Database>) -> Ft + Send + 'static,
+    F: FnMut() -> Ft + Send + 'static,
     Ft: Future<Output = ()> + Send + 'static,
 {
     tokio::spawn(async move {
@@ -58,7 +64,7 @@ where
 
         loop {
             interval.tick().await;
-            task(Arc::clone(&context), Arc::clone(&database)).await;
+            task().await;
         }
     });
 }
@@ -68,13 +74,11 @@ where
 ///
 /// ### Arguments
 ///
-/// - `context` - the bot's serenity context
-/// - `database` - the bot's database connection
 /// - `period` - the length of time between each task run
 /// - `task` - the Future representing the task to run
-fn spawn_result_task_loop<F, T, U, Ft>(context: Arc<Context>, database: Arc<Database>, period: Duration, mut task: F)
+fn spawn_result_task_loop<F, T, U, Ft>(period: Duration, mut task: F)
 where
-    F: FnMut(Arc<Context>, Arc<Database>) -> Ft + Send + 'static,
+    F: FnMut() -> Ft + Send + 'static,
     Ft: Future<Output = Result<T, U>> + Send + 'static,
     U: Display,
 {
@@ -84,8 +88,8 @@ where
         loop {
             interval.tick().await;
 
-            if let Err(e) = task(Arc::clone(&context), Arc::clone(&database)).await {
-                error!("Error running periodic task: {}", e)
+            if let Err(e) = task().await {
+                error!("Error running periodic task: {}", e);
             }
         }
     });
@@ -98,7 +102,7 @@ pub(crate) async fn heartbeat(ctx: Arc<Context>) {
 }
 
 /// Updates all recorded watchers and edits their referenced messages with the new content.
-pub(crate) async fn update_watchers(context: Arc<Context>, database: Arc<Database>) -> Result<(), anyhow::Error> {
+pub(crate) async fn update_watchers(context: Arc<Context>, database: Arc<Database>, message_cache: Arc<MessageCache>) -> Result<(), anyhow::Error> {
     info!("[threadwatch] Updating watchers");
     let watchers: Vec<ThreadWatcher> = db::list_watchers(&database).await?
         .into_iter()
@@ -142,7 +146,7 @@ pub(crate) async fn update_watchers(context: Arc<Context>, database: Arc<Databas
         }
 
         let muses = muses::list(&database, &user).await?;
-        let threads_content = threads::get_formatted_list(threads, todos, muses, &watcher.user(), &context).await?;
+        let threads_content = threads::get_formatted_list(threads, todos, muses, &watcher.user(), &context, &message_cache).await?;
 
         let edit_result = message.edit(
             &context.http,
@@ -161,4 +165,13 @@ pub(crate) async fn update_watchers(context: Arc<Context>, database: Arc<Databas
     }
 
     Ok(())
+}
+
+/// Purge any expired entries in the message cache.
+///
+/// ### Arguments
+///
+/// - `cache` - the message cache
+async fn purge_expired_cache_entries(cache: Arc<MessageCache>) {
+    cache.purge_expired().await;
 }
