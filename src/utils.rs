@@ -59,7 +59,14 @@ impl EventData {
 #[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
 pub(crate) struct ChannelMessage {
     pub channel_id: ChannelId,
-    pub message_id: MessageId
+    pub message_id: MessageId,
+}
+
+impl ChannelMessage {
+    /// Retrieves the message from Discord API
+    pub async fn fetch(&self, http: impl AsRef<Http>) -> Result<Message, SerenityError> {
+        self.channel_id.message(http, self.message_id).await
+    }
 }
 
 impl From<(MessageId, ChannelId)> for ChannelMessage {

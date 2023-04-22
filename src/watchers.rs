@@ -104,10 +104,12 @@ pub(crate) async fn remove(
         0 => error!("Watcher should have been present in the database, but was missing when removal was attempted: {:?}", watcher),
         _ => {
             event_data.reply_context().send_success_embed("Watcher removed", "Watcher successfully removed.", message_cache).await;
-            let message = message_cache.get_or_else(
-                &watcher.message(),
-                || event_data.http().get_message(watcher.channel_id.0, watcher.message_id.0)).await?;
-            message.delete(event_data.http()).await?;
+            let channel_message = watcher.message();
+            message_cache.get_or_else(
+                &channel_message,
+                || channel_message.fetch(event_data.http())
+            ).await?
+                .delete(event_data.http()).await?;
         }
     }
 

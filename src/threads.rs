@@ -412,9 +412,10 @@ fn trim_link_name(name: &str) -> String {
 async fn get_last_responder(thread: &TrackedThread, context: &Context, message_cache: &MessageCache) -> Option<User> {
     if let Ok(Channel::Guild(channel)) = thread.channel_id.to_channel(context).await {
         if let Some(last_message_id) = channel.last_message_id {
+            let channel_message = (last_message_id, channel.id).into();
             message_cache.get_or_else(
-                &(last_message_id, channel.id).into(),
-                || channel.message(context, last_message_id)
+                &channel_message,
+                || channel_message.fetch(context)
             ).await
                 .ok()
                 .map(|m| m.author.clone())
@@ -514,7 +515,7 @@ async fn cache_last_channel_message(channel: Option<&GuildChannel>, http: impl A
             let channel_message = (last_message_id, channel.id).into();
 
             if !message_cache.contains_key(&channel_message).await {
-                if let Ok(last_message) = channel.message(http, last_message_id).await {
+                if let Ok(last_message) = channel_message.fetch(http).await {
                     message_cache.store(channel_message, last_message).await;
                 }
             }
