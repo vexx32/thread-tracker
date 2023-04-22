@@ -39,6 +39,7 @@ pub(crate) struct EventData {
     pub user_id: UserId,
     pub guild_id: GuildId,
     pub channel_id: ChannelId,
+    pub message_id: MessageId,
     pub context: Context,
 }
 

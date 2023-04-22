@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::anyhow;
 use cache::MessageCache;
 use serenity::{
@@ -92,6 +94,7 @@ struct ThreadTrackerBot
     /// Postgres database pool
     database: Database,
     message_cache: MessageCache,
+    user_id: Arc<RwLock<Option<UserId>>>,
 }
 
 impl ThreadTrackerBot {
@@ -100,7 +103,17 @@ impl ThreadTrackerBot {
         Self {
             database,
             message_cache: MessageCache::new(),
+            user_id: Arc::new(RwLock::new(None)),
         }
+    }
+
+    async fn set_user(&self, id: UserId) {
+        let mut guard = self.user_id.write().await;
+        *guard = Some(id);
+    }
+
+    async fn user(&self) -> Option<UserId> {
+        *self.user_id.read().await
     }
 
     /// Handles processing commands received by the bot.
@@ -212,11 +225,39 @@ impl ThreadTrackerBot {
 #[async_trait]
 impl EventHandler for ThreadTrackerBot {
     async fn reaction_add(&self, context: Context, reaction: Reaction)  {
+        const REACTION_DELETE: &str = "🚫";
 
+        let bot_user = self.user().await;
+        if reaction.user_id == bot_user {
+            // Ignore reactions made by the bot user
+            return;
+        }
+
+        let channel_message = (reaction.channel_id, reaction.message_id).into();
+        if let Ok(message) = self.message_cache.get_or_else(&channel_message, || channel_message.fetch(&context)).await {
+            if Some(message.author.id) != bot_user {
+                // Ignore reactions to messages not sent by the bot.
+                return;
+            }
+
+            if let Some(message) = &message.referenced_message {
+                if Some(message.author.id) == reaction.user_id && reaction.emoji.unicode_eq(REACTION_DELETE) {
+                    if let Err(e) = message.delete(&context).await {
+                        error!("Unable to delete message {:?}: {}", message, e);
+                    }
+                }
+            }
+        }
     }
 
     async fn message(&self, context: Context, msg: Message) {
         let user_id = msg.author.id;
+
+        if Some(user_id) == self.user().await  {
+            return;
+        }
+
+        let message_id = msg.id;
         let channel_id = msg.channel_id;
         let guild_id = if let Ok(Channel::Guild(guild_channel)) = channel_id.to_channel(&context.http).await {
             guild_channel.guild_id
@@ -224,12 +265,12 @@ impl EventHandler for ThreadTrackerBot {
         else {
             error!("Error: Not currently in a server.");
 
-            ReplyContext::new(channel_id, &context.http)
+            ReplyContext::new(channel_id, message_id, &context.http)
                 .send_error_embed("No direct messages please", "Sorry, Titi is only designed to work in a server currently.", &self.message_cache).await;
             return;
         };
 
-        let event_data = EventData { user_id, guild_id, channel_id, context };
+        let event_data = EventData { user_id, guild_id, channel_id, message_id, context };
 
         if !msg.content.starts_with("tt!") {
             return;
@@ -243,6 +284,8 @@ impl EventHandler for ThreadTrackerBot {
 
     async fn ready(&self, ctx: Context, ready: Ready) {
         info!("{} is connected!", ready.user.name);
+
+        self.set_user(ready.user.id).await;
 
         run_periodic_tasks(ctx.into(), self).await;
     }
@@ -280,7 +323,10 @@ async fn serenity(
         .context("failed to run migrations")?;
 
     // Set gateway intents, which decides what events the bot will be notified about
-    let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
+    let intents = GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::MESSAGE_CONTENT
+        | GatewayIntents::GUILD_MESSAGE_REACTIONS
+        | GatewayIntents::DIRECT_MESSAGES;
 
     let bot = ThreadTrackerBot::new(database);
     let client = Client::builder(&token, intents)
