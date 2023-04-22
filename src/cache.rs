@@ -55,6 +55,10 @@ where
             .map(|c| Arc::clone(&c.data))
     }
 
+    pub async fn remove(&self, id: &TKey) -> Option<Arc<TData>> {
+        self.storage.write().await.remove(id).map(|c| c.data)
+    }
+
     pub async fn contains_key(&self, id: &TKey) -> bool {
         self.storage.read().await
             .contains_key(id)

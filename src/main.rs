@@ -233,18 +233,31 @@ impl EventHandler for ThreadTrackerBot {
             return;
         }
 
-        let channel_message = (reaction.channel_id, reaction.message_id).into();
-        if let Ok(message) = self.message_cache.get_or_else(&channel_message, || channel_message.fetch(&context)).await {
-            if Some(message.author.id) != bot_user {
-                // Ignore reactions to messages not sent by the bot.
-                return;
-            }
+        info!("Received reaction {} on message {}", reaction.emoji, reaction.message_id);
 
-            if let Some(message) = &message.referenced_message {
-                if Some(message.author.id) == reaction.user_id && reaction.emoji.unicode_eq(REACTION_DELETE) {
-                    if let Err(e) = message.delete(&context).await {
-                        error!("Unable to delete message {:?}: {}", message, e);
+        if reaction.emoji.unicode_eq(REACTION_DELETE) {
+            info!("Deletion action recognised from reaction");
+
+            let channel_message = (reaction.channel_id, reaction.message_id).into();
+            if let Ok(message) = self.message_cache.get_or_else(&channel_message, || channel_message.fetch(&context)).await {
+                if Some(message.author.id) != bot_user {
+                    // Ignore reactions to messages not sent by the bot.
+                    return;
+                }
+
+                if let Some(referenced_message) = &message.referenced_message {
+                    if Some(referenced_message.author.id) == reaction.user_id && reaction.emoji.unicode_eq(REACTION_DELETE) {
+                        if let Err(e) = message.delete(&context).await {
+                            error!("Unable to delete message {:?}: {}", message, e);
+                        }
+                        else {
+                            info!("Message deleted successfully!");
+                            self.message_cache.remove(&channel_message).await;
+                        }
                     }
+                }
+                else {
+                    error!("Could not find referenced message to check requesting user ID against")
                 }
             }
         }
