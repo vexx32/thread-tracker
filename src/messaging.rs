@@ -10,7 +10,7 @@ use tracing::{error, info};
 
 use crate::cache::MessageCache;
 
-const EMBED_FOOTER: &str = "React with 🚫 to delete this response.";
+const EMBED_FOOTER: &str = "React with 🚫 to delete this message.";
 
 pub(crate) struct ReplyContext
 {
@@ -31,7 +31,7 @@ impl ReplyContext {
     pub(crate) async fn send_embed(&self, title: impl ToString, body: impl ToString, colour: Option<Colour>) -> Result<Message, SerenityError> {
         info!("Sending embed `{}` with content `{}`", title.to_string(), body.to_string());
         self.channel_id.send_message(&self.http, |msg| {
-            msg.embed(|embed| embed.title(title).description(body).colour(colour.unwrap_or(Colour::PURPLE)))
+            msg.embed(|embed| embed.title(title).description(body).colour(colour.unwrap_or(Colour::PURPLE)).footer(|f| f.text(EMBED_FOOTER)))
                 .reference_message((self.channel_id, self.message_id))
         }).await
     }
