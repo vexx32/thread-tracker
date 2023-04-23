@@ -131,12 +131,14 @@ pub(crate) async fn add(
         reply_context.send_error_embed("Error adding tracked threads", errors, message_cache).await;
     }
 
-    let title = match category {
-        Some(name) => format!("Tracked threads added to `{}`", name),
-        None => "Tracked threads added".to_owned(),
-    };
+    if !threads_added.0.is_empty() {
+        let title = match category {
+            Some(name) => format!("Tracked threads added to `{}`", name),
+            None => "Tracked threads added".to_owned(),
+        };
 
-    reply_context.send_success_embed(title, threads_added, message_cache).await;
+        reply_context.send_success_embed(title, threads_added, message_cache).await;
+    }
 
     Ok(())
 }
@@ -200,12 +202,14 @@ pub(crate) async fn set_category(
             .await;
     }
 
-    let title = match category {
-        Some(name) => format!("Tracked threads' category set to `{}`", name),
-        None => String::from("Tracked threads' categories removed"),
-    };
+    if !threads_updated.0.is_empty() {
+        let title = match category {
+            Some(name) => format!("Tracked threads' category set to `{}`", name),
+            None => String::from("Tracked threads' categories removed"),
+        };
 
-    reply_context.send_success_embed(title, threads_updated, message_cache).await;
+        reply_context.send_success_embed(title, threads_updated, message_cache).await;
+    }
 
     Ok(())
 }
@@ -304,9 +308,11 @@ pub(crate) async fn remove(
             .await;
     }
 
-    reply_context
-        .send_success_embed("Tracked threads removed", threads_removed, message_cache)
-        .await;
+    if !threads_removed.0.is_empty() {
+        reply_context
+            .send_success_embed("Tracked threads removed", threads_removed, message_cache)
+            .await;
+    }
 
     Ok(())
 }
