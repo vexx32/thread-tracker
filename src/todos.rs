@@ -12,6 +12,7 @@ use crate::{
     error_on_additional_arguments,
 
     db::{self, Database},
+    messaging::handle_send_result,
     utils::*, ThreadTrackerBot,
 };
 
@@ -162,7 +163,7 @@ pub(crate) async fn send_list(args: Vec<&str>, event_data: &EventData, bot: &Thr
         message.push_line("There is nothing on your to do list.");
     }
 
-    event_data.reply_context().send_success_embed("To Do list", message, message_cache).await;
+    handle_send_result(event_data.reply_context().send_message_embed("To Do list", message), message_cache).await;
 
     Ok(())
 }

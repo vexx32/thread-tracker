@@ -74,6 +74,8 @@ Adds a to do-list item. Optionally specify a category as `!categoryname` before 
 
 `tt!done`
 Crosses off and removes a to do-list item. Add `!categoryname` to remove all entries from that category, or `!all` to remove all to do entries.
+
+Titi's responses can be deleted by the user that triggered the request reacting with :no_entry_sign: or :wastebasket: — this will not work if the message that Titi's responding to has been deleted.
 "#;
 
 #[derive(Debug, Error)]
@@ -225,7 +227,7 @@ impl ThreadTrackerBot {
 #[async_trait]
 impl EventHandler for ThreadTrackerBot {
     async fn reaction_add(&self, context: Context, reaction: Reaction)  {
-        const REACTION_DELETE: &str = "🚫";
+        const DELETE_EMOJI: [&str; 2] = ["🚫", "🗑️"];
 
         let bot_user = self.user().await;
         if reaction.user_id == bot_user {
@@ -235,7 +237,7 @@ impl EventHandler for ThreadTrackerBot {
 
         info!("Received reaction {} on message {}", reaction.emoji, reaction.message_id);
 
-        if reaction.emoji.unicode_eq(REACTION_DELETE) {
+        if DELETE_EMOJI.iter().any(|emoji| reaction.emoji.unicode_eq(emoji)) {
             info!("Deletion action recognised from reaction");
 
             let channel_message = (reaction.channel_id, reaction.message_id).into();
@@ -246,7 +248,7 @@ impl EventHandler for ThreadTrackerBot {
                 }
 
                 if let Some(referenced_message) = &message.referenced_message {
-                    if Some(referenced_message.author.id) == reaction.user_id && reaction.emoji.unicode_eq(REACTION_DELETE) {
+                    if Some(referenced_message.author.id) == reaction.user_id {
                         if let Err(e) = message.delete(&context).await {
                             error!("Unable to delete message {:?}: {}", message, e);
                         }
@@ -310,7 +312,7 @@ impl EventHandler for ThreadTrackerBot {
 ///
 /// - `reply_context` - the bot context and channel to reply to
 async fn help_message(reply_context: ReplyContext, message_cache: &MessageCache) {
-    log_send_errors(reply_context.send_message_embed("Thread Tracker help", HELP_MESSAGE), message_cache).await;
+    handle_send_result(reply_context.send_message_embed("Thread Tracker help", HELP_MESSAGE), message_cache).await;
 }
 
 #[shuttle_runtime::main]

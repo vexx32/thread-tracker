@@ -301,7 +301,7 @@ pub(crate) async fn send_random_thread(mut args: Vec<&str>, event_data: &EventDa
     match get_random_thread(category, event_data, bot).await? {
         None => {
             message.push("Congrats! You don't seem to have any threads that are waiting on your reply! :tada:");
-            log_send_errors(reply_context.send_message_embed("No waiting threads", message), &bot.message_cache).await;
+            handle_send_result(reply_context.send_message_embed("No waiting threads", message), &bot.message_cache).await;
         },
         Some((last_author, thread)) => {
             message.push("Titi has chosen... this thread");
@@ -318,7 +318,7 @@ pub(crate) async fn send_random_thread(mut args: Vec<&str>, event_data: &EventDa
             message.push_line("");
             message.push_quote(get_thread_link(&thread, None, event_data.http()).await).push(" — ").push_line(Bold + last_author);
 
-            log_send_errors(reply_context.send_message_embed("Random thread", message), &bot.message_cache).await;
+            handle_send_result(reply_context.send_message_embed("Random thread", message), &bot.message_cache).await;
         },
     };
 
