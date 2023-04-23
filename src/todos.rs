@@ -1,19 +1,14 @@
 use std::collections::BTreeMap;
 
-use serenity::{
-    utils::{
-        ContentModifier::*,
-        MessageBuilder,
-    },
-};
+use serenity::utils::{ContentModifier::*, MessageBuilder};
 
 use crate::{
-    CommandError::*,
-    error_on_additional_arguments,
-
     db::{self, Database},
+    error_on_additional_arguments,
     messaging::handle_send_result,
-    utils::*, ThreadTrackerBot,
+    utils::*,
+    CommandError::*,
+    ThreadTrackerBot,
 };
 
 pub(crate) struct Todo {
@@ -23,14 +18,15 @@ pub(crate) struct Todo {
 
 impl From<db::TodoRow> for Todo {
     fn from(value: db::TodoRow) -> Self {
-        Self {
-            content: value.content,
-            category: value.category,
-        }
+        Self { content: value.content, category: value.category }
     }
 }
 
-pub(crate) async fn add<'a>(args: &str, event_data: &EventData, bot: &ThreadTrackerBot) -> anyhow::Result<()> {
+pub(crate) async fn add<'a>(
+    args: &str,
+    event_data: &EventData,
+    bot: &ThreadTrackerBot,
+) -> anyhow::Result<()> {
     let mut entry = args.trim();
 
     let category = match entry.split_ascii_whitespace().next() {
@@ -45,9 +41,12 @@ pub(crate) async fn add<'a>(args: &str, event_data: &EventData, bot: &ThreadTrac
     };
 
     if entry.is_empty() {
-        let category_string = category.map(|s| format!(" !{}", s))
-            .unwrap_or(String::new());
-        return Err(MissingArguments(format!("Please provide a to do entry, such as: `tt!todo{} write X a starter`", category_string)).into());
+        let category_string = category.map(|s| format!(" !{}", s)).unwrap_or(String::new());
+        return Err(MissingArguments(format!(
+            "Please provide a to do entry, such as: `tt!todo{} write X a starter`",
+            category_string
+        ))
+        .into());
     }
 
     let (database, message_cache) = (&bot.database, &bot.message_cache);
@@ -55,10 +54,13 @@ pub(crate) async fn add<'a>(args: &str, event_data: &EventData, bot: &ThreadTrac
 
     let mut result = MessageBuilder::new();
     result.push("To do list entry ").push(Italic + entry);
-    match db::add_todo(database, event_data.guild_id.0, event_data.user_id.0, entry, category).await? {
+    match db::add_todo(database, event_data.guild_id.0, event_data.user_id.0, entry, category)
+        .await?
+    {
         true => {
             if let Some(c) = category {
-                result.push(" added to category ")
+                result
+                    .push(" added to category ")
                     .push(Bold + Underline + c)
                     .push_line(" successfully.");
             }
@@ -69,14 +71,20 @@ pub(crate) async fn add<'a>(args: &str, event_data: &EventData, bot: &ThreadTrac
         },
         false => {
             result.push(" was not added as it is already present.");
-            reply_context.send_error_embed("Error adding to do list entry", result, message_cache).await;
+            reply_context
+                .send_error_embed("Error adding to do list entry", result, message_cache)
+                .await;
         },
     };
 
     Ok(())
 }
 
-pub(crate) async fn remove(entry: &str, event_data: &EventData, bot: &ThreadTrackerBot) -> anyhow::Result<()> {
+pub(crate) async fn remove(
+    entry: &str,
+    event_data: &EventData,
+    bot: &ThreadTrackerBot,
+) -> anyhow::Result<()> {
     let mut entry = entry.trim();
     if entry.is_empty() {
         return Err(MissingArguments(String::from(
@@ -101,11 +109,13 @@ pub(crate) async fn remove(entry: &str, event_data: &EventData, bot: &ThreadTrac
     let result = match category {
         Some("all") => {
             message.push("To do-list entries were ");
-            db::remove_all_todos(database, event_data.guild_id.0, event_data.user_id.0, None).await?
+            db::remove_all_todos(database, event_data.guild_id.0, event_data.user_id.0, None)
+                .await?
         },
         Some(cat) => {
             message.push(format!("To do list entries in category `{}` were ", cat));
-            db::remove_all_todos(database, event_data.guild_id.0, event_data.user_id.0, Some(cat)).await?
+            db::remove_all_todos(database, event_data.guild_id.0, event_data.user_id.0, Some(cat))
+                .await?
         },
         None => {
             message.push("To do list entry was ").push(Italic + entry);
@@ -117,7 +127,9 @@ pub(crate) async fn remove(entry: &str, event_data: &EventData, bot: &ThreadTrac
     match result {
         0 => {
             message.push_line(" not found.");
-            reply_context.send_error_embed("Error updating to do-list", message, message_cache).await;
+            reply_context
+                .send_error_embed("Error updating to do-list", message, message_cache)
+                .await;
         },
         num => {
             message.push_line(format!(" successfully removed. {} entries deleted.", num));
@@ -128,7 +140,11 @@ pub(crate) async fn remove(entry: &str, event_data: &EventData, bot: &ThreadTrac
     Ok(())
 }
 
-pub(crate) async fn send_list(args: Vec<&str>, event_data: &EventData, bot: &ThreadTrackerBot) -> anyhow::Result<()> {
+pub(crate) async fn send_list(
+    args: Vec<&str>,
+    event_data: &EventData,
+    bot: &ThreadTrackerBot,
+) -> anyhow::Result<()> {
     let mut args = args.into_iter().peekable();
     let (database, message_cache) = (&bot.database, &bot.message_cache);
 
@@ -139,7 +155,6 @@ pub(crate) async fn send_list(args: Vec<&str>, event_data: &EventData, bot: &Thr
         list(database, &event_data.user(), None).await?
     };
 
-
     let mut message = MessageBuilder::new();
 
     if !todos.is_empty() {
@@ -148,8 +163,7 @@ pub(crate) async fn send_list(args: Vec<&str>, event_data: &EventData, bot: &Thr
 
         for (name, todos) in categories {
             if let Some(n) = name {
-                message.push_line(Bold + Underline + n)
-                    .push_line("");
+                message.push_line(Bold + Underline + n).push_line("");
             }
 
             for item in todos {
@@ -163,7 +177,11 @@ pub(crate) async fn send_list(args: Vec<&str>, event_data: &EventData, bot: &Thr
         message.push_line("There is nothing on your to do list.");
     }
 
-    handle_send_result(event_data.reply_context().send_message_embed("To Do list", message), message_cache).await;
+    handle_send_result(
+        event_data.reply_context().send_message_embed("To Do list", message),
+        message_cache,
+    )
+    .await;
 
     Ok(())
 }
@@ -172,13 +190,19 @@ pub(crate) fn categorise(todos: Vec<Todo>) -> BTreeMap<Option<String>, Vec<Todo>
     partition_into_map(todos, |t| t.category.clone())
 }
 
-pub(crate) async fn list(database: &Database, user: &GuildUser, categories: Option<Vec<&str>>) -> anyhow::Result<Vec<Todo>> {
+pub(crate) async fn list(
+    database: &Database,
+    user: &GuildUser,
+    categories: Option<Vec<&str>>,
+) -> anyhow::Result<Vec<Todo>> {
     let mut result = Vec::new();
 
     match categories {
         Some(cats) => {
             for category in cats {
-                result.extend(enumerate(database, user, Some(category.trim_start_matches('!'))).await?);
+                result.extend(
+                    enumerate(database, user, Some(category.trim_start_matches('!'))).await?,
+                );
             }
         },
         None => result.extend(enumerate(database, user, None).await?),
@@ -187,14 +211,20 @@ pub(crate) async fn list(database: &Database, user: &GuildUser, categories: Opti
     Ok(result)
 }
 
-pub(crate) async fn enumerate(database: &Database, user: &GuildUser, category: Option<&str>) -> anyhow::Result<impl Iterator<Item = Todo>> {
-    Ok(
-        db::list_todos(database, user.guild_id.0, user.user_id.0, category).await?
-            .into_iter()
-            .map(|t| t.into())
-    )
+pub(crate) async fn enumerate(
+    database: &Database,
+    user: &GuildUser,
+    category: Option<&str>,
+) -> anyhow::Result<impl Iterator<Item = Todo>> {
+    Ok(db::list_todos(database, user.guild_id.0, user.user_id.0, category)
+        .await?
+        .into_iter()
+        .map(|t| t.into()))
 }
 
-pub(crate) fn push_todo_line<'a>(message: &'a mut MessageBuilder, todo: &Todo) -> &'a mut MessageBuilder {
+pub(crate) fn push_todo_line<'a>(
+    message: &'a mut MessageBuilder,
+    todo: &Todo,
+) -> &'a mut MessageBuilder {
     message.push_quote_line(format!("• {}", &todo.content))
 }

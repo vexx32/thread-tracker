@@ -1,24 +1,17 @@
-use std::{
-    fmt::Display,
-    time::Duration,
-    future::Future,
-    sync::Arc,
-};
+use std::{fmt::Display, future::Future, sync::Arc, time::Duration};
 
 use chrono::Utc;
-use serenity::{
-    model::prelude::*,
-    prelude::*,
-    utils::Colour,
-};
+use serenity::{model::prelude::*, prelude::*, utils::Colour};
 use tracing::{error, info};
 
 use crate::{
+    cache::MessageCache,
     db::{self, Database},
-    threads::{self, TrackedThread},
     muses,
+    threads::{self, TrackedThread},
     todos::{self, Todo},
-    watchers::ThreadWatcher, ThreadTrackerBot, cache::MessageCache,
+    watchers::ThreadWatcher,
+    ThreadTrackerBot,
 };
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(295);
@@ -28,24 +21,17 @@ const CACHE_TRIM_INTERVAL: Duration = Duration::from_secs(2995);
 /// Core task spawning function. Creates a set of periodically recurring tasks on their own threads.
 pub(crate) async fn run_periodic_tasks(context: Arc<Context>, bot: &ThreadTrackerBot) {
     let c = Arc::clone(&context);
-    spawn_task_loop(
-        HEARTBEAT_INTERVAL,
-        move || heartbeat(Arc::clone(&c))
-    );
+    spawn_task_loop(HEARTBEAT_INTERVAL, move || heartbeat(Arc::clone(&c)));
 
     let c = Arc::clone(&context);
     let d = Arc::new(bot.database.clone());
     let m = Arc::new(bot.message_cache.clone());
-    spawn_result_task_loop(
-        WATCHER_UPDATE_INTERVAL,
-        move || update_watchers(Arc::clone(&c), Arc::clone(&d), Arc::clone(&m))
-    );
+    spawn_result_task_loop(WATCHER_UPDATE_INTERVAL, move || {
+        update_watchers(Arc::clone(&c), Arc::clone(&d), Arc::clone(&m))
+    });
 
     let c = Arc::new(bot.message_cache.clone());
-    spawn_task_loop(
-        CACHE_TRIM_INTERVAL,
-        move || purge_expired_cache_entries(Arc::clone(&c))
-    );
+    spawn_task_loop(CACHE_TRIM_INTERVAL, move || purge_expired_cache_entries(Arc::clone(&c)));
 }
 
 /// Spawns a task which loops indefinitely, with a wait period between each iteration.
@@ -97,35 +83,45 @@ where
 
 /// Performs a set_presence request to ensure the Activity is set correctly.
 pub(crate) async fn heartbeat(ctx: Arc<Context>) {
-    ctx.set_presence(Some(Activity::watching("over your threads (tt!help)")), OnlineStatus::Online).await;
+    ctx.set_presence(Some(Activity::watching("over your threads (tt!help)")), OnlineStatus::Online)
+        .await;
     info!("[heartbeat] Keep-alive heartbeat set_presence request completed")
 }
 
 /// Updates all recorded watchers and edits their referenced messages with the new content.
-pub(crate) async fn update_watchers(context: Arc<Context>, database: Arc<Database>, message_cache: Arc<MessageCache>) -> Result<(), anyhow::Error> {
+pub(crate) async fn update_watchers(
+    context: Arc<Context>,
+    database: Arc<Database>,
+    message_cache: Arc<MessageCache>,
+) -> Result<(), anyhow::Error> {
     info!("[threadwatch] Updating watchers");
-    let watchers: Vec<ThreadWatcher> = db::list_watchers(&database).await?
-        .into_iter()
-        .map(|w| w.into())
-        .collect();
+    let watchers: Vec<ThreadWatcher> =
+        db::list_watchers(&database).await?.into_iter().map(|w| w.into()).collect();
 
     for watcher in watchers {
         info!("[threadwatch] Updating watcher {:?}", watcher);
-        let mut message = match context.http.get_message(watcher.channel_id.0, watcher.message_id.0).await {
-            Ok(m) => m,
-            Err(e) => {
-                let channel_name = watcher.channel_id
-                    .to_channel(&context.http).await
-                    .map_or(None, |c| c.guild())
-                    .map_or_else(|| "<unavailable channel>".to_owned(), |gc| gc.name);
+        let mut message =
+            match context.http.get_message(watcher.channel_id.0, watcher.message_id.0).await {
+                Ok(m) => m,
+                Err(e) => {
+                    let channel_name = watcher
+                        .channel_id
+                        .to_channel(&context.http)
+                        .await
+                        .map_or(None, |c| c.guild())
+                        .map_or_else(|| "<unavailable channel>".to_owned(), |gc| gc.name);
 
-                error!("[threadwatch] Could not find message {} in channel {}: {}. Removing watcher.", watcher.message_id, channel_name, e);
-                db::remove_watcher(&database, watcher.id).await
-                    .map_err(|e| error!("Failed to remove watcher: {}", e))
-                    .ok();
-                continue;
-            },
-        };
+                    error!(
+                    "[threadwatch] Could not find message {} in channel {}: {}. Removing watcher.",
+                    watcher.message_id, channel_name, e
+                );
+                    db::remove_watcher(&database, watcher.id)
+                        .await
+                        .map_err(|e| error!("Failed to remove watcher: {}", e))
+                        .ok();
+                    continue;
+                },
+            };
 
         let user = watcher.user();
 
@@ -146,17 +142,27 @@ pub(crate) async fn update_watchers(context: Arc<Context>, database: Arc<Databas
         }
 
         let muses = muses::list(&database, &user).await?;
-        let threads_content = threads::get_formatted_list(threads, todos, muses, &watcher.user(), &context, &message_cache).await?;
+        let threads_content = threads::get_formatted_list(
+            threads,
+            todos,
+            muses,
+            &watcher.user(),
+            &context,
+            &message_cache,
+        )
+        .await?;
 
-        let edit_result = message.edit(
-            &context.http,
-            |msg| msg.embed(|embed|
-                embed.colour(Colour::PURPLE)
-                    .title("Watching threads")
-                    .description(threads_content)
-                    .footer(|footer| footer.text(format!("Last updated: {}", Utc::now())))
-            )
-        ).await;
+        let edit_result = message
+            .edit(&context.http, |msg| {
+                msg.embed(|embed| {
+                    embed
+                        .colour(Colour::PURPLE)
+                        .title("Watching threads")
+                        .description(threads_content)
+                        .footer(|footer| footer.text(format!("Last updated: {}", Utc::now())))
+                })
+            })
+            .await;
         if let Err(e) = edit_result {
             // If we return here, an error updating one watcher message would prevent the rest from being updated.
             // Simply log these instead.

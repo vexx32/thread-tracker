@@ -1,13 +1,12 @@
 use std::{
     collections::HashMap,
+    future::Future,
     hash::Hash,
-    sync::Arc, time::{Instant, Duration}, future::Future,
+    sync::Arc,
+    time::{Duration, Instant},
 };
 
-use serenity::{
-    model::prelude::*,
-    prelude::*,
-};
+use serenity::{model::prelude::*, prelude::*};
 
 use crate::utils::ChannelMessage;
 
@@ -50,9 +49,7 @@ where
     }
 
     pub async fn get(&self, id: &TKey) -> Option<Arc<TData>> {
-        self.storage.read().await
-            .get(id)
-            .map(|c| Arc::clone(&c.data))
+        self.storage.read().await.get(id).map(|c| Arc::clone(&c.data))
     }
 
     pub async fn remove(&self, id: &TKey) -> Option<Arc<TData>> {
@@ -60,8 +57,7 @@ where
     }
 
     pub async fn contains_key(&self, id: &TKey) -> bool {
-        self.storage.read().await
-            .contains_key(id)
+        self.storage.read().await.contains_key(id)
     }
 
     pub async fn get_or_else<TErr, F, Fut>(&self, id: &TKey, f: F) -> Result<Arc<TData>, TErr>

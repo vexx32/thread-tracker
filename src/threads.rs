@@ -1,28 +1,33 @@
-use std::{collections::{BTreeMap, BTreeSet, HashMap}, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    sync::Arc,
+};
 
 use lazy_static::lazy_static;
 use rand::Rng;
+use regex::Regex;
 use serenity::{
-    http::{Http, CacheHttp},
+    http::{CacheHttp, Http},
     model::prelude::*,
     prelude::*,
-    utils::{MessageBuilder, EmbedMessageBuilding, ContentModifier::*},
+    utils::{ContentModifier::*, EmbedMessageBuilding, MessageBuilder},
 };
-use regex::Regex;
 use tracing::{error, info};
 
 use crate::{
+    cache::MessageCache,
     db::{self, Database},
     error_on_additional_arguments,
     messaging::*,
     muses,
     todos::{self, Todo},
     utils::*,
-
-    CommandError::*, EventData, cache::MessageCache, ThreadTrackerBot,
+    CommandError::*,
+    EventData,
+    ThreadTrackerBot,
 };
 
-lazy_static!{
+lazy_static! {
     static ref URL_REGEX: Regex = Regex::new("^https://discord.com/channels/").unwrap();
 }
 
@@ -42,12 +47,15 @@ impl From<db::TrackedThreadRow> for TrackedThread {
     }
 }
 
-pub(crate) async fn enumerate(database: &Database, user: &GuildUser, category: Option<&str>) -> anyhow::Result<impl Iterator<Item = TrackedThread>> {
-    Ok(
-        db::list_threads(database, user.guild_id.0, user.user_id.0, category).await?
-            .into_iter()
-            .map(|t| t.into())
-    )
+pub(crate) async fn enumerate(
+    database: &Database,
+    user: &GuildUser,
+    category: Option<&str>,
+) -> anyhow::Result<impl Iterator<Item = TrackedThread>> {
+    Ok(db::list_threads(database, user.guild_id.0, user.user_id.0, category)
+        .await?
+        .into_iter()
+        .map(|t| t.into()))
 }
 
 pub(crate) async fn add(
@@ -58,12 +66,7 @@ pub(crate) async fn add(
     let mut args = args.into_iter().peekable();
     let (database, message_cache) = (&bot.database, &bot.message_cache);
 
-    let category = if !URL_REGEX.is_match(args.peek().unwrap_or(&"")) {
-        args.next()
-    }
-    else {
-        None
-    };
+    let category = if !URL_REGEX.is_match(args.peek().unwrap_or(&"")) { args.next() } else { None };
 
     if args.peek().is_none() {
         return Err(MissingArguments(format!(
@@ -80,16 +83,41 @@ pub(crate) async fn add(
             let thread = ChannelId(target_channel_id);
             match thread.to_channel(event_data.http()).await {
                 Ok(channel) => {
-                    info!("Adding tracked thread {} for user {}", target_channel_id, event_data.user_id);
-                    cache_last_channel_message(channel.guild().as_ref(), event_data.http(), message_cache).await;
+                    info!(
+                        "Adding tracked thread {} for user {}",
+                        target_channel_id, event_data.user_id
+                    );
+                    cache_last_channel_message(
+                        channel.guild().as_ref(),
+                        event_data.http(),
+                        message_cache,
+                    )
+                    .await;
 
-                    match db::add_thread(database, event_data.guild_id.0, target_channel_id, event_data.user_id.0, category).await {
+                    match db::add_thread(
+                        database,
+                        event_data.guild_id.0,
+                        target_channel_id,
+                        event_data.user_id.0,
+                        category,
+                    )
+                    .await
+                    {
                         Ok(true) => threads_added.push("• ").mention(&thread).push_line(""),
-                        Ok(false) => threads_added.push("• Skipped ").mention(&thread).push_line(" as it is already being tracked"),
-                        Err(e) => errors.push("• Failed to register thread ").mention(&thread).push_line_safe(format!(": {}", e)),
+                        Ok(false) => threads_added
+                            .push("• Skipped ")
+                            .mention(&thread)
+                            .push_line(" as it is already being tracked"),
+                        Err(e) => errors
+                            .push("• Failed to register thread ")
+                            .mention(&thread)
+                            .push_line_safe(format!(": {}", e)),
                     }
                 },
-                Err(e) => errors.push("• Cannot access channel ").mention(&thread).push_line_safe(format!(": {}", e)),
+                Err(e) => errors
+                    .push("• Cannot access channel ")
+                    .mention(&thread)
+                    .push_line_safe(format!(": {}", e)),
             };
         }
         else {
@@ -116,7 +144,7 @@ pub(crate) async fn add(
 pub(crate) async fn set_category(
     args: Vec<&str>,
     event_data: &EventData,
-    bot: &ThreadTrackerBot
+    bot: &ThreadTrackerBot,
 ) -> Result<(), anyhow::Error> {
     let mut args = args.into_iter().peekable();
     let (database, message_cache) = (&bot.database, &bot.message_cache);
@@ -134,12 +162,29 @@ pub(crate) async fn set_category(
         if let Some(Ok(target_channel_id)) = thread_id.split('/').last().map(|x| x.parse()) {
             let thread = ChannelId(target_channel_id);
             match thread.to_channel(event_data.http()).await {
-                Ok(_) => match db::update_thread_category(database, event_data.guild_id.0, target_channel_id, event_data.user_id.0, category).await {
+                Ok(_) => match db::update_thread_category(
+                    database,
+                    event_data.guild_id.0,
+                    target_channel_id,
+                    event_data.user_id.0,
+                    category,
+                )
+                .await
+                {
                     Ok(true) => threads_updated.push("• ").mention(&thread).push_line(""),
-                    Ok(false) => errors.push("• ").mention(&thread).push_line(" is not currently being tracked"),
-                    Err(e) => errors.push("• Failed to update thread category for ").mention(&thread).push_line_safe(format!(": {}", e)),
+                    Ok(false) => errors
+                        .push("• ")
+                        .mention(&thread)
+                        .push_line(" is not currently being tracked"),
+                    Err(e) => errors
+                        .push("• Failed to update thread category for ")
+                        .mention(&thread)
+                        .push_line_safe(format!(": {}", e)),
                 },
-                Err(e) => errors.push("• Cannot access channel ").mention(&thread).push_line(format!(": {}", e)),
+                Err(e) => errors
+                    .push("• Cannot access channel ")
+                    .mention(&thread)
+                    .push_line(format!(": {}", e)),
             };
         }
         else {
@@ -150,7 +195,9 @@ pub(crate) async fn set_category(
     let reply_context = event_data.reply_context();
     if !errors.0.is_empty() {
         error!("Errors updating thread categories:\n{}", errors);
-        reply_context.send_error_embed("Error updating thread category", errors, message_cache).await;
+        reply_context
+            .send_error_embed("Error updating thread category", errors, message_cache)
+            .await;
     }
 
     let title = match category {
@@ -163,7 +210,11 @@ pub(crate) async fn set_category(
     Ok(())
 }
 
-pub(crate) async fn remove(args: Vec<&str>, event_data: &EventData, bot: &ThreadTrackerBot) -> Result<(), anyhow::Error> {
+pub(crate) async fn remove(
+    args: Vec<&str>,
+    event_data: &EventData,
+    bot: &ThreadTrackerBot,
+) -> Result<(), anyhow::Error> {
     let mut args = args.into_iter().peekable();
     let database = &bot.database;
     let message_cache = &bot.message_cache;
@@ -178,11 +229,16 @@ pub(crate) async fn remove(args: Vec<&str>, event_data: &EventData, bot: &Thread
     let reply_context = event_data.reply_context();
     if let Some(&"all") = args.peek() {
         db::remove_all_threads(database, event_data.guild_id.0, event_data.user_id.0, None).await?;
-        reply_context.send_success_embed(
-            "Tracked threads removed",
-            &format!("All registered threads for user {:} removed.", event_data.user_id.mention()),
-            message_cache
-        ).await;
+        reply_context
+            .send_success_embed(
+                "Tracked threads removed",
+                &format!(
+                    "All registered threads for user {:} removed.",
+                    event_data.user_id.mention()
+                ),
+                message_cache,
+            )
+            .await;
 
         return Ok(());
     }
@@ -192,18 +248,48 @@ pub(crate) async fn remove(args: Vec<&str>, event_data: &EventData, bot: &Thread
 
     for thread_or_category in args {
         if !URL_REGEX.is_match(thread_or_category) {
-            match db::remove_all_threads(database, event_data.guild_id.0, event_data.user_id.0, Some(thread_or_category)).await {
-                Ok(0) => errors.push_line(format!("• No threads in category {} to remove", thread_or_category)),
-                Ok(count) => threads_removed.push_line(format!("• All {} threads in category `{}` removed", count, thread_or_category)),
-                Err(e) => errors.push_line(format!("• Unable to remove threads in category `{}`: {}", thread_or_category, e)),
+            match db::remove_all_threads(
+                database,
+                event_data.guild_id.0,
+                event_data.user_id.0,
+                Some(thread_or_category),
+            )
+            .await
+            {
+                Ok(0) => errors.push_line(format!(
+                    "• No threads in category {} to remove",
+                    thread_or_category
+                )),
+                Ok(count) => threads_removed.push_line(format!(
+                    "• All {} threads in category `{}` removed",
+                    count, thread_or_category
+                )),
+                Err(e) => errors.push_line(format!(
+                    "• Unable to remove threads in category `{}`: {}",
+                    thread_or_category, e
+                )),
             };
         }
-        else if let Some(Ok(target_channel_id)) = thread_or_category.split('/').last().map(|x| x.parse()) {
+        else if let Some(Ok(target_channel_id)) =
+            thread_or_category.split('/').last().map(|x| x.parse())
+        {
             let thread = ChannelId(target_channel_id);
-            match db::remove_thread(database, event_data.guild_id.0, target_channel_id, event_data.user_id.0).await {
-                Ok(0) => errors.push_line(format!("• {} is not currently being tracked", thread.mention())),
+            match db::remove_thread(
+                database,
+                event_data.guild_id.0,
+                target_channel_id,
+                event_data.user_id.0,
+            )
+            .await
+            {
+                Ok(0) => errors
+                    .push_line(format!("• {} is not currently being tracked", thread.mention())),
                 Ok(_) => threads_removed.push_line(format!("• {:}", thread.mention())),
-                Err(e) => errors.push_line(format!("• Failed to unregister thread {}: {}", thread.mention(), e)),
+                Err(e) => errors.push_line(format!(
+                    "• Failed to unregister thread {}: {}",
+                    thread.mention(),
+                    e
+                )),
             };
         }
         else {
@@ -213,10 +299,14 @@ pub(crate) async fn remove(args: Vec<&str>, event_data: &EventData, bot: &Thread
 
     if !errors.0.is_empty() {
         error!("Errors handling thread removal:\n{}", errors);
-        reply_context.send_error_embed("Error removing tracked threads", errors, message_cache).await;
+        reply_context
+            .send_error_embed("Error removing tracked threads", errors, message_cache)
+            .await;
     }
 
-    reply_context.send_success_embed("Tracked threads removed", threads_removed, message_cache).await;
+    reply_context
+        .send_success_embed("Tracked threads removed", threads_removed, message_cache)
+        .await;
 
     Ok(())
 }
@@ -253,7 +343,9 @@ pub(crate) async fn send_list_with_title(
     }
 
     let muses = muses::list(&bot.database, &user).await?;
-    let message = get_formatted_list(threads, todos, muses, &user, &event_data.context, &bot.message_cache).await?;
+    let message =
+        get_formatted_list(threads, todos, muses, &user, &event_data.context, &bot.message_cache)
+            .await?;
 
     match event_data.reply_context().send_message_embed(title, message).await {
         Ok(msg) => Ok(bot.message_cache.store((msg.id, msg.channel_id).into(), msg).await),
@@ -261,16 +353,22 @@ pub(crate) async fn send_list_with_title(
     }
 }
 
-pub(crate) async fn get_random_thread(category: Option<&str>, event_data: &EventData, bot: &ThreadTrackerBot) -> anyhow::Result<Option<(String, TrackedThread)>> {
+pub(crate) async fn get_random_thread(
+    category: Option<&str>,
+    event_data: &EventData,
+    bot: &ThreadTrackerBot,
+) -> anyhow::Result<Option<(String, TrackedThread)>> {
     let user = event_data.user();
     let muses = muses::list(&bot.database, &user).await?;
     let mut pending_threads = Vec::new();
 
     for thread in enumerate(&bot.database, &user, category).await? {
-        let last_message_author = get_last_responder(&thread, &event_data.context, &bot.message_cache).await;
+        let last_message_author =
+            get_last_responder(&thread, &event_data.context, &bot.message_cache).await;
         match last_message_author {
             Some(user) => {
-                let last_author_name = get_nick_or_name(&user, event_data.guild_id, event_data.http()).await;
+                let last_author_name =
+                    get_nick_or_name(&user, event_data.guild_id, event_data.http()).await;
                 if user.id != event_data.user_id && !muses.contains(&last_author_name) {
                     pending_threads.push((last_author_name, thread));
                 }
@@ -289,7 +387,11 @@ pub(crate) async fn get_random_thread(category: Option<&str>, event_data: &Event
     }
 }
 
-pub(crate) async fn send_random_thread(mut args: Vec<&str>, event_data: &EventData, bot: &ThreadTrackerBot) -> anyhow::Result<()> {
+pub(crate) async fn send_random_thread(
+    mut args: Vec<&str>,
+    event_data: &EventData,
+    bot: &ThreadTrackerBot,
+) -> anyhow::Result<()> {
     let mut message = MessageBuilder::new();
     let reply_context = event_data.reply_context();
 
@@ -301,13 +403,18 @@ pub(crate) async fn send_random_thread(mut args: Vec<&str>, event_data: &EventDa
     match get_random_thread(category, event_data, bot).await? {
         None => {
             message.push("Congrats! You don't seem to have any threads that are waiting on your reply! :tada:");
-            handle_send_result(reply_context.send_message_embed("No waiting threads", message), &bot.message_cache).await;
+            handle_send_result(
+                reply_context.send_message_embed("No waiting threads", message),
+                &bot.message_cache,
+            )
+            .await;
         },
         Some((last_author, thread)) => {
             message.push("Titi has chosen... this thread");
 
             if let Some(category) = &thread.category {
-                message.push(" from your ")
+                message
+                    .push(" from your ")
                     .push(Bold + Underline + category)
                     .push_line(" threads!");
             }
@@ -316,9 +423,16 @@ pub(crate) async fn send_random_thread(mut args: Vec<&str>, event_data: &EventDa
             }
 
             message.push_line("");
-            message.push_quote(get_thread_link(&thread, None, event_data.http()).await).push(" — ").push_line(Bold + last_author);
+            message
+                .push_quote(get_thread_link(&thread, None, event_data.http()).await)
+                .push(" — ")
+                .push_line(Bold + last_author);
 
-            handle_send_result(reply_context.send_message_embed("Random thread", message), &bot.message_cache).await;
+            handle_send_result(
+                reply_context.send_message_embed("Random thread", message),
+                &bot.message_cache,
+            )
+            .await;
         },
     };
 
@@ -355,13 +469,21 @@ pub(crate) async fn get_formatted_list(
 
     for name in categories {
         if let Some(n) = name {
-            message.push_line(Bold + Underline + n)
-                .push_line("");
+            message.push_line(Bold + Underline + n).push_line("");
         }
 
         if let Some(threads) = threads.get(name) {
             for thread in threads {
-                push_thread_line(&mut message, thread, &guild_threads, context, message_cache, user.user_id, &muses).await;
+                push_thread_line(
+                    &mut message,
+                    thread,
+                    &guild_threads,
+                    context,
+                    message_cache,
+                    user.user_id,
+                    &muses,
+                )
+                .await;
             }
         }
 
@@ -379,8 +501,7 @@ pub(crate) async fn get_formatted_list(
     // Uncategorised todos at the end of the list
     if let Some(todos) = todos.get(&None) {
         if !todos.is_empty() {
-            message.push_line(Bold + Underline + "To Do")
-                .push_line("");
+            message.push_line(Bold + Underline + "To Do").push_line("");
 
             for todo in todos {
                 todos::push_todo_line(&mut message, todo);
@@ -409,14 +530,17 @@ fn trim_link_name(name: &str) -> String {
     }
 }
 
-async fn get_last_responder(thread: &TrackedThread, context: &Context, message_cache: &MessageCache) -> Option<User> {
+async fn get_last_responder(
+    thread: &TrackedThread,
+    context: &Context,
+    message_cache: &MessageCache,
+) -> Option<User> {
     if let Ok(Channel::Guild(channel)) = thread.channel_id.to_channel(context).await {
         if let Some(last_message_id) = channel.last_message_id {
             let channel_message = (last_message_id, channel.id).into();
-            message_cache.get_or_else(
-                &channel_message,
-                || channel_message.fetch(context)
-            ).await
+            message_cache
+                .get_or_else(&channel_message, || channel_message.fetch(context))
+                .await
                 .ok()
                 .map(|m| m.author.clone())
         }
@@ -434,8 +558,7 @@ async fn get_nick_or_name(user: &User, guild_id: GuildId, cache_http: impl Cache
         user.name.clone()
     }
     else {
-        user.nick_in(cache_http, guild_id).await
-            .unwrap_or(user.name.clone())
+        user.nick_in(cache_http, guild_id).await.unwrap_or(user.name.clone())
     }
 }
 
@@ -450,15 +573,10 @@ async fn push_thread_line<'a>(
 ) -> &'a mut MessageBuilder {
     let last_message_author = get_last_responder(thread, context, message_cache).await;
 
-    let link = get_thread_link(
-        thread,
-        guild_threads.get(&thread.channel_id).cloned(),
-        context,
-    ).await;
+    let link =
+        get_thread_link(thread, guild_threads.get(&thread.channel_id).cloned(), context).await;
     // Thread entries in blockquotes
-    message.push_quote("• ")
-        .push(link)
-        .push(" — ");
+    message.push_quote("• ").push(link).push(" — ");
 
     match last_message_author {
         Some(user) => {
@@ -474,7 +592,11 @@ async fn push_thread_line<'a>(
     }
 }
 
-async fn get_thread_link(thread: &TrackedThread, name: Option<String>, cache_http: impl CacheHttp) -> MessageBuilder {
+async fn get_thread_link(
+    thread: &TrackedThread,
+    name: Option<String>,
+    cache_http: impl CacheHttp,
+) -> MessageBuilder {
     let mut link = MessageBuilder::new();
     let channel_name = match name {
         Some(n) => Some(n),
@@ -484,7 +606,10 @@ async fn get_thread_link(thread: &TrackedThread, name: Option<String>, cache_htt
     match channel_name {
         Some(n) => {
             let name = trim_link_name(&n);
-            link.push_named_link(Bold + format!("#{}", name), format!("https://discord.com/channels/{}/{}", thread.guild_id, thread.channel_id))
+            link.push_named_link(
+                Bold + format!("#{}", name),
+                format!("https://discord.com/channels/{}/{}", thread.guild_id, thread.channel_id),
+            )
         },
         None => link.push(thread.channel_id.mention()),
     };
@@ -496,20 +621,23 @@ async fn get_thread_name(thread: &TrackedThread, cache_http: impl CacheHttp) -> 
     let name = if let Some(cache) = cache_http.cache() {
         thread.channel_id.name(cache).await
     }
-    else { None };
+    else {
+        None
+    };
 
     if let Some(n) = name {
         Some(n)
     }
     else {
-        thread.channel_id
-            .to_channel(cache_http).await
-            .map_or(None, |c| c.guild())
-            .map(|gc| gc.name)
+        thread.channel_id.to_channel(cache_http).await.map_or(None, |c| c.guild()).map(|gc| gc.name)
     }
 }
 
-async fn cache_last_channel_message(channel: Option<&GuildChannel>, http: impl AsRef<Http>, message_cache: &MessageCache) {
+async fn cache_last_channel_message(
+    channel: Option<&GuildChannel>,
+    http: impl AsRef<Http>,
+    message_cache: &MessageCache,
+) {
     if let Some(channel) = channel {
         if let Some(last_message_id) = channel.last_message_id {
             let channel_message = (last_message_id, channel.id).into();

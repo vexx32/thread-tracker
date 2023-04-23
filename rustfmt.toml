@@ -1,0 +1,16 @@
+match_block_trailing_comma = true
+use_field_init_shorthand = true
+condense_wildcard_suffixes = true
+reorder_impl_items = true
+
+use_small_heuristics = "Max"
+fn_params_layout = "Tall"
+
+imports_layout = "HorizontalVertical"
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"
+
+brace_style = "SameLineWhere"
+control_brace_style = "ClosingNextLine"
+
+chain_width = 120

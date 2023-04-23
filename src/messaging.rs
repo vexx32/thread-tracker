@@ -1,17 +1,11 @@
-use std::{sync::Arc, future::Future};
+use std::{future::Future, sync::Arc};
 
-use serenity::{
-    http::Http,
-    model::prelude::*,
-    prelude::*,
-    utils::Colour,
-};
+use serenity::{http::Http, model::prelude::*, prelude::*, utils::Colour};
 use tracing::{error, info};
 
 use crate::cache::MessageCache;
 
-pub(crate) struct ReplyContext
-{
+pub(crate) struct ReplyContext {
     channel_id: ChannelId,
     message_id: MessageId,
     http: Arc<Http>,
@@ -19,30 +13,51 @@ pub(crate) struct ReplyContext
 
 impl ReplyContext {
     pub(crate) fn new(channel_id: ChannelId, message_id: MessageId, http: &Arc<Http>) -> Self {
-        Self {
-            channel_id,
-            message_id,
-            http: Arc::clone(http),
-        }
+        Self { channel_id, message_id, http: Arc::clone(http) }
     }
 
-    pub(crate) async fn send_embed(&self, title: impl ToString, body: impl ToString, colour: Option<Colour>) -> Result<Message, SerenityError> {
+    pub(crate) async fn send_embed(
+        &self,
+        title: impl ToString,
+        body: impl ToString,
+        colour: Option<Colour>,
+    ) -> Result<Message, SerenityError> {
         info!("Sending embed `{}` with content `{}`", title.to_string(), body.to_string());
-        self.channel_id.send_message(&self.http, |msg| {
-            msg.embed(|embed| embed.title(title).description(body).colour(colour.unwrap_or(Colour::PURPLE)))
+        self.channel_id
+            .send_message(&self.http, |msg| {
+                msg.embed(|embed| {
+                    embed.title(title).description(body).colour(colour.unwrap_or(Colour::PURPLE))
+                })
                 .reference_message((self.channel_id, self.message_id))
-        }).await
+            })
+            .await
     }
 
-    pub(crate) async fn send_success_embed(&self, title: impl ToString, body: impl ToString, message_cache: &MessageCache) {
-        handle_send_result(self.send_embed(title, body, Some(Colour::FABLED_PINK)), message_cache).await;
+    pub(crate) async fn send_success_embed(
+        &self,
+        title: impl ToString,
+        body: impl ToString,
+        message_cache: &MessageCache,
+    ) {
+        handle_send_result(self.send_embed(title, body, Some(Colour::FABLED_PINK)), message_cache)
+            .await;
     }
 
-    pub(crate) async fn send_error_embed(&self, title: impl ToString, body: impl ToString, message_cache: &MessageCache) {
-        handle_send_result(self.send_embed(title, body, Some(Colour::DARK_ORANGE)), message_cache).await;
+    pub(crate) async fn send_error_embed(
+        &self,
+        title: impl ToString,
+        body: impl ToString,
+        message_cache: &MessageCache,
+    ) {
+        handle_send_result(self.send_embed(title, body, Some(Colour::DARK_ORANGE)), message_cache)
+            .await;
     }
 
-    pub(crate) async fn send_message_embed(&self, title: impl ToString, body: impl ToString) -> Result<Message, SerenityError> {
+    pub(crate) async fn send_message_embed(
+        &self,
+        title: impl ToString,
+        body: impl ToString,
+    ) -> Result<Message, SerenityError> {
         self.send_embed(title, body, None).await
     }
 }
@@ -57,7 +72,10 @@ impl From<&crate::EventData> for ReplyContext {
     }
 }
 
-pub(crate) async fn handle_send_result(task: impl Future<Output = Result<Message, SerenityError>>, message_cache: &MessageCache) {
+pub(crate) async fn handle_send_result(
+    task: impl Future<Output = Result<Message, SerenityError>>,
+    message_cache: &MessageCache,
+) {
     match task.await {
         Ok(msg) => {
             message_cache.store((msg.id, msg.channel_id).into(), msg).await;

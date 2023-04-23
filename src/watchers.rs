@@ -1,17 +1,16 @@
 use serenity::model::prelude::*;
 use thiserror::Error;
 use tracing::{error, info};
+use WatcherError::*;
 
 use crate::{
     db,
     threads,
-
+    utils::{ChannelMessage, GuildUser},
     CommandError::*,
-    EventData, utils::{GuildUser, ChannelMessage},
+    EventData,
     ThreadTrackerBot,
 };
-
-use WatcherError::*;
 
 type Result<T> = std::result::Result<T, WatcherError>;
 
@@ -62,15 +61,18 @@ pub(crate) async fn add(
     bot: &ThreadTrackerBot,
 ) -> anyhow::Result<()> {
     info!("[threadwatch] Adding watcher for user {}, categories {:?}", event_data.user_id, args);
-    let arguments = if !args.is_empty() {
-        Some(args.join(" "))
-    }
-    else {
-        None
-    };
+    let arguments = if !args.is_empty() { Some(args.join(" ")) } else { None };
 
     let message = threads::send_list_with_title(args, "Watching threads", event_data, bot).await?;
-    db::add_watcher(&bot.database, event_data.user_id.0, message.id.0, event_data.channel_id.0, event_data.guild_id.0, arguments.as_deref()).await?;
+    db::add_watcher(
+        &bot.database,
+        event_data.user_id.0,
+        message.id.0,
+        event_data.channel_id.0,
+        event_data.guild_id.0,
+        arguments.as_deref(),
+    )
+    .await?;
 
     Ok(())
 }
@@ -91,13 +93,22 @@ pub(crate) async fn remove(
     let (watcher_message_id, watcher_channel_id) = parse_message_link(message_url)?;
     let (database, message_cache) = (&bot.database, &bot.message_cache);
 
-    let watcher: ThreadWatcher = match db::get_watcher(database, watcher_channel_id, watcher_message_id).await? {
-        Some(w) => w.into(),
-        None => return Err(NotFound(format!("Could not find a watcher for the target message: `{}`", message_url)).into()),
-    };
+    let watcher: ThreadWatcher =
+        match db::get_watcher(database, watcher_channel_id, watcher_message_id).await? {
+            Some(w) => w.into(),
+            None => {
+                return Err(NotFound(format!(
+                    "Could not find a watcher for the target message: `{}`",
+                    message_url
+                ))
+                .into())
+            },
+        };
 
     if watcher.user_id != event_data.user_id {
-        return Err(NotAllowed(format!("User {} does not own the watcher.", event_data.user_id)).into());
+        return Err(
+            NotAllowed(format!("User {} does not own the watcher.", event_data.user_id)).into()
+        );
     }
 
     match db::remove_watcher(database, watcher.id).await? {
@@ -118,10 +129,7 @@ pub(crate) async fn remove(
 
 fn parse_message_link(link: &str) -> Result<(u64, u64)> {
     let mut result: Vec<u64> = Vec::with_capacity(2);
-    let message_url_fragments = link.split('/')
-        .rev()
-        .take(2)
-        .map(|s| s.parse().ok());
+    let message_url_fragments = link.split('/').rev().take(2).map(|s| s.parse().ok());
 
     for parsed in message_url_fragments {
         match parsed {
