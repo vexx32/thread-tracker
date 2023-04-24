@@ -36,7 +36,7 @@ pub(crate) const HELP_THREADS_TITLE: &str = "View or change tracked threads";
 pub(crate) const HELP_THREADS: &str = r#"
 Titi can show a list of all your tracked threads and who last responded to each thread. If the last reply isn't from you or one of your muses (`tt?muses`), the name is shown in bold to indicate it's awaiting a reply.
 
-Thread URLs can be found under `Copy Link` when you right click or long-press on the channel or thread in Discord. If a command takes multiple URLs, separate the links with spaces or linebreaks.
+Thread URLs can be found under `Copy Link` when you right click or long-press on the channel or thread in Discord. If you want to give multiple URLs at once, separate the links with spaces or linebreaks.
 
 Parameters in _`italics`_ are optional.
 

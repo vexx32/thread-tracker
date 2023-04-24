@@ -10,7 +10,7 @@ use serenity::{
 use shuttle_secrets::SecretStore;
 use sqlx::Executor;
 use thiserror::Error;
-use tracing::{error, info};
+use tracing::{error, info, debug};
 
 mod background_tasks;
 mod cache;
@@ -295,6 +295,7 @@ impl EventHandler for ThreadTrackerBot {
 
         if let Some(command) = msg.content.split_ascii_whitespace().next() {
             info!("[command] processing command `{}` from user `{}`", msg.content, user_id);
+            debug!("Message details: {:?}", msg);
             self.process_command(event_data, command, msg.content[command.len()..].trim_start())
                 .await;
         }
