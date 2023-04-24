@@ -112,7 +112,8 @@ impl HelpMessage {
             | "tt?untrack"
             | "tt?watch"
             | "tt?unwatch"
-            | "tt?random" => Some(Self::Threads),
+            | "tt?random"
+            | "tt?category" => Some(Self::Threads),
             "tt?todos"
             | "tt?todolist"
             | "tt?todo"
