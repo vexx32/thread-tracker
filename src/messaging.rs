@@ -9,6 +9,7 @@ use crate::{
     CommandError::*,
 };
 
+/// Wrapper struct to keep track of which channel and message is being replied to.
 pub(crate) struct ReplyContext {
     channel_id: ChannelId,
     message_id: MessageId,
@@ -16,10 +17,18 @@ pub(crate) struct ReplyContext {
 }
 
 impl ReplyContext {
+    /// Create a new `ReplyContext`
     pub(crate) fn new(channel_id: ChannelId, message_id: MessageId, http: &Arc<Http>) -> Self {
         Self { channel_id, message_id, http: Arc::clone(http) }
     }
 
+    /// Sends a custom embed.
+    ///
+    /// ### Arguments
+    ///
+    /// - `title` - the title of the embed
+    /// - `body` - the content of the embed
+    /// - `colour` - the colour of the embed border
     pub(crate) async fn send_embed(
         &self,
         title: impl ToString,
@@ -37,6 +46,13 @@ impl ReplyContext {
             .await
     }
 
+    /// Sends a 'success' confirmation embed.
+    ///
+    /// ### Arguments
+    ///
+    /// - `title` - the title of the embed
+    /// - `body` - the content of the embed
+    /// - `message_cache` - the cache to store sent messages in
     pub(crate) async fn send_success_embed(
         &self,
         title: impl ToString,
@@ -47,6 +63,13 @@ impl ReplyContext {
             .await;
     }
 
+    /// Sends an error embed.
+    ///
+    /// ### Argumentds
+    ///
+    /// - `title` - the title of the embed
+    /// - `body` - the content of the embed
+    /// - `message_cache` - the cache to store sent messages in
     pub(crate) async fn send_error_embed(
         &self,
         title: impl ToString,
@@ -57,6 +80,12 @@ impl ReplyContext {
             .await;
     }
 
+    /// Sends a normal message embed with the default colour.
+    ///
+    /// ### Arguments
+    ///
+    /// - `title` - the title of the embed
+    /// - `body` - the contents of the embed
     pub(crate) async fn send_message_embed(
         &self,
         title: impl ToString,
@@ -69,6 +98,7 @@ impl ReplyContext {
     ///
     /// ### Arguments
     ///
+    /// - `message` - the type of help message to send
     /// - `reply_context` - the bot context and channel to reply to
     pub(crate) async fn send_help(&self, message: HelpMessage, message_cache: &MessageCache) {
         handle_send_result(
@@ -89,6 +119,7 @@ impl From<&crate::EventData> for ReplyContext {
     }
 }
 
+/// Mapping enum to select appropriate help messages for various commands and retrieve the associated text.
 pub(crate) enum HelpMessage {
     Main,
     Muses,
@@ -97,6 +128,11 @@ pub(crate) enum HelpMessage {
 }
 
 impl HelpMessage {
+    /// Gets the appropriate `HelpMessage` for a given bot command.
+    ///
+    /// ### Arguments
+    ///
+    /// - `command` - the command string to fetch a help message for.
     pub fn from_command(command: &str) -> Option<Self> {
         match command {
             "tt!help"
@@ -122,6 +158,7 @@ impl HelpMessage {
         }
     }
 
+    /// Get the text for this help message.
     pub fn text(&self) -> &'static str {
         match self {
             Self::Main => HELP_MAIN,
@@ -131,6 +168,7 @@ impl HelpMessage {
         }
     }
 
+    /// Get the message title for this help message.
     pub fn title(&self) -> &'static str {
         match self {
             Self::Main => HELP_MAIN_TITLE,
@@ -141,6 +179,12 @@ impl HelpMessage {
     }
 }
 
+/// Log errors encountered when sending messages, and cache successful sent messages.
+///
+/// ### Arguments
+///
+/// - `task` - the async task that attempts to send a message.
+/// - `message_cache` - the cache to store sent messages in.
 pub(crate) async fn handle_send_result(
     task: impl Future<Output = Result<Message, SerenityError>>,
     message_cache: &MessageCache,
@@ -153,6 +197,13 @@ pub(crate) async fn handle_send_result(
     };
 }
 
+/// Sends an error embed indicating the input command is not recognised.
+///
+/// ### Arguments
+///
+/// - `reply_context` - the context to use when sending the reply
+/// - `command` - the unrecognised command
+/// - `message_cache` - the cache to store sent message in
 pub(crate) async fn send_unknown_command(reply_context: &ReplyContext, command: &str, message_cache: &MessageCache) {
     info!("Unknown command received: {}", command);
     reply_context
