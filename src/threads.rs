@@ -359,40 +359,6 @@ pub(crate) async fn send_list_with_title(
     }
 }
 
-pub(crate) async fn get_random_thread(
-    category: Option<&str>,
-    event_data: &EventData,
-    bot: &ThreadTrackerBot,
-) -> anyhow::Result<Option<(String, TrackedThread)>> {
-    let user = event_data.user();
-    let muses = muses::list(&bot.database, &user).await?;
-    let mut pending_threads = Vec::new();
-
-    for thread in enumerate(&bot.database, &user, category).await? {
-        let last_message_author =
-            get_last_responder(&thread, &event_data.context, &bot.message_cache).await;
-        match last_message_author {
-            Some(user) => {
-                let last_author_name =
-                    get_nick_or_name(&user, event_data.guild_id, event_data.http()).await;
-                if user.id != event_data.user_id && !muses.contains(&last_author_name) {
-                    pending_threads.push((last_author_name, thread));
-                }
-            },
-            None => pending_threads.push((String::from("No replies yet"), thread)),
-        }
-    }
-
-    if pending_threads.is_empty() {
-        Ok(None)
-    }
-    else {
-        let mut rng = rand::thread_rng();
-        let index = rng.gen_range(0..pending_threads.len());
-        Ok(Some(pending_threads.remove(index)))
-    }
-}
-
 pub(crate) async fn send_random_thread(
     mut args: Vec<&str>,
     event_data: &EventData,
@@ -443,6 +409,40 @@ pub(crate) async fn send_random_thread(
     };
 
     Ok(())
+}
+
+pub(crate) async fn get_random_thread(
+    category: Option<&str>,
+    event_data: &EventData,
+    bot: &ThreadTrackerBot,
+) -> anyhow::Result<Option<(String, TrackedThread)>> {
+    let user = event_data.user();
+    let muses = muses::list(&bot.database, &user).await?;
+    let mut pending_threads = Vec::new();
+
+    for thread in enumerate(&bot.database, &user, category).await? {
+        let last_message_author =
+            get_last_responder(&thread, &event_data.context, &bot.message_cache).await;
+        match last_message_author {
+            Some(user) => {
+                let last_author_name =
+                    get_nick_or_name(&user, event_data.guild_id, event_data.http()).await;
+                if user.id != event_data.user_id && !muses.contains(&last_author_name) {
+                    pending_threads.push((last_author_name, thread));
+                }
+            },
+            None => pending_threads.push((String::from("No replies yet"), thread)),
+        }
+    }
+
+    if pending_threads.is_empty() {
+        Ok(None)
+    }
+    else {
+        let mut rng = rand::thread_rng();
+        let index = rng.gen_range(0..pending_threads.len());
+        Ok(Some(pending_threads.remove(index)))
+    }
 }
 
 pub(crate) async fn get_formatted_list(

@@ -5,7 +5,7 @@ use serenity::{http::Http, model::prelude::*, prelude::*};
 use crate::{
     messaging::ReplyContext,
     watchers::ThreadWatcher,
-    CommandError::{self, *},
+    CommandError::*,
 };
 
 /// Wrapper struct to simplify passing around user/guild ID pair.
@@ -98,11 +98,9 @@ where
 }
 
 /// Returns `Err` if `unrecognised_args` is not empty.
-pub(crate) fn error_on_additional_arguments(
-    unrecognised_args: Vec<&str>,
-) -> Result<(), CommandError> {
+pub(crate) fn error_on_additional_arguments(unrecognised_args: Vec<&str>) -> anyhow::Result<()> {
     if !unrecognised_args.is_empty() {
-        return Err(UnrecognisedArguments(unrecognised_args.join(", ")));
+        return Err(UnrecognisedArguments(unrecognised_args.join(", ")).into());
     }
 
     Ok(())

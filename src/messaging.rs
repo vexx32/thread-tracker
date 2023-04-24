@@ -3,7 +3,11 @@ use std::{future::Future, sync::Arc};
 use serenity::{http::Http, model::prelude::*, prelude::*, utils::Colour};
 use tracing::{error, info};
 
-use crate::cache::MessageCache;
+use crate::{
+    cache::MessageCache,
+    consts::*,
+    CommandError::*,
+};
 
 pub(crate) struct ReplyContext {
     channel_id: ChannelId,
@@ -60,6 +64,19 @@ impl ReplyContext {
     ) -> Result<Message, SerenityError> {
         self.send_embed(title, body, None).await
     }
+
+    /// Sends the bot's help message to the channel.
+    ///
+    /// ### Arguments
+    ///
+    /// - `reply_context` - the bot context and channel to reply to
+    pub(crate) async fn send_help(&self, message: HelpMessage, message_cache: &MessageCache) {
+        handle_send_result(
+            self.send_message_embed(message.title(), message.text()),
+            message_cache,
+        )
+        .await;
+    }
 }
 
 impl From<&crate::EventData> for ReplyContext {
@@ -68,6 +85,57 @@ impl From<&crate::EventData> for ReplyContext {
             channel_id: value.channel_id,
             message_id: value.message_id,
             http: Arc::clone(&value.context.http),
+        }
+    }
+}
+
+pub(crate) enum HelpMessage {
+    Main,
+    Muses,
+    Threads,
+    Todos,
+}
+
+impl HelpMessage {
+    pub fn from_command(command: &str) -> Option<Self> {
+        match command {
+            "tt!help"
+            | "tt?help" => Some(Self::Main),
+            "tt?muses"
+            | "tt?addmuse"
+            | "tt?removemuse" => Some(Self::Muses),
+            "tt?threads"
+            | "tt?replies"
+            | "tt?add"
+            | "tt?track"
+            | "tt?remove"
+            | "tt?untrack"
+            | "tt?watch"
+            | "tt?unwatch"
+            | "tt?random" => Some(Self::Threads),
+            "tt?todos"
+            | "tt?todolist"
+            | "tt?todo"
+            | "tt?done" => Some(Self::Todos),
+            _ => None,
+        }
+    }
+
+    pub fn text(&self) -> &'static str {
+        match self {
+            Self::Main => HELP_MAIN,
+            Self::Muses => HELP_MUSES,
+            Self::Threads => HELP_THREADS,
+            Self::Todos => HELP_TODOS,
+        }
+    }
+
+    pub fn title(&self) -> &'static str {
+        match self {
+            Self::Main => HELP_MAIN_TITLE,
+            Self::Muses => HELP_MUSES_TITLE,
+            Self::Threads => HELP_THREADS_TITLE,
+            Self::Todos => HELP_TODOS_TITLE,
         }
     }
 }
@@ -82,4 +150,15 @@ pub(crate) async fn handle_send_result(
         },
         Err(err) => error!("Error sending message: {:?}", err),
     };
+}
+
+pub(crate) async fn send_unknown_command(reply_context: &ReplyContext, command: &str, message_cache: &MessageCache) {
+    info!("Unknown command received: {}", command);
+    reply_context
+        .send_error_embed(
+            "Unknown command",
+            UnknownCommand(command.to_owned()),
+            message_cache,
+        )
+        .await;
 }

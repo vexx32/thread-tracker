@@ -14,6 +14,7 @@ use tracing::{error, info};
 
 mod background_tasks;
 mod cache;
+mod consts;
 mod db;
 mod messaging;
 mod muses;
@@ -23,56 +24,10 @@ mod utils;
 mod watchers;
 
 use background_tasks::*;
+use consts::*;
 use db::Database;
 use messaging::*;
 use utils::{error_on_additional_arguments, EventData};
-use CommandError::*;
-
-const HELP_MESSAGE: &str = r#"
-`tt!help`
-This is the command that reaches this help message. You can use it if you ever have any questions about the current functionality of Thread Tracker. To report bugs or make feature requests, go to: <https://github.com/vexx32/thread-tracker>
-
-`tt!add` // `tt!track`
-This is the command that adds channels and threads to your tracker. After `add`, write a space or linebreak and then paste the URL of a channel (found under `Copy Link` when you right click or long-press on the channel). If you wish to paste more than one channel, make sure there's a space or linebreak between each. To add channels to a specific category, use `tt!add categoryname` followed by the channels you want to add to that category. Category names cannot contain spaces.
-
-`tt!cat` // `tt!category`
-This command will let you change an already-tracked thread's category. Specify the category name first, and then thread URLs to change those threads' categories. Use `unset` or `none` as the category name to make the thread(s) uncategorised. If you want to specify more than one thread, make sure there's a space between each. Category names cannot contain spaces.
-
-`tt!rm` // `tt!remove` // `tt!untrack`
-Use this in conjunction with a channel or thread URL to remove that URL from your list, one or more category names to remove all threads in those categories, or simply `all` to remove all tracked threads.
-
-`tt!replies` // `tt!threads`
-This command shows you, in a list, who responded last to each channel, with each category grouped together along with any to do-list items in those categories. Specify one or more category names to list only the threads and to do-list items in those categories.
-
-`tt!addmuse`
-Register a muse name. Registered muses determine which respondents should be considered you when using bots like Tupper. Thread Tracker will list the last respondent to a thread in bold if it is not you or a registered muse.
-
-`tt!removemuse`
-Remove a registered muse name.
-
-`tt!muses`
-List the currently registered muse names.
-
-`tt!watch`
-This command is similar to `tt!replies`, but once the list has been generated, the bot will periodically re-check the threads and update the same message rather than sending additional messages.
-
-`tt!unwatch`
-Copy the message URL from an existing watcher message (with the title "Watching threads") and use it with this command to remove the watcher and its associated message.
-
-`tt!random` // `tt!rng`
-Finds a random tracked thread that was last replied to by someone other than you. Optionally, provide a category name to limit the selection to that category.
-
-`tt!todos` // `tt!todolist`
-List all to do-list entries.
-
-`tt!todo`
-Adds a to do-list item. Optionally specify a category as `!categoryname` before the to do-list entry itself, for example: `tt!todo !mycategory do the thing`
-
-`tt!done`
-Crosses off and removes a to do-list item. Add `!categoryname` to remove all entries from that category, or `!all` to remove all to do entries.
-
-Titi's responses can be deleted by the user that triggered the request reacting with :no_entry_sign: or :wastebasket: — this will not work if the message that Titi's responding to has been deleted.
-"#;
 
 #[derive(Debug, Error)]
 pub(crate) enum CommandError {
@@ -118,17 +73,7 @@ impl ThreadTrackerBot {
     /// - `args` - string slice containing the rest of the message that follows the command
     async fn process_command(&self, event_data: EventData, command: &str, args: &str) {
         let reply_context = event_data.reply_context();
-        match command {
-            "tt!help" => {
-                let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = error_on_additional_arguments(args) {
-                    reply_context
-                        .send_error_embed("Too many arguments", e, &self.message_cache)
-                        .await;
-                };
-
-                help_message(reply_context, &self.message_cache).await;
-            },
+        match command.to_lowercase().as_str() {
             "tt!add" | "tt!track" => {
                 let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = threads::add(args, &event_data, self).await {
@@ -153,7 +98,7 @@ impl ThreadTrackerBot {
                         .await;
                 }
             },
-            "tt!rm" | "tt!remove" | "tt!untrack" => {
+            "tt!remove" | "tt!untrack" => {
                 let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = threads::remove(args, &event_data, self).await {
                     reply_context
@@ -173,7 +118,7 @@ impl ThreadTrackerBot {
                         .await;
                 }
             },
-            "tt!random" | "tt!rng" => {
+            "tt!random" => {
                 let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = threads::send_random_thread(args, &event_data, self).await {
                     reply_context
@@ -253,15 +198,22 @@ impl ThreadTrackerBot {
                         .await;
                 }
             },
-            other => {
-                info!("Unknown command received: {}", other);
-                reply_context
-                    .send_error_embed(
-                        "Unknown command",
-                        UnknownCommand(String::from(other)),
-                        &self.message_cache,
-                    )
-                    .await;
+            cmd => {
+                match HelpMessage::from_command(cmd) {
+                    Some(help_message) => {
+                        let args = args.split_ascii_whitespace().collect();
+                        if let Err(e) = error_on_additional_arguments(args) {
+                            reply_context
+                                .send_error_embed("Too many arguments", e, &self.message_cache)
+                                .await;
+                        };
+
+                        reply_context.send_help(help_message, &self.message_cache).await;
+                    },
+                    None => {
+                        send_unknown_command(&reply_context, command, &self.message_cache).await;
+                    },
+                }
             },
         }
     }
@@ -270,8 +222,6 @@ impl ThreadTrackerBot {
 #[async_trait]
 impl EventHandler for ThreadTrackerBot {
     async fn reaction_add(&self, context: Context, reaction: Reaction) {
-        const DELETE_EMOJI: [&str; 2] = ["🚫", "🗑️"];
-
         let bot_user = self.user().await;
         if reaction.user_id == bot_user {
             // Ignore reactions made by the bot user
@@ -313,8 +263,11 @@ impl EventHandler for ThreadTrackerBot {
     }
 
     async fn message(&self, context: Context, msg: Message) {
-        let user_id = msg.author.id;
+        if !msg.content.starts_with("tt!") && !msg.content.starts_with("tt?") {
+            return;
+        }
 
+        let user_id = msg.author.id;
         if Some(user_id) == self.user().await {
             return;
         }
@@ -340,10 +293,6 @@ impl EventHandler for ThreadTrackerBot {
 
         let event_data = EventData { user_id, guild_id, channel_id, message_id, context };
 
-        if !msg.content.starts_with("tt!") {
-            return;
-        }
-
         if let Some(command) = msg.content.split_ascii_whitespace().next() {
             info!("[command] processing command `{}` from user `{}`", msg.content, user_id);
             self.process_command(event_data, command, msg.content[command.len()..].trim_start())
@@ -358,19 +307,6 @@ impl EventHandler for ThreadTrackerBot {
 
         run_periodic_tasks(ctx.into(), self).await;
     }
-}
-
-/// Sends the bot's help message to the channel.
-///
-/// ### Arguments
-///
-/// - `reply_context` - the bot context and channel to reply to
-async fn help_message(reply_context: ReplyContext, message_cache: &MessageCache) {
-    handle_send_result(
-        reply_context.send_message_embed("Thread Tracker help", HELP_MESSAGE),
-        message_cache,
-    )
-    .await;
 }
 
 #[shuttle_runtime::main]
