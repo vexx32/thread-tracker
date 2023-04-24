@@ -10,7 +10,7 @@ use serenity::{
 use shuttle_secrets::SecretStore;
 use sqlx::Executor;
 use thiserror::Error;
-use tracing::{error, info, debug};
+use tracing::{debug, error, info};
 
 mod background_tasks;
 mod cache;
@@ -198,22 +198,20 @@ impl ThreadTrackerBot {
                         .await;
                 }
             },
-            cmd => {
-                match HelpMessage::from_command(cmd) {
-                    Some(help_message) => {
-                        let args = args.split_ascii_whitespace().collect();
-                        if let Err(e) = error_on_additional_arguments(args) {
-                            reply_context
-                                .send_error_embed("Too many arguments", e, &self.message_cache)
-                                .await;
-                        };
+            cmd => match HelpMessage::from_command(cmd) {
+                Some(help_message) => {
+                    let args = args.split_ascii_whitespace().collect();
+                    if let Err(e) = error_on_additional_arguments(args) {
+                        reply_context
+                            .send_error_embed("Too many arguments", e, &self.message_cache)
+                            .await;
+                    };
 
-                        reply_context.send_help(help_message, &self.message_cache).await;
-                    },
-                    None => {
-                        send_unknown_command(&reply_context, command, &self.message_cache).await;
-                    },
-                }
+                    reply_context.send_help(help_message, &self.message_cache).await;
+                },
+                None => {
+                    send_unknown_command(&reply_context, command, &self.message_cache).await;
+                },
             },
         }
     }
@@ -281,13 +279,24 @@ impl EventHandler for ThreadTrackerBot {
             else {
                 error!("Error: Not currently in a server.");
 
-                ReplyContext::new(channel_id, message_id, &context.http)
-                    .send_error_embed(
-                        "No direct messages please",
-                        "Sorry, Titi is only designed to work in a server currently.",
+                let reply_context = ReplyContext::new(channel_id, message_id, &context.http);
+                if user_id == DEBUG_USER {
+                    handle_send_result(
+                        reply_context.send_message_embed("Debug information", format!("{:?}", msg)),
                         &self.message_cache,
                     )
                     .await;
+                }
+                else {
+                    reply_context
+                        .send_error_embed(
+                            "No direct messages please",
+                            "Sorry, Titi is only designed to work in a server currently.",
+                            &self.message_cache,
+                        )
+                        .await;
+                }
+
                 return;
             };
 

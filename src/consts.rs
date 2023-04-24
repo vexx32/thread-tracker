@@ -1,4 +1,5 @@
 pub(crate) const DELETE_EMOJI: [&str; 2] = ["🚫", "🗑️"];
+pub(crate) const DEBUG_USER: u64 = 283711673934807042;
 
 pub(crate) const HELP_MAIN_TITLE: &str = "Help";
 pub(crate) const HELP_MAIN: &str = r#"
