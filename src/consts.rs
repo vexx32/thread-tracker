@@ -23,7 +23,9 @@ _Titi's responses can be deleted by the user that triggered the request reacting
 
 pub(crate) const HELP_MUSES_TITLE: &str = "View or change registered muses.";
 pub(crate) const HELP_MUSES: &str = r#"
-When using a bot like [Tupperbox](https://tupperbox.app), which lets you send responses from the bot under specific names, Titi can't normally tell which responses are from you. Registering a muse name lets Titi know which responses are yours. When listing threads (`tt?threads`), Titi will list the person who last responded to a thread in bold if it isn't you or one of your muses. It'll also ensure that Titi picks threads that you haven't responded to when using `tt!random`.
+When using a bot like [Tupperbox](https://tupperbox.app), which lets you send responses from the bot under specific names, Titi can't normally tell which responses are from you. Registering a muse name lets Titi know which responses are yours.
+
+When listing threads (`tt?threads`), Titi will list the person who last responded to a thread in bold if it isn't you or one of your muses. It'll also ensure that Titi picks threads that you haven't responded to when using `tt!random`.
 
 > **`tt!muses`** — List the currently registered muses
 > **`tt!addmuse`** `name` — Register a muse name
@@ -56,7 +58,9 @@ __**List**__
 
 pub(crate) const HELP_TODOS_TITLE: &str = "View or change to do-list entries.";
 pub(crate) const HELP_TODOS: &str = r#"
-Titi can help keep track of your to do list! To Do list entries will also be shown when listing threads, and can occupy the same categories as your normal threads. Note that using categories with to do-list items requires you prefix the category with `!`, for example `!Bob`.
+Titi can help keep track of your to do list! To Do list entries will also be shown when listing threads, and can occupy the same categories as your normal threads.
+
+Note that using categories with to do-list items requires you prefix the category with `!`, for example `!Bob`.
 
 > **`tt!todos`** — List all to do-list entries.
 > **`tt!todo`** _`!category`_ `todo text` — Add a to do-list item, optionally with a category.
