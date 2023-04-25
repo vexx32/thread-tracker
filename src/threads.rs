@@ -29,6 +29,7 @@ use crate::{
 
 lazy_static! {
     static ref URL_REGEX: Regex = Regex::new("^https://discord.com/channels/").unwrap();
+    static ref CHANNEL_MENTION_REGEX: Regex = Regex::new("<#[0-9]+>").unwrap();
 }
 
 pub(crate) struct TrackedThread {
@@ -66,7 +67,8 @@ pub(crate) async fn add(
     let mut args = args.into_iter().peekable();
     let (database, message_cache) = (&bot.database, &bot.message_cache);
 
-    let category = if !URL_REGEX.is_match(args.peek().unwrap_or(&"")) { args.next() } else { None };
+    let first_arg = args.peek().unwrap_or(&"");
+    let category = if !URL_REGEX.is_match(first_arg) && !CHANNEL_MENTION_REGEX.is_match(first_arg) { args.next() } else { None };
 
     if args.peek().is_none() {
         let example_url = format!("https://discord.com/channels/{guild_id}/{channel_id}", guild_id = event_data.guild_id, channel_id = event_data.channel_id);
@@ -79,13 +81,12 @@ pub(crate) async fn add(
     let mut errors = MessageBuilder::new();
 
     for thread_id in args {
-        if let Some(Ok(target_channel_id)) = thread_id.split('/').last().map(|x| x.parse()) {
-            let thread = ChannelId(target_channel_id);
-            match thread.to_channel(event_data.http()).await {
+        if let Some(channel_id) = parse_channel_id(thread_id) {
+            match channel_id.to_channel(event_data.http()).await {
                 Ok(channel) => {
                     info!(
                         "Adding tracked thread {} for user {}",
-                        target_channel_id, event_data.user_id
+                        channel_id, event_data.user_id
                     );
                     cache_last_channel_message(
                         channel.guild().as_ref(),
@@ -97,26 +98,26 @@ pub(crate) async fn add(
                     match db::add_thread(
                         database,
                         event_data.guild_id.0,
-                        target_channel_id,
+                        channel_id.0,
                         event_data.user_id.0,
                         category,
                     )
                     .await
                     {
-                        Ok(true) => threads_added.push("• ").mention(&thread).push_line(""),
+                        Ok(true) => threads_added.push("• ").mention(&channel_id).push_line(""),
                         Ok(false) => threads_added
                             .push("• Skipped ")
-                            .mention(&thread)
+                            .mention(&channel_id)
                             .push_line(" as it is already being tracked"),
                         Err(e) => errors
                             .push("• Failed to register thread ")
-                            .mention(&thread)
+                            .mention(&channel_id)
                             .push_line_safe(format!(": {}", e)),
                     }
                 },
                 Err(e) => errors
                     .push("• Cannot access channel ")
-                    .mention(&thread)
+                    .mention(&channel_id)
                     .push_line_safe(format!(": {}", e)),
             };
         }
@@ -161,31 +162,30 @@ pub(crate) async fn set_category(
     let mut errors = MessageBuilder::new();
 
     for thread_id in args {
-        if let Some(Ok(target_channel_id)) = thread_id.split('/').last().map(|x| x.parse()) {
-            let thread = ChannelId(target_channel_id);
-            match thread.to_channel(event_data.http()).await {
+        if let Some(channel_id) = parse_channel_id(thread_id) {
+            match channel_id.to_channel(event_data.http()).await {
                 Ok(_) => match db::update_thread_category(
                     database,
                     event_data.guild_id.0,
-                    target_channel_id,
+                    channel_id.0,
                     event_data.user_id.0,
                     category,
                 )
                 .await
                 {
-                    Ok(true) => threads_updated.push("• ").mention(&thread).push_line(""),
+                    Ok(true) => threads_updated.push("• ").mention(&channel_id).push_line(""),
                     Ok(false) => errors
                         .push("• ")
-                        .mention(&thread)
+                        .mention(&channel_id)
                         .push_line(" is not currently being tracked"),
                     Err(e) => errors
                         .push("• Failed to update thread category for ")
-                        .mention(&thread)
+                        .mention(&channel_id)
                         .push_line_safe(format!(": {}", e)),
                 },
                 Err(e) => errors
                     .push("• Cannot access channel ")
-                    .mention(&thread)
+                    .mention(&channel_id)
                     .push_line(format!(": {}", e)),
             };
         }
@@ -251,7 +251,27 @@ pub(crate) async fn remove(
     let mut errors = MessageBuilder::new();
 
     for thread_or_category in args {
-        if !URL_REGEX.is_match(thread_or_category) {
+        if let Some(channel_id) = parse_channel_id(thread_or_category) {
+            let result = db::remove_thread(
+                database,
+                event_data.guild_id.0,
+                channel_id.0,
+                event_data.user_id.0,
+            )
+            .await;
+
+            match result {
+                Ok(0) => errors
+                    .push_line(format!("• {} is not currently being tracked", channel_id.mention())),
+                Ok(_) => threads_removed.push_line(format!("• {:}", channel_id.mention())),
+                Err(e) => errors.push_line(format!(
+                    "• Failed to unregister thread {}: {}",
+                    channel_id.mention(),
+                    e
+                )),
+            };
+        }
+        else if !(URL_REGEX.is_match(thread_or_category) || CHANNEL_MENTION_REGEX.is_match(thread_or_category)) {
             match db::remove_all_threads(
                 database,
                 event_data.guild_id.0,
@@ -271,28 +291,6 @@ pub(crate) async fn remove(
                 Err(e) => errors.push_line(format!(
                     "• Unable to remove threads in category `{}`: {}",
                     thread_or_category, e
-                )),
-            };
-        }
-        else if let Some(Ok(target_channel_id)) =
-            thread_or_category.split('/').last().map(|x| x.parse())
-        {
-            let thread = ChannelId(target_channel_id);
-            match db::remove_thread(
-                database,
-                event_data.guild_id.0,
-                target_channel_id,
-                event_data.user_id.0,
-            )
-            .await
-            {
-                Ok(0) => errors
-                    .push_line(format!("• {} is not currently being tracked", thread.mention())),
-                Ok(_) => threads_removed.push_line(format!("• {:}", thread.mention())),
-                Err(e) => errors.push_line(format!(
-                    "• Failed to unregister thread {}: {}",
-                    thread.mention(),
-                    e
                 )),
             };
         }
@@ -654,5 +652,22 @@ async fn cache_last_channel_message(
                 }
             }
         }
+    }
+}
+
+fn parse_channel_id(url_or_mention: &str) -> Option<ChannelId> {
+    if CHANNEL_MENTION_REGEX.is_match(url_or_mention) {
+        url_or_mention.parse().ok()
+    }
+    else if URL_REGEX.is_match(url_or_mention) {
+        if let Some(Ok(target_channel_id)) = url_or_mention.split('/').last().map(|x| x.parse()) {
+            Some(ChannelId(target_channel_id))
+        }
+        else {
+            None
+        }
+    }
+    else {
+        None
     }
 }
