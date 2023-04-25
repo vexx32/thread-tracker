@@ -69,9 +69,9 @@ pub(crate) async fn add(
     let category = if !URL_REGEX.is_match(args.peek().unwrap_or(&"")) { args.next() } else { None };
 
     if args.peek().is_none() {
+        let example_url = format!("https://discord.com/channels/{guild_id}/{channel_id}", guild_id = event_data.guild_id, channel_id = event_data.channel_id);
         return Err(MissingArguments(format!(
-            "Please provide a thread or channel URL, such as: `tt!add {channel}`, optionally alongside a category name: `tt!add category {channel}`",
-            channel = event_data.channel_id.mention()
+            "Please provide a `#thread-link` or URL, such as: `tt!track {example_url}` or `tt!track #thread-name`, optionally alongside a category name: `tt!track category {example_url}`"
         )).into());
     }
 

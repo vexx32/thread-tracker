@@ -118,7 +118,7 @@ pub(crate) async fn remove(
                 .await?
         },
         None => {
-            message.push("To do list entry was ").push(Italic + entry);
+            message.push("To do list entry ").push(Italic + entry).push(" was ");
             db::remove_todo(database, event_data.guild_id.0, event_data.user_id.0, entry).await?
         },
     };

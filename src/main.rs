@@ -79,7 +79,7 @@ impl ThreadTrackerBot {
                 if let Err(e) = threads::add(args, &event_data, self).await {
                     reply_context
                         .send_error_embed(
-                            "Error adding tracked channel(s): {:}",
+                            "Error adding tracked channel(s)",
                             e,
                             &self.message_cache,
                         )
