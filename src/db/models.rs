@@ -33,3 +33,14 @@ pub(crate) struct TodoRow {
     pub content: String,
     pub category: Option<String>,
 }
+
+#[derive(FromRow)]
+pub(crate) struct Statistics {
+    pub users: i64,
+    pub servers: i64,
+    pub threads_distinct: i64,
+    pub threads_total: i64,
+    pub muses: i64,
+    pub todos: i64,
+    pub watchers: i64,
+}

@@ -328,3 +328,8 @@ pub(crate) async fn remove_all_todos(
 
     Ok(result.rows_affected())
 }
+
+pub(crate) async fn statistics(database: &Database) -> Result<Statistics> {
+    sqlx::query_as(include_str!("../sql/queries/stats.sql"))
+        .fetch_one(database).await
+}

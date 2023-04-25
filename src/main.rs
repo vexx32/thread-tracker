@@ -18,6 +18,7 @@ mod consts;
 mod db;
 mod messaging;
 mod muses;
+mod stats;
 mod threads;
 mod todos;
 mod utils;
@@ -78,11 +79,7 @@ impl ThreadTrackerBot {
                 let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = threads::add(args, &event_data, self).await {
                     reply_context
-                        .send_error_embed(
-                            "Error adding tracked channel(s)",
-                            e,
-                            &self.message_cache,
-                        )
+                        .send_error_embed("Error adding tracked channel(s)", e, &self.message_cache)
                         .await;
                 }
             },
@@ -198,6 +195,20 @@ impl ThreadTrackerBot {
                         .await;
                 }
             },
+            "tt!stats" => {
+                let args = args.split_ascii_whitespace().collect();
+                if let Err(e) = error_on_additional_arguments(args) {
+                    reply_context
+                        .send_error_embed("Too many arguments", e, &self.message_cache)
+                        .await;
+                }
+
+                if let Err(e) = stats::send_statistics(&reply_context, self).await {
+                    reply_context
+                        .send_error_embed("Error fetching statistics", e, &self.message_cache)
+                        .await
+                }
+            },
             cmd => match HelpMessage::from_command(cmd) {
                 Some(help_message) => {
                     let args = args.split_ascii_whitespace().collect();
@@ -246,14 +257,12 @@ impl EventHandler for ThreadTrackerBot {
                     if Some(referenced_message.author.id) == reaction.user_id {
                         if let Err(e) = message.delete(&context).await {
                             error!("Unable to delete message {:?}: {}", message, e);
-                        }
-                        else {
+                        } else {
                             info!("Message deleted successfully!");
                             self.message_cache.remove(&channel_message).await;
                         }
                     }
-                }
-                else {
+                } else {
                     error!("Could not find referenced message to check requesting user ID against")
                 }
             }
@@ -275,8 +284,7 @@ impl EventHandler for ThreadTrackerBot {
         let guild_id =
             if let Ok(Channel::Guild(guild_channel)) = channel_id.to_channel(&context.http).await {
                 guild_channel.guild_id
-            }
-            else {
+            } else {
                 error!("Error: Not currently in a server.");
 
                 let reply_context = ReplyContext::new(channel_id, message_id, &context.http);
@@ -286,8 +294,7 @@ impl EventHandler for ThreadTrackerBot {
                         &self.message_cache,
                     )
                     .await;
-                }
-                else {
+                } else {
                     reply_context
                         .send_error_embed(
                             "No direct messages please",
@@ -332,13 +339,15 @@ async fn serenity(
     // Get the discord token set in `Secrets.toml`
     let token = if let Some(token) = secret_store.get("DISCORD_TOKEN") {
         token
-    }
-    else {
+    } else {
         return Err(anyhow!("'DISCORD_TOKEN' was not found").into());
     };
 
     // Run the schema migration
-    database.execute(include_str!("../schema.sql")).await.context("failed to run migrations")?;
+    database
+        .execute(include_str!("../sql/schema.sql"))
+        .await
+        .context("failed to run migrations")?;
 
     // Set gateway intents, which decides what events the bot will be notified about
     let intents = GatewayIntents::GUILD_MESSAGES
