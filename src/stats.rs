@@ -1,10 +1,10 @@
+use serenity::utils::MessageBuilder;
+
 use crate::{
     db,
     messaging::{handle_send_result, ReplyContext},
     ThreadTrackerBot,
 };
-
-use serenity::utils::MessageBuilder;
 
 pub(crate) async fn send_statistics(
     reply_context: &ReplyContext,

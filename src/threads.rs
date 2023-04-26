@@ -61,12 +61,7 @@ pub(crate) async fn add(
     let (database, message_cache) = (&bot.database, &bot.message_cache);
 
     let first_arg = args.peek().unwrap_or(&"");
-    let category = if !is_channel_reference(first_arg) {
-        args.next()
-    }
-    else {
-        None
-    };
+    let category = if !is_channel_reference(first_arg) { args.next() } else { None };
 
     if args.peek().is_none() {
         let example_url = format!(

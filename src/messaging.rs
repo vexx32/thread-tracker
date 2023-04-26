@@ -3,11 +3,7 @@ use std::{future::Future, sync::Arc};
 use serenity::{http::Http, model::prelude::*, prelude::*, utils::Colour};
 use tracing::{error, info};
 
-use crate::{
-    cache::MessageCache,
-    consts::*,
-    CommandError::*,
-};
+use crate::{cache::MessageCache, consts::*, CommandError::*};
 
 /// Wrapper struct to keep track of which channel and message is being replied to.
 pub(crate) struct ReplyContext {
@@ -101,11 +97,8 @@ impl ReplyContext {
     /// - `message` - the type of help message to send
     /// - `reply_context` - the bot context and channel to reply to
     pub(crate) async fn send_help(&self, message: HelpMessage, message_cache: &MessageCache) {
-        handle_send_result(
-            self.send_message_embed(message.title(), message.text()),
-            message_cache,
-        )
-        .await;
+        handle_send_result(self.send_message_embed(message.title(), message.text()), message_cache)
+            .await;
     }
 }
 
@@ -135,25 +128,11 @@ impl HelpMessage {
     /// - `command` - the command string to fetch a help message for.
     pub fn from_command(command: &str) -> Option<Self> {
         match command {
-            "tt!help"
-            | "tt?help" => Some(Self::Main),
-            "tt?muses"
-            | "tt?addmuse"
-            | "tt?removemuse" => Some(Self::Muses),
-            "tt?threads"
-            | "tt?replies"
-            | "tt?add"
-            | "tt?track"
-            | "tt?remove"
-            | "tt?untrack"
-            | "tt?watch"
-            | "tt?unwatch"
-            | "tt?random"
-            | "tt?category" => Some(Self::Threads),
-            "tt?todos"
-            | "tt?todolist"
-            | "tt?todo"
-            | "tt?done" => Some(Self::Todos),
+            "tt!help" | "tt?help" => Some(Self::Main),
+            "tt?muses" | "tt?addmuse" | "tt?removemuse" => Some(Self::Muses),
+            "tt?threads" | "tt?replies" | "tt?add" | "tt?track" | "tt?remove" | "tt?untrack"
+            | "tt?watch" | "tt?unwatch" | "tt?random" | "tt?category" => Some(Self::Threads),
+            "tt?todos" | "tt?todolist" | "tt?todo" | "tt?done" => Some(Self::Todos),
             _ => None,
         }
     }
@@ -204,13 +183,13 @@ pub(crate) async fn handle_send_result(
 /// - `reply_context` - the context to use when sending the reply
 /// - `command` - the unrecognised command
 /// - `message_cache` - the cache to store sent message in
-pub(crate) async fn send_unknown_command(reply_context: &ReplyContext, command: &str, message_cache: &MessageCache) {
+pub(crate) async fn send_unknown_command(
+    reply_context: &ReplyContext,
+    command: &str,
+    message_cache: &MessageCache,
+) {
     info!("Unknown command received: {}", command);
     reply_context
-        .send_error_embed(
-            "Unknown command",
-            UnknownCommand(command.to_owned()),
-            message_cache,
-        )
+        .send_error_embed("Unknown command", UnknownCommand(command.to_owned()), message_cache)
         .await;
 }

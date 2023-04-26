@@ -257,12 +257,14 @@ impl EventHandler for ThreadTrackerBot {
                     if Some(referenced_message.author.id) == reaction.user_id {
                         if let Err(e) = message.delete(&context).await {
                             error!("Unable to delete message {:?}: {}", message, e);
-                        } else {
+                        }
+                        else {
                             info!("Message deleted successfully!");
                             self.message_cache.remove(&channel_message).await;
                         }
                     }
-                } else {
+                }
+                else {
                     error!("Could not find referenced message to check requesting user ID against")
                 }
             }
@@ -284,7 +286,8 @@ impl EventHandler for ThreadTrackerBot {
         let guild_id =
             if let Ok(Channel::Guild(guild_channel)) = channel_id.to_channel(&context.http).await {
                 guild_channel.guild_id
-            } else {
+            }
+            else {
                 error!("Error: Not currently in a server.");
 
                 let reply_context = ReplyContext::new(channel_id, message_id, &context.http);
@@ -294,7 +297,8 @@ impl EventHandler for ThreadTrackerBot {
                         &self.message_cache,
                     )
                     .await;
-                } else {
+                }
+                else {
                     reply_context
                         .send_error_embed(
                             "No direct messages please",
@@ -339,7 +343,8 @@ async fn serenity(
     // Get the discord token set in `Secrets.toml`
     let token = if let Some(token) = secret_store.get("DISCORD_TOKEN") {
         token
-    } else {
+    }
+    else {
         return Err(anyhow!("'DISCORD_TOKEN' was not found").into());
     };
 

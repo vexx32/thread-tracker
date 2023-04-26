@@ -2,11 +2,7 @@ use std::collections::BTreeMap;
 
 use serenity::{http::Http, model::prelude::*, prelude::*};
 
-use crate::{
-    messaging::ReplyContext,
-    watchers::ThreadWatcher,
-    CommandError::*,
-};
+use crate::{messaging::ReplyContext, watchers::ThreadWatcher, CommandError::*};
 
 /// Wrapper struct to simplify passing around user/guild ID pair.
 pub(crate) struct GuildUser {
