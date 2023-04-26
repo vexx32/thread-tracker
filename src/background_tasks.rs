@@ -6,6 +6,7 @@ use tracing::{error, info};
 
 use crate::{
     cache::MessageCache,
+    consts::*,
     db::{self, Database},
     muses,
     threads::{self, TrackedThread},
@@ -14,11 +15,12 @@ use crate::{
     ThreadTrackerBot,
 };
 
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(295);
-const WATCHER_UPDATE_INTERVAL: Duration = Duration::from_secs(600);
-const CACHE_TRIM_INTERVAL: Duration = Duration::from_secs(2995);
-
 /// Core task spawning function. Creates a set of periodically recurring tasks on their own threads.
+///
+/// ### Arguments
+///
+/// - `context` - the Serenity context to delegate to tasks
+/// - `bot` - the bot instance to delegate to tasks
 pub(crate) async fn run_periodic_tasks(context: Arc<Context>, bot: &ThreadTrackerBot) {
     let c = Arc::clone(&context);
     spawn_task_loop(HEARTBEAT_INTERVAL, move || heartbeat(Arc::clone(&c)));

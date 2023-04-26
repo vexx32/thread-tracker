@@ -139,21 +139,25 @@ impl HelpMessage {
 
     /// Get the text for this help message.
     pub fn text(&self) -> &'static str {
+        use help::*;
+
         match self {
-            Self::Main => HELP_MAIN,
-            Self::Muses => HELP_MUSES,
-            Self::Threads => HELP_THREADS,
-            Self::Todos => HELP_TODOS,
+            Self::Main => MAIN,
+            Self::Muses => MUSES,
+            Self::Threads => THREADS,
+            Self::Todos => TODOS,
         }
     }
 
     /// Get the message title for this help message.
     pub fn title(&self) -> &'static str {
+        use help::*;
+
         match self {
-            Self::Main => HELP_MAIN_TITLE,
-            Self::Muses => HELP_MUSES_TITLE,
-            Self::Threads => HELP_THREADS_TITLE,
-            Self::Todos => HELP_TODOS_TITLE,
+            Self::Main => MAIN_TITLE,
+            Self::Muses => MUSES_TITLE,
+            Self::Threads => THREADS_TITLE,
+            Self::Todos => TODOS_TITLE,
         }
     }
 }
