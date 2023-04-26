@@ -3,9 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use lazy_static::lazy_static;
 use rand::Rng;
-use regex::Regex;
 use serenity::{
     http::{CacheHttp, Http},
     model::prelude::*,
@@ -26,11 +24,6 @@ use crate::{
     EventData,
     ThreadTrackerBot,
 };
-
-lazy_static! {
-    static ref URL_REGEX: Regex = Regex::new("^https://discord.com/channels/").unwrap();
-    static ref CHANNEL_MENTION_REGEX: Regex = Regex::new("<#[0-9]+>").unwrap();
-}
 
 pub(crate) struct TrackedThread {
     pub channel_id: ChannelId,
@@ -68,10 +61,19 @@ pub(crate) async fn add(
     let (database, message_cache) = (&bot.database, &bot.message_cache);
 
     let first_arg = args.peek().unwrap_or(&"");
-    let category = if !URL_REGEX.is_match(first_arg) && !CHANNEL_MENTION_REGEX.is_match(first_arg) { args.next() } else { None };
+    let category = if !is_channel_reference(first_arg) {
+        args.next()
+    }
+    else {
+        None
+    };
 
     if args.peek().is_none() {
-        let example_url = format!("https://discord.com/channels/{guild_id}/{channel_id}", guild_id = event_data.guild_id, channel_id = event_data.channel_id);
+        let example_url = format!(
+            "https://discord.com/channels/{guild_id}/{channel_id}",
+            guild_id = event_data.guild_id,
+            channel_id = event_data.channel_id
+        );
         return Err(MissingArguments(format!(
             "Please provide a `#thread-link` or URL, such as: `tt!track {example_url}` or `tt!track #thread-name`, optionally alongside a category name: `tt!track category {example_url}`"
         )).into());
@@ -84,10 +86,7 @@ pub(crate) async fn add(
         if let Some(channel_id) = parse_channel_id(thread_id) {
             match channel_id.to_channel(event_data.http()).await {
                 Ok(channel) => {
-                    info!(
-                        "Adding tracked thread {} for user {}",
-                        channel_id, event_data.user_id
-                    );
+                    info!("Adding tracked thread {} for user {}", channel_id, event_data.user_id);
                     cache_last_channel_message(
                         channel.guild().as_ref(),
                         event_data.http(),
@@ -261,8 +260,10 @@ pub(crate) async fn remove(
             .await;
 
             match result {
-                Ok(0) => errors
-                    .push_line(format!("• {} is not currently being tracked", channel_id.mention())),
+                Ok(0) => errors.push_line(format!(
+                    "• {} is not currently being tracked",
+                    channel_id.mention()
+                )),
                 Ok(_) => threads_removed.push_line(format!("• {:}", channel_id.mention())),
                 Err(e) => errors.push_line(format!(
                     "• Failed to unregister thread {}: {}",
@@ -271,7 +272,7 @@ pub(crate) async fn remove(
                 )),
             };
         }
-        else if !(URL_REGEX.is_match(thread_or_category) || CHANNEL_MENTION_REGEX.is_match(thread_or_category)) {
+        else if !is_channel_reference(thread_or_category) {
             match db::remove_all_threads(
                 database,
                 event_data.guild_id.0,
@@ -656,10 +657,10 @@ async fn cache_last_channel_message(
 }
 
 fn parse_channel_id(url_or_mention: &str) -> Option<ChannelId> {
-    if CHANNEL_MENTION_REGEX.is_match(url_or_mention) {
+    if is_channel_mention(url_or_mention) {
         url_or_mention.parse().ok()
     }
-    else if URL_REGEX.is_match(url_or_mention) {
+    else if is_discord_link(url_or_mention) {
         if let Some(Ok(target_channel_id)) = url_or_mention.split('/').last().map(|x| x.parse()) {
             Some(ChannelId(target_channel_id))
         }
@@ -670,4 +671,16 @@ fn parse_channel_id(url_or_mention: &str) -> Option<ChannelId> {
     else {
         None
     }
+}
+
+fn is_channel_reference(s: &str) -> bool {
+    is_channel_mention(s) || is_discord_link(s)
+}
+
+fn is_discord_link(s: &str) -> bool {
+    s.starts_with("https://") && s.matches("discord.com/channels/").any(|_| true)
+}
+
+fn is_channel_mention(s: &str) -> bool {
+    s.starts_with("<#") && s.ends_with('>')
 }
