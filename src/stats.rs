@@ -1,5 +1,3 @@
-use serenity::utils::MessageBuilder;
-
 use crate::{
     db,
     messaging::{handle_send_result, ReplyContext},
@@ -18,26 +16,17 @@ pub(crate) async fn send_statistics(
 ) -> anyhow::Result<()> {
     let stats = db::statistics(&bot.database).await?;
 
-    let mut message = MessageBuilder::new();
-
-    message
-        .push_bold("Unique users: ")
-        .push_line(stats.users)
-        .push_bold("Servers: ")
-        .push_line(stats.servers)
-        .push_bold("Unique threads: ")
-        .push_line(stats.threads_distinct)
-        .push_bold("Total threads: ")
-        .push_line(stats.threads_total)
-        .push_bold("Watchers: ")
-        .push_line(stats.watchers)
-        .push_bold("Muses: ")
-        .push_line(stats.muses)
-        .push_bold("To do-list items: ")
-        .push_line(stats.todos);
-
+    let fields = [
+        ("Unique users", stats.users),
+        ("Servers", stats.servers),
+        ("Unique threads", stats.threads_distinct),
+        ("Total threads", stats.threads_total),
+        ("Watchers", stats.watchers),
+        ("Muses", stats.muses),
+        ("To Dos", stats.todos),
+    ];
     handle_send_result(
-        reply_context.send_message_embed("Thread Tracker Statistics", message),
+        reply_context.send_data_embed("Thread Tracker Statistics", "", fields.into_iter()),
         &bot.message_cache,
     )
     .await;

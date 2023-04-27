@@ -1,6 +1,6 @@
 use std::{future::Future, sync::Arc};
 
-use serenity::{http::Http, model::prelude::*, prelude::*, utils::Colour};
+use serenity::{builder::CreateEmbed, http::Http, model::prelude::*, prelude::*, utils::Colour};
 use tracing::{error, info};
 
 use crate::{cache::MessageCache, consts::*, CommandError::*};
@@ -32,12 +32,24 @@ impl ReplyContext {
         colour: Option<Colour>,
     ) -> Result<Message, SerenityError> {
         info!("Sending embed `{}` with content `{}`", title.to_string(), body.to_string());
+        self.send_custom_embed(title, body, |embed| embed.colour(colour.unwrap_or(Colour::PURPLE)))
+            .await
+    }
+
+    pub(crate) async fn send_custom_embed<F>(
+        &self,
+        title: impl ToString,
+        body: impl ToString,
+        f: F,
+    ) -> Result<Message, SerenityError>
+    where
+        F: FnOnce(&mut CreateEmbed) -> &mut CreateEmbed,
+    {
+        info!("Sending custom embed `{}` with content `{}`", title.to_string(), body.to_string());
         self.channel_id
             .send_message(&self.http, |msg| {
-                msg.embed(|embed| {
-                    embed.title(title).description(body).colour(colour.unwrap_or(Colour::PURPLE))
-                })
-                .reference_message((self.channel_id, self.message_id))
+                msg.embed(|embed| f(embed.title(title).description(body)))
+                    .reference_message((self.channel_id, self.message_id))
             })
             .await
     }
@@ -88,6 +100,22 @@ impl ReplyContext {
         body: impl ToString,
     ) -> Result<Message, SerenityError> {
         self.send_embed(title, body, None).await
+    }
+
+    pub(crate) async fn send_data_embed<T, U>(
+        &self,
+        title: impl ToString,
+        body: impl ToString,
+        fields: impl Iterator<Item = (T, U)>,
+    ) -> Result<Message, SerenityError>
+    where
+        T: ToString,
+        U: ToString,
+    {
+        self.send_custom_embed(title, body, |embed| {
+            embed.colour(Colour::TEAL).fields(fields.map(|(name, value)| (name, value, true)))
+        })
+        .await
     }
 
     /// Sends the bot's help message to the channel.
