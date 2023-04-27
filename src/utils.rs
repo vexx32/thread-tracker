@@ -105,3 +105,9 @@ pub(crate) fn error_on_additional_arguments(unrecognised_args: Vec<&str>) -> any
 
     Ok(())
 }
+
+/// If the given string starts with `tt!` or `tt?` (case-insensitive), returns true.
+pub(crate) fn message_is_command(content: &str) -> bool {
+    let prefix: String = content.chars().take(3).flat_map(|c| c.to_lowercase()).collect();
+    prefix == "tt!" || prefix == "tt?"
+}

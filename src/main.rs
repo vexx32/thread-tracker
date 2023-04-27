@@ -28,7 +28,7 @@ use background_tasks::*;
 use consts::*;
 use db::Database;
 use messaging::*;
-use utils::{error_on_additional_arguments, EventData};
+use utils::{error_on_additional_arguments, message_is_command, EventData};
 
 /// Command parsing errors
 #[derive(Debug, Error)]
@@ -239,6 +239,30 @@ impl ThreadTrackerBot {
             },
         }
     }
+
+    async fn process_direct_message(
+        &self,
+        user_id: UserId,
+        reply_context: ReplyContext,
+        message: Message,
+    ) {
+        if user_id == DEBUG_USER {
+            handle_send_result(
+                reply_context.send_message_embed("Debug information", format!("{:?}", message)),
+                &self.message_cache,
+            )
+            .await;
+        }
+        else {
+            reply_context
+                .send_error_embed(
+                    "No direct messages please",
+                    "Sorry, Titi is only designed to work in a server currently.",
+                    &self.message_cache,
+                )
+                .await;
+        }
+    }
 }
 
 #[async_trait]
@@ -284,53 +308,37 @@ impl EventHandler for ThreadTrackerBot {
         }
     }
 
-    async fn message(&self, context: Context, msg: Message) {
-        if !msg.content.starts_with("tt!") && !msg.content.starts_with("tt?") {
+    async fn message(&self, context: Context, message: Message) {
+        if !message_is_command(&message.content) {
             return;
         }
 
-        let user_id = msg.author.id;
+        let user_id = message.author.id;
         if Some(user_id) == self.user().await {
             return;
         }
 
-        let message_id = msg.id;
-        let channel_id = msg.channel_id;
-        let guild_id =
-            if let Ok(Channel::Guild(guild_channel)) = channel_id.to_channel(&context.http).await {
-                guild_channel.guild_id
-            }
-            else {
-                error!("Error: Not currently in a server.");
+        let message_id = message.id;
+        let channel_id = message.channel_id;
 
-                let reply_context = ReplyContext::new(channel_id, message_id, &context.http);
-                if user_id == DEBUG_USER {
-                    handle_send_result(
-                        reply_context.send_message_embed("Debug information", format!("{:?}", msg)),
-                        &self.message_cache,
-                    )
-                    .await;
-                }
-                else {
-                    reply_context
-                        .send_error_embed(
-                            "No direct messages please",
-                            "Sorry, Titi is only designed to work in a server currently.",
-                            &self.message_cache,
-                        )
-                        .await;
-                }
+        if let Ok(Channel::Guild(guild_channel)) = channel_id.to_channel(&context.http).await {
+            let guild_id = guild_channel.guild_id;
+            let event_data = EventData { user_id, guild_id, channel_id, message_id, context };
 
-                return;
-            };
-
-        let event_data = EventData { user_id, guild_id, channel_id, message_id, context };
-
-        if let Some(command) = msg.content.split_ascii_whitespace().next() {
-            info!("[command] processing command `{}` from user `{}`", msg.content, user_id);
-            debug!("Message details: {:?}", msg);
-            self.process_command(event_data, command, msg.content[command.len()..].trim_start())
+            if let Some(command) = message.content.split_ascii_whitespace().next() {
+                info!("[command] processing command `{}` from user `{}`", message.content, user_id);
+                debug!("Message details: {:?}", message);
+                self.process_command(
+                    event_data,
+                    command,
+                    message.content[command.len()..].trim_start(),
+                )
                 .await;
+            }
+        }
+        else {
+            let reply_context = ReplyContext::new(channel_id, message_id, &context.http);
+            self.process_direct_message(user_id, reply_context, message).await;
         }
     }
 
