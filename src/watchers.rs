@@ -14,6 +14,7 @@ use crate::{
 
 type Result<T> = std::result::Result<T, WatcherError>;
 
+/// Stores all necessary information for updating watched thread lists.
 #[derive(Debug)]
 pub(crate) struct ThreadWatcher {
     pub message_id: MessageId,
@@ -25,10 +26,12 @@ pub(crate) struct ThreadWatcher {
 }
 
 impl ThreadWatcher {
+    /// Get the guild and user for this thread watcher.
     pub fn user(&self) -> GuildUser {
         self.into()
     }
 
+    /// Get the channel and message for this thread watcher.
     pub fn message(&self) -> ChannelMessage {
         (self.channel_id, self.message_id).into()
     }
@@ -47,6 +50,7 @@ impl From<db::ThreadWatcherRow> for ThreadWatcher {
     }
 }
 
+/// Errors encountered while handling watchers.
 #[derive(Error, Debug)]
 enum WatcherError {
     #[error("Error fetching watcher: {0}")]
@@ -55,6 +59,13 @@ enum WatcherError {
     NotAllowed(String),
 }
 
+/// Add a new thread watcher and send the initial watcher message.
+///
+/// ### Arguments
+///
+/// - `args` - the command arguments
+/// - `event_data` - the event data
+/// - `bot` - the bot instance
 pub(crate) async fn add(
     args: Vec<&str>,
     event_data: &EventData,
@@ -77,6 +88,13 @@ pub(crate) async fn add(
     Ok(())
 }
 
+/// Removes a currently active watcher and deletes the watched message.
+///
+/// ### Arguments
+///
+/// - `args` - the command arguments
+/// - `event_data` - the event data
+/// - `bot` - the bot instance
 pub(crate) async fn remove(
     args: Vec<&str>,
     event_data: &EventData,
@@ -127,6 +145,7 @@ pub(crate) async fn remove(
     Ok(())
 }
 
+/// Parse a message link to retrieve the message and channel IDs.
 fn parse_message_link(link: &str) -> Result<(u64, u64)> {
     let mut result: Vec<u64> = Vec::with_capacity(2);
     let message_url_fragments = link.split('/').rev().take(2).map(|s| s.parse().ok());

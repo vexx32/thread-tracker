@@ -8,9 +8,7 @@ use std::{
 
 use serenity::{model::prelude::*, prelude::*};
 
-use crate::utils::ChannelMessage;
-
-const CACHE_LIFETIME: Duration = Duration::from_secs(6000);
+use crate::{consts::CACHE_LIFETIME, utils::ChannelMessage};
 
 pub(crate) type MessageCache = MemoryCache<ChannelMessage, Message>;
 

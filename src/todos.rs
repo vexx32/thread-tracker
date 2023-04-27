@@ -11,6 +11,7 @@ use crate::{
     ThreadTrackerBot,
 };
 
+/// To do list entry from the database.
 pub(crate) struct Todo {
     pub content: String,
     pub category: Option<String>,
@@ -22,6 +23,13 @@ impl From<db::TodoRow> for Todo {
     }
 }
 
+/// Add a new to do list entry.
+///
+/// ### Arguments
+///
+/// - `args` - the command arguments
+/// - `event_data` - the event data
+/// - `bot` - the bot instance
 pub(crate) async fn add<'a>(
     args: &str,
     event_data: &EventData,
@@ -80,6 +88,13 @@ pub(crate) async fn add<'a>(
     Ok(())
 }
 
+/// Remove an existing to do list entry.
+///
+/// ### Arguments
+///
+/// - `args` - the command arguments
+/// - `event_data` - the event data
+/// - `bot` - the bot instance
 pub(crate) async fn remove(
     entry: &str,
     event_data: &EventData,
@@ -140,6 +155,13 @@ pub(crate) async fn remove(
     Ok(())
 }
 
+/// Send the full to do list.
+///
+/// ### Arguments
+///
+/// - `args` - the command arguments
+/// - `event_data` - the event data
+/// - `bot` - the bot instance
 pub(crate) async fn send_list(
     args: Vec<&str>,
     event_data: &EventData,
@@ -186,10 +208,18 @@ pub(crate) async fn send_list(
     Ok(())
 }
 
+/// Partition the to do entries into categories.
 pub(crate) fn categorise(todos: Vec<Todo>) -> BTreeMap<Option<String>, Vec<Todo>> {
     partition_into_map(todos, |t| t.category.clone())
 }
 
+/// Retrieve a list of all to do entries in the target categories.
+///
+/// ### Arguments
+///
+/// - `database` - the database to query
+/// - `user` - the user to query to do entries for
+/// - `categories` - an optional list of categories to find to do entries in
 pub(crate) async fn list(
     database: &Database,
     user: &GuildUser,
@@ -211,6 +241,7 @@ pub(crate) async fn list(
     Ok(result)
 }
 
+/// Create an iterator over the to do list entries in the database for the given user and category.
 pub(crate) async fn enumerate(
     database: &Database,
     user: &GuildUser,
@@ -222,6 +253,7 @@ pub(crate) async fn enumerate(
         .map(|t| t.into()))
 }
 
+/// Append a line to the message builder containing the to do list item's text.
 pub(crate) fn push_todo_line<'a>(
     message: &'a mut MessageBuilder,
     todo: &Todo,

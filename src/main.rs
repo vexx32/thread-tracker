@@ -30,6 +30,7 @@ use db::Database;
 use messaging::*;
 use utils::{error_on_additional_arguments, EventData};
 
+/// Command parsing errors
 #[derive(Debug, Error)]
 pub(crate) enum CommandError {
     #[error("Additional arguments are required. {0}")]
@@ -46,21 +47,33 @@ pub(crate) enum CommandError {
 struct ThreadTrackerBot {
     /// Postgres database pool
     database: Database,
+    /// Threadsafe memory cache for messages the bot has sent or looked up
     message_cache: MessageCache,
+    /// The bot's current user id
     user_id: Arc<RwLock<Option<UserId>>>,
 }
 
 impl ThreadTrackerBot {
     /// Create a new bot instance.
+    ///
+    /// ### Arguments
+    ///
+    /// - `database` - database pool connection
     fn new(database: Database) -> Self {
         Self { database, message_cache: MessageCache::new(), user_id: Arc::new(RwLock::new(None)) }
     }
 
+    /// Sets the current user ID for the bot
+    ///
+    /// ### Arguments
+    ///
+    /// - `id` - the UserId
     async fn set_user(&self, id: UserId) {
         let mut guard = self.user_id.write().await;
         *guard = Some(id);
     }
 
+    /// Gets the current user ID for the bot, if it's been set
     async fn user(&self) -> Option<UserId> {
         *self.user_id.read().await
     }

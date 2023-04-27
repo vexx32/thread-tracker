@@ -14,6 +14,7 @@ use tracing::{error, info};
 
 use crate::{
     cache::MessageCache,
+    consts::THREAD_NAME_LENGTH,
     db::{self, Database},
     error_on_additional_arguments,
     messaging::*,
@@ -41,6 +42,13 @@ impl From<db::TrackedThreadRow> for TrackedThread {
     }
 }
 
+/// Get an iterator for the entries from the threads table for the given user.
+///
+/// ### Arguments
+///
+/// - `database` - the database to retrieve entries from
+/// - `user` the user to get thread entries for
+/// - `category` the category to filter results by
 pub(crate) async fn enumerate(
     database: &Database,
     user: &GuildUser,
@@ -52,6 +60,13 @@ pub(crate) async fn enumerate(
         .map(|t| t.into()))
 }
 
+/// Adds an entry to the threads table
+///
+/// ### Arguments
+///
+/// - `args` - the command arguments
+/// - `event_data` - the event data
+/// - `bot` - the bot instance
 pub(crate) async fn add(
     args: Vec<&str>,
     event_data: &EventData,
@@ -138,6 +153,13 @@ pub(crate) async fn add(
     Ok(())
 }
 
+/// Change the category of an existing entry in the threads table
+///
+/// ### Arguments
+///
+/// - `args` - the command arguments
+/// - `event_data` - the event data
+/// - `bot` - the bot instance
 pub(crate) async fn set_category(
     args: Vec<&str>,
     event_data: &EventData,
@@ -208,6 +230,13 @@ pub(crate) async fn set_category(
     Ok(())
 }
 
+/// Remove an entry for the threads table.
+///
+/// ### Arguments
+///
+/// - `args` - the command arguments
+/// - `event_data` - the event data
+/// - `bot` - the bot instance
 pub(crate) async fn remove(
     args: Vec<&str>,
     event_data: &EventData,
@@ -311,6 +340,13 @@ pub(crate) async fn remove(
     Ok(())
 }
 
+/// Send the list of threads and todos with the default title.
+///
+/// ### Arguments
+///
+/// - `args` - the command arguments
+/// - `event_data` - the event data
+/// - `bot` - the bot instance
 pub(crate) async fn send_list(
     args: Vec<&str>,
     event_data: &EventData,
@@ -319,6 +355,13 @@ pub(crate) async fn send_list(
     send_list_with_title(args, "Currently tracked threads", event_data, bot).await
 }
 
+/// Send the list of threads and todos with a custom title.
+///
+/// ### Arguments
+///
+/// - `args` - the command arguments
+/// - `event_data` - the event data
+/// - `bot` - the bot instance
 pub(crate) async fn send_list_with_title(
     args: Vec<&str>,
     title: impl ToString,
@@ -353,6 +396,13 @@ pub(crate) async fn send_list_with_title(
     }
 }
 
+/// Select and send a random thread to the user that is awaiting their reply.
+///
+/// ### Arguments
+///
+/// - `args` - the command arguments
+/// - `event_data` - the event data
+/// - `bot` - the bot instance
 pub(crate) async fn send_random_thread(
     mut args: Vec<&str>,
     event_data: &EventData,
@@ -405,6 +455,13 @@ pub(crate) async fn send_random_thread(
     Ok(())
 }
 
+/// Get a random thread for the current user that is awaiting a reply.
+///
+/// ### Arguments
+///
+/// - `category` - constrain the selection to the given category
+/// - `event_data` - the event data
+/// - `bot` - the bot instance
 pub(crate) async fn get_random_thread(
     category: Option<&str>,
     event_data: &EventData,
@@ -439,6 +496,16 @@ pub(crate) async fn get_random_thread(
     }
 }
 
+/// Build a formatted thread and todo list message.
+///
+/// ### Arguments
+///
+/// - `threads` - the list of threads
+/// - `todos` - the list of todos
+/// - `muses` - the target user's muses
+/// - `user` - the target user
+/// - `context` - the event context
+/// - `message_cache` - the message cache
 pub(crate) async fn get_formatted_list(
     threads: Vec<TrackedThread>,
     todos: Vec<Todo>,
@@ -516,20 +583,12 @@ pub(crate) async fn get_formatted_list(
     Ok(message.to_string())
 }
 
+/// Partition the given threads by their categories.
 fn categorise(threads: Vec<TrackedThread>) -> BTreeMap<Option<String>, Vec<TrackedThread>> {
     partition_into_map(threads, |t| t.category.clone())
 }
 
-fn trim_link_name(name: &str) -> String {
-    if name.chars().count() > 32 {
-        let (cutoff, _) = name.char_indices().nth(31).unwrap();
-        format!("{}…", &name[0..cutoff].trim())
-    }
-    else {
-        name.to_owned()
-    }
-}
-
+/// Get the last user that responded to the thread, if any.
 async fn get_last_responder(
     thread: &TrackedThread,
     context: &Context,
@@ -553,6 +612,7 @@ async fn get_last_responder(
     }
 }
 
+/// Get the user's nickname in the given guild, or their username.
 async fn get_nick_or_name(user: &User, guild_id: GuildId, cache_http: impl CacheHttp) -> String {
     if user.bot {
         user.name.clone()
@@ -562,6 +622,7 @@ async fn get_nick_or_name(user: &User, guild_id: GuildId, cache_http: impl Cache
     }
 }
 
+/// Append a thread list entry to the message, followed by a newline.
 async fn push_thread_line<'a>(
     message: &'a mut MessageBuilder,
     thread: &TrackedThread,
@@ -592,6 +653,7 @@ async fn push_thread_line<'a>(
     }
 }
 
+/// Build a thread link, either as a named link or a simple thread mention if the name isn't provided and can't be looked up.
 async fn get_thread_link(
     thread: &TrackedThread,
     name: Option<String>,
@@ -605,7 +667,7 @@ async fn get_thread_link(
 
     match channel_name {
         Some(n) => {
-            let name = trim_link_name(&n);
+            let name = trim_string(&n, THREAD_NAME_LENGTH);
             link.push_named_link(
                 Bold + format!("#{}", name),
                 format!("https://discord.com/channels/{}/{}", thread.guild_id, thread.channel_id),
@@ -617,6 +679,18 @@ async fn get_thread_link(
     link
 }
 
+/// Trim the given string to the maximum length, and append ellipsis if the string was trimmed.
+fn trim_string(name: &str, max_length: usize) -> String {
+    if name.chars().count() > max_length {
+        let (cutoff, _) = name.char_indices().nth(max_length - 1).unwrap();
+        format!("{}…", &name[0..cutoff].trim())
+    }
+    else {
+        name.to_owned()
+    }
+}
+
+/// Attempt to get the thread name from the Discord API
 async fn get_thread_name(thread: &TrackedThread, cache_http: impl CacheHttp) -> Option<String> {
     let name = if let Some(cache) = cache_http.cache() {
         thread.channel_id.name(cache).await
@@ -633,6 +707,7 @@ async fn get_thread_name(thread: &TrackedThread, cache_http: impl CacheHttp) -> 
     }
 }
 
+/// Retrieve the most recent message in the given channel and store it in the cache.
 async fn cache_last_channel_message(
     channel: Option<&GuildChannel>,
     http: impl AsRef<Http>,
@@ -651,6 +726,7 @@ async fn cache_last_channel_message(
     }
 }
 
+/// Parse the channel ID from either a channel mention or a full discord URL to the channel.
 fn parse_channel_id(url_or_mention: &str) -> Option<ChannelId> {
     if is_channel_mention(url_or_mention) {
         url_or_mention.parse().ok()
@@ -668,14 +744,17 @@ fn parse_channel_id(url_or_mention: &str) -> Option<ChannelId> {
     }
 }
 
+/// Returns true if the string is either a full channel URL or a channel mention (`<#8782839489279>`).
 fn is_channel_reference(s: &str) -> bool {
     is_channel_mention(s) || is_discord_link(s)
 }
 
+/// Returns true if the string is a discord channel URL.
 fn is_discord_link(s: &str) -> bool {
     s.starts_with("https://") && s.matches("discord.com/channels/").any(|_| true)
 }
 
+/// Returns true if the string is (probably) a channel mention.
 fn is_channel_mention(s: &str) -> bool {
     s.starts_with("<#") && s.ends_with('>')
 }

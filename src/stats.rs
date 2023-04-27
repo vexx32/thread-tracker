@@ -6,6 +6,12 @@ use crate::{
     ThreadTrackerBot,
 };
 
+/// Send the bot's statistics as a reply to the input context
+///
+/// ### Argument
+///
+/// - `reply_context` - the context to reply to
+/// - `bot` - the bot instance
 pub(crate) async fn send_statistics(
     reply_context: &ReplyContext,
     bot: &ThreadTrackerBot,

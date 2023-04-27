@@ -5,12 +5,14 @@ pub(crate) use sqlx::PgPool as Database;
 
 type Result<T> = std::result::Result<T, sqlx::Error>;
 
+/// Get all entries from the watchers table
 pub(crate) async fn list_watchers(database: &Database) -> Result<Vec<ThreadWatcherRow>> {
     sqlx::query_as("SELECT id, user_id, message_id, channel_id, guild_id, categories FROM watchers")
         .fetch_all(database)
         .await
 }
 
+/// Get an entry from the watchers table by channel and message ID
 pub(crate) async fn get_watcher(
     database: &Database,
     channel_id: u64,
@@ -22,6 +24,7 @@ pub(crate) async fn get_watcher(
         .fetch_optional(database).await
 }
 
+/// Add a new entry to the watchers table
 pub(crate) async fn add_watcher(
     database: &Database,
     user_id: u64,
@@ -41,6 +44,7 @@ pub(crate) async fn add_watcher(
     Ok(result.rows_affected() > 0)
 }
 
+/// Remove an entry from the watchers table
 pub(crate) async fn remove_watcher(database: &Database, watcher_id: i32) -> Result<u64> {
     let result = sqlx::query("DELETE FROM watchers WHERE id = $1")
         .bind(watcher_id)
@@ -50,6 +54,7 @@ pub(crate) async fn remove_watcher(database: &Database, watcher_id: i32) -> Resu
     Ok(result.rows_affected())
 }
 
+/// Add a new entry to the threads table
 pub(crate) async fn add_thread(
     database: &Database,
     guild_id: u64,
@@ -72,6 +77,7 @@ pub(crate) async fn add_thread(
     }
 }
 
+/// Update the category of an entry in the threads table
 pub(crate) async fn update_thread_category(
     database: &Database,
     guild_id: u64,
@@ -92,6 +98,7 @@ pub(crate) async fn update_thread_category(
     Ok(result.rows_affected() > 0)
 }
 
+/// Remove an entry from the threads table
 pub(crate) async fn remove_thread(
     database: &Database,
     guild_id: u64,
@@ -109,6 +116,7 @@ pub(crate) async fn remove_thread(
     Ok(result.rows_affected())
 }
 
+/// Remove all entries from the threads table for a given user and guild ID
 pub(crate) async fn remove_all_threads(
     database: &Database,
     guild_id: u64,
@@ -132,6 +140,7 @@ pub(crate) async fn remove_all_threads(
     Ok(result.rows_affected())
 }
 
+/// Get all entries from the threads table
 pub(crate) async fn list_threads(
     database: &Database,
     guild_id: u64,
@@ -151,6 +160,7 @@ pub(crate) async fn list_threads(
     query.fetch_all(database).await
 }
 
+/// Get an entry from the threads table with a specific channel ID
 pub(crate) async fn get_thread(
     database: &Database,
     guild_id: u64,
@@ -164,6 +174,7 @@ pub(crate) async fn get_thread(
         .fetch_optional(database).await
 }
 
+/// Add an entry to the muses table
 pub(crate) async fn add_muse(
     database: &Database,
     guild_id: u64,
@@ -185,6 +196,7 @@ pub(crate) async fn add_muse(
     }
 }
 
+/// Get an entry from the muses table by name
 pub(crate) async fn get_muse(
     database: &Database,
     guild_id: u64,
@@ -201,6 +213,7 @@ pub(crate) async fn get_muse(
     .await
 }
 
+/// Get all entries from the muses table for a given user and guild ID
 pub(crate) async fn list_muses(
     database: &Database,
     guild_id: u64,
@@ -213,6 +226,7 @@ pub(crate) async fn list_muses(
         .await
 }
 
+/// Remove an entry from the muses table
 pub(crate) async fn remove_muse(
     database: &Database,
     guild_id: u64,
@@ -230,6 +244,7 @@ pub(crate) async fn remove_muse(
     Ok(result.rows_affected())
 }
 
+/// Add an entry to the todos table
 pub(crate) async fn add_todo(
     database: &Database,
     guild_id: u64,
@@ -265,6 +280,7 @@ pub(crate) async fn add_todo(
     }
 }
 
+/// Get an entry from the todos table by its content
 pub(crate) async fn get_todo(
     database: &Database,
     guild_id: u64,
@@ -278,6 +294,7 @@ pub(crate) async fn get_todo(
         .fetch_optional(database).await
 }
 
+/// Get all entries from the todos table for a given user and guild ID
 pub(crate) async fn list_todos(
     database: &Database,
     guild_id: u64,
@@ -293,6 +310,7 @@ pub(crate) async fn list_todos(
     query.bind(user_id as i64).bind(guild_id as i64).fetch_all(database).await
 }
 
+/// Remove an entry from the todos table
 pub(crate) async fn remove_todo(
     database: &Database,
     guild_id: u64,
@@ -310,6 +328,7 @@ pub(crate) async fn remove_todo(
     Ok(result.rows_affected())
 }
 
+/// Remove all entries from the todos table that match the given user and guild IDs
 pub(crate) async fn remove_all_todos(
     database: &Database,
     guild_id: u64,
@@ -329,6 +348,7 @@ pub(crate) async fn remove_all_todos(
     Ok(result.rows_affected())
 }
 
+/// Query for overall statistics from the database
 pub(crate) async fn statistics(database: &Database) -> Result<Statistics> {
     sqlx::query_as(include_str!("../sql/queries/stats.sql")).fetch_one(database).await
 }

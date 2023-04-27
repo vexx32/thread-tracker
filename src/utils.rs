@@ -32,19 +32,23 @@ pub(crate) struct EventData {
 }
 
 impl EventData {
+    /// Get the Http from the event context.
     pub fn http(&self) -> &Http {
         &self.context.http
     }
 
+    /// Get a ReplyContext from the event data.
     pub fn reply_context(&self) -> ReplyContext {
         self.into()
     }
 
+    /// Get the associated GuildUser for this event.
     pub fn user(&self) -> GuildUser {
         self.into()
     }
 }
 
+/// Wrapper struct for the MessageId and ChannelId of a Discord message.
 #[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
 pub(crate) struct ChannelMessage {
     pub channel_id: ChannelId,
@@ -52,7 +56,7 @@ pub(crate) struct ChannelMessage {
 }
 
 impl ChannelMessage {
-    /// Retrieves the message from Discord API
+    /// Retrieves the original message from Discord API
     pub async fn fetch(&self, http: impl AsRef<Http>) -> Result<Message, SerenityError> {
         self.channel_id.message(http, self.message_id).await
     }

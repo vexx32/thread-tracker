@@ -7,6 +7,13 @@ use crate::{
     ThreadTrackerBot,
 };
 
+/// Add a new muse to the user's list.
+///
+/// ### Arguments
+///
+/// - `args` - the arguments from the command
+/// - `event_data` - the event data
+/// - `bot` - the bot instance
 pub(crate) async fn add<'a>(
     args: Vec<&str>,
     event_data: &EventData,
@@ -39,6 +46,13 @@ pub(crate) async fn add<'a>(
     Ok(())
 }
 
+/// Removes a muse from the user's list.
+///
+/// ### Arguments
+///
+/// - `args` - the arguments from the command
+/// - `event_data` - the event data
+/// - `bot` - the bot instance
 pub(crate) async fn remove(
     args: Vec<&str>,
     event_data: &EventData,
@@ -72,6 +86,12 @@ pub(crate) async fn remove(
     Ok(())
 }
 
+/// Sends the list of muses as a reply to the received command.
+///
+/// ### Arguments
+///
+/// - `event_data` - the event data to construct the reply for
+/// - `bot` - the bot instance
 pub(crate) async fn send_list(
     event_data: &EventData,
     bot: &ThreadTrackerBot,
@@ -97,6 +117,12 @@ pub(crate) async fn send_list(
     Ok(())
 }
 
+/// Get the list of muses for the user out of the database.
+///
+/// ### Arguments
+///
+/// - `database` - the database to get the list from
+/// - `user` - the user to retrieve the list of muses for
 pub(crate) async fn list(database: &Database, user: &GuildUser) -> anyhow::Result<Vec<String>> {
     Ok(db::list_muses(database, user.guild_id.0, user.user_id.0)
         .await?
