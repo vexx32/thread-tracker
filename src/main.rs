@@ -327,7 +327,6 @@ impl EventHandler for ThreadTrackerBot {
 
             if let Some(command) = message.content.split_ascii_whitespace().next() {
                 info!("[command] processing command `{}` from user `{}`", message.content, user_id);
-                debug!("Message details: {:?}", message);
                 self.process_command(
                     event_data,
                     command,
