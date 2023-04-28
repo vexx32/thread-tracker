@@ -594,7 +594,7 @@ async fn get_last_responder(
     context: &Context,
     message_cache: &MessageCache,
 ) -> Option<User> {
-    if let Ok(Channel::Guild(channel)) = thread.channel_id.to_channel(context).await {
+    if let Ok(Channel::Guild(channel)) = context.http().get_channel(thread.channel_id.into()).await {
         if let Some(last_message_id) = channel.last_message_id {
             let channel_message = (last_message_id, channel.id).into();
             message_cache
