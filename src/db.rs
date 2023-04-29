@@ -174,6 +174,13 @@ pub(crate) async fn get_thread(
         .fetch_optional(database).await
 }
 
+/// Get all unique channel_ids from tracked threads (globally)
+pub(crate) async fn get_global_tracked_thread_ids(database: &Database) -> Result<Vec<TrackedThreadId>> {
+    sqlx::query_as("SELECT DISTINCT channel_id FROM threads")
+        .fetch_all(database)
+        .await
+}
+
 /// Add an entry to the muses table
 pub(crate) async fn add_muse(
     database: &Database,

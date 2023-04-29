@@ -12,7 +12,7 @@ use crate::{consts::CACHE_LIFETIME, utils::ChannelMessage};
 
 pub(crate) type MessageCache = MemoryCache<ChannelMessage, Message>;
 
-type CacheStorage<TKey, TValue> = HashMap<TKey, Cached<TValue>>;
+type CacheMap<TKey, TValue> = HashMap<TKey, Cached<TValue>>;
 
 #[derive(Debug)]
 struct Cached<T> {
@@ -34,7 +34,7 @@ pub(crate) struct MemoryCache<TKey, TData>
 where
     TKey: PartialEq + Eq + Hash + Clone,
 {
-    storage: Arc<RwLock<CacheStorage<TKey, TData>>>,
+    storage: Arc<RwLock<CacheMap<TKey, TData>>>,
 }
 
 impl<TKey, TData> MemoryCache<TKey, TData>

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use anyhow::anyhow;
 use cache::MessageCache;
@@ -51,6 +51,8 @@ struct ThreadTrackerBot {
     message_cache: MessageCache,
     /// The bot's current user id
     user_id: Arc<RwLock<Option<UserId>>>,
+    /// The current list of tracked threads
+    tracked_threads: Arc<RwLock<HashSet<ChannelId>>>,
 }
 
 impl ThreadTrackerBot {
@@ -64,6 +66,7 @@ impl ThreadTrackerBot {
             database,
             message_cache: MessageCache::new(),
             user_id: Arc::new(RwLock::new(None)),
+            tracked_threads: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
@@ -94,7 +97,7 @@ impl ThreadTrackerBot {
         event_data: EventData,
         command: &str,
         args: &str,
-        attachments: Vec<Attachment>,
+        attachments: &Vec<Attachment>,
     ) {
         let reply_context = event_data.reply_context();
         match command.to_lowercase().as_str() {
@@ -233,7 +236,15 @@ impl ThreadTrackerBot {
                 }
             },
             "tt!bug" => {
-                if let Err(e) = messaging::submit_bug_report(args, attachments, event_data.user, &self.message_cache, &reply_context).await {
+                if let Err(e) = messaging::submit_bug_report(
+                    args,
+                    attachments,
+                    &event_data.user,
+                    &self.message_cache,
+                    &reply_context,
+                )
+                .await
+                {
                     reply_context
                         .send_error_embed("Failed to submit bug report", e, &self.message_cache)
                         .await;
@@ -279,6 +290,45 @@ impl ThreadTrackerBot {
                 )
                 .await;
         }
+    }
+
+    /// Retrieve the full list of tracked threads from the database to populate the in-memory
+    /// list of tracked threads.
+    async fn update_tracked_threads(&self) -> sqlx::Result<()> {
+        let mut tracked_threads = self.tracked_threads.write().await;
+
+        tracked_threads.clear();
+
+        threads::enumerate_tracked_channel_ids(&self.database).await?
+            .for_each(|id| {
+                tracked_threads.insert(id);
+            });
+
+        Ok(())
+    }
+
+    /// Add a newly tracked thread ID into the in-memory list of tracked threads.
+    async fn add_tracked_thread(&self, channel_id: ChannelId) {
+        self.tracked_threads.write().await.insert(channel_id);
+    }
+
+    /// Call this function after removing a tracked thread from the database to update the in-memory
+    /// list of tracked threads. The thread will only be removed from the list if it is no longer
+    /// being tracked by any users.
+    async fn remove_tracked_thread(&self, channel_id: ChannelId) -> sqlx::Result<()> {
+        let still_tracked = threads::enumerate_tracked_channel_ids(&self.database).await?.any(|id| id == channel_id);
+
+        if !still_tracked {
+            let mut tracked_threads = self.tracked_threads.write().await;
+            tracked_threads.remove(&channel_id);
+        }
+
+        Ok(())
+    }
+
+    /// Check if the given channel_id is in the list of tracked threads.
+    async fn tracking_thread(&self, channel_id: ChannelId) -> bool {
+        self.tracked_threads.read().await.contains(&channel_id)
     }
 }
 
@@ -327,6 +377,10 @@ impl EventHandler for ThreadTrackerBot {
 
     async fn message(&self, context: Context, message: Message) {
         if !message_is_command(&message.content) {
+            if self.tracking_thread(message.channel_id).await {
+                self.message_cache.store((message.channel_id, message.id).into(), message).await;
+            }
+
             return;
         }
 
@@ -351,7 +405,7 @@ impl EventHandler for ThreadTrackerBot {
                     event_data,
                     command,
                     message.content[command.len()..].trim_start(),
-                    message.attachments,
+                    &message.attachments,
                 )
                 .await;
             }
@@ -402,6 +456,10 @@ async fn serenity(
         | GatewayIntents::DIRECT_MESSAGES;
 
     let bot = ThreadTrackerBot::new(database);
+    if let Err(e) = bot.update_tracked_threads().await {
+        return Err(anyhow!(e).into());
+    }
+
     let client = Client::builder(&discord_token, intents)
         .event_handler(bot)
         .await

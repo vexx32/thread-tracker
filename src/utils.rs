@@ -116,7 +116,7 @@ pub(crate) fn message_is_command(content: &str) -> bool {
 pub(crate) fn substring(name: &str, max_length: usize) -> &str {
     if name.chars().count() > max_length {
         let (cutoff, _) = name.char_indices().nth(max_length - 1).unwrap();
-        &name[0..cutoff].trim()
+        name[0..cutoff].trim()
     }
     else {
         name

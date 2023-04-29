@@ -10,6 +10,11 @@ pub(crate) struct TrackedThreadRow {
 }
 
 #[derive(FromRow)]
+pub(crate) struct TrackedThreadId {
+    pub channel_id: i64,
+}
+
+#[derive(FromRow)]
 pub(crate) struct ThreadWatcherRow {
     pub id: i32,
     pub user_id: i64,

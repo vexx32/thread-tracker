@@ -60,6 +60,15 @@ pub(crate) async fn enumerate(
         .map(|t| t.into()))
 }
 
+pub(crate) async fn enumerate_tracked_channel_ids(
+    database: &Database,
+) -> sqlx::Result<impl Iterator<Item = ChannelId>> {
+    Ok(db::get_global_tracked_thread_ids(database)
+        .await?
+        .into_iter()
+        .map(|t| ChannelId(t.channel_id as u64)))
+}
+
 /// Adds an entry to the threads table
 ///
 /// ### Arguments
@@ -104,16 +113,19 @@ pub(crate) async fn add(
                     )
                     .await;
 
-                    match db::add_thread(
+                    let result = db::add_thread(
                         database,
                         event_data.guild_id.0,
                         channel_id.0,
                         event_data.user.id.0,
                         category,
                     )
-                    .await
-                    {
-                        Ok(true) => threads_added.push("• ").mention(&channel_id).push_line(""),
+                    .await;
+                    match result {
+                        Ok(true) => {
+                            bot.add_tracked_thread(channel_id).await;
+                            threads_added.push("• ").mention(&channel_id).push_line("")
+                        },
                         Ok(false) => threads_added
                             .push("• Skipped ")
                             .mention(&channel_id)
@@ -267,6 +279,8 @@ pub(crate) async fn remove(
             )
             .await;
 
+        bot.update_tracked_threads().await?;
+
         return Ok(());
     }
 
@@ -288,7 +302,10 @@ pub(crate) async fn remove(
                     "• {} is not currently being tracked",
                     channel_id.mention()
                 )),
-                Ok(_) => threads_removed.push_line(format!("• {:}", channel_id.mention())),
+                Ok(_) => {
+                    bot.remove_tracked_thread(channel_id).await?;
+                    threads_removed.push_line(format!("• {:}", channel_id.mention()))
+                },
                 Err(e) => errors.push_line(format!(
                     "• Failed to unregister thread {}: {}",
                     channel_id.mention(),
@@ -309,10 +326,13 @@ pub(crate) async fn remove(
                     "• No threads in category {} to remove",
                     thread_or_category
                 )),
-                Ok(count) => threads_removed.push_line(format!(
-                    "• All {} threads in category `{}` removed",
-                    count, thread_or_category
-                )),
+                Ok(count) => {
+                    bot.update_tracked_threads().await?;
+                    threads_removed.push_line(format!(
+                        "• All {} threads in category `{}` removed",
+                        count, thread_or_category
+                    ))
+                },
                 Err(e) => errors.push_line(format!(
                     "• Unable to remove threads in category `{}`: {}",
                     thread_or_category, e
@@ -594,7 +614,8 @@ async fn get_last_responder(
     context: &Context,
     message_cache: &MessageCache,
 ) -> Option<User> {
-    if let Ok(Channel::Guild(channel)) = context.http().get_channel(thread.channel_id.into()).await {
+    if let Ok(Channel::Guild(channel)) = context.http().get_channel(thread.channel_id.into()).await
+    {
         if let Some(last_message_id) = channel.last_message_id {
             let channel_message = (last_message_id, channel.id).into();
             message_cache
