@@ -1,4 +1,4 @@
-use std::{future::Future, sync::Arc};
+use std::future::Future;
 
 use serenity::{
     builder::CreateEmbed,
@@ -245,17 +245,21 @@ pub(crate) async fn submit_bug_report(
     reporting_user: User,
     message_cache: &MessageCache,
     reply_context: &ReplyContext,
-) -> anyhow::Result<Arc<Message>> {
+) -> anyhow::Result<()> {
     if message.trim().is_empty() {
         return Err(CommandError::MissingArguments("Please provide a summary of the bug, reproduction steps, and a screenshot if you're comfortable doing so.".to_owned()).into());
     }
 
     let mut report = MessageBuilder::new();
-    report.push_line("## Bug Report").push_line("").push_line(message);
+    report
+        .push("__**Bug Report**__ from ")
+        .push_line(reporting_user.mention())
+        .push_line("")
+        .push_line(message);
 
     let target_user = UserId(DEBUG_USER);
 
-    let message = target_user
+    let dm = target_user
         .to_user(&reply_context.context)
         .await?
         .direct_message(&reply_context.context, |msg| {
@@ -264,11 +268,11 @@ pub(crate) async fn submit_bug_report(
                     attachments
                         .iter()
                         .filter_map(|a| url::Url::parse(&a.url).ok())
-                        .map(|u| AttachmentType::Image(u)),
+                        .map(AttachmentType::Image),
                 )
                 .embed(|embed| {
                     embed
-                        .title("User Information")
+                        .title("Reported By")
                         .field(
                             "User",
                             format!("{} #{}", reporting_user.name, reporting_user.discriminator),
@@ -279,5 +283,14 @@ pub(crate) async fn submit_bug_report(
         })
         .await?;
 
-    Ok(message_cache.store((message.channel_id, message.id).into(), message).await)
+    message_cache.store((dm.channel_id, dm.id).into(), dm).await;
+    reply_context
+        .send_success_embed(
+            "Bug report submitted successfully!",
+            "Your bug report has been sent.",
+            message_cache,
+        )
+        .await;
+
+    Ok(())
 }
