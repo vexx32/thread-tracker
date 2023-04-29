@@ -241,7 +241,7 @@ pub(crate) async fn send_unknown_command(
 
 pub(crate) async fn submit_bug_report(
     message: &str,
-    attachments: &Vec<Attachment>,
+    attachments: &[Attachment],
     reporting_user: &User,
     message_cache: &MessageCache,
     reply_context: &ReplyContext,

@@ -90,17 +90,26 @@ impl ThreadTrackerBot {
     /// ### Arguments
     ///
     /// - `event_data` - information about the context and metadata of the message that triggered the command.
-    /// - `command` - string slice containing the command keyword, which should start with `tt!`
+    /// - `command` - string slice containing the command keyword, which should start with `tt!` or `tt?`
     /// - `args` - string slice containing the rest of the message that follows the command
     async fn process_command(
         &self,
         event_data: EventData,
         command: &str,
-        args: &str,
-        attachments: &Vec<Attachment>,
+        mut args: &str,
+        attachments: &[Attachment],
     ) {
         let reply_context = event_data.reply_context();
-        match command.to_lowercase().as_str() {
+        let mut final_command = String::from(command);
+        if final_command.len() == 3 {
+            // This should only ever be "tt!" or "tt?", no other commands should reach this method
+            if let Some(command_fragment) = args.split_ascii_whitespace().next() {
+                final_command += command_fragment;
+                args = &args[command_fragment.len()..];
+            }
+        }
+
+        match final_command.to_ascii_lowercase().as_str() {
             "tt!add" | "tt!track" => {
                 let args = args.split_ascii_whitespace().collect();
                 if let Err(e) = threads::add(args, &event_data, self).await {
@@ -262,7 +271,7 @@ impl ThreadTrackerBot {
                     reply_context.send_help(help_message, &self.message_cache).await;
                 },
                 None => {
-                    send_unknown_command(&reply_context, command, &self.message_cache).await;
+                    send_unknown_command(&reply_context, &final_command, &self.message_cache).await;
                 },
             },
         }
