@@ -96,7 +96,7 @@ pub(crate) async fn add(
         if let Some(channel_id) = parse_channel_id(thread_id) {
             match channel_id.to_channel(event_data.http()).await {
                 Ok(channel) => {
-                    info!("Adding tracked thread {} for user {}", channel_id, event_data.user_id);
+                    info!("Adding tracked thread {} for user {}", channel_id, event_data.user.id);
                     cache_last_channel_message(
                         channel.guild().as_ref(),
                         event_data.http(),
@@ -108,7 +108,7 @@ pub(crate) async fn add(
                         database,
                         event_data.guild_id.0,
                         channel_id.0,
-                        event_data.user_id.0,
+                        event_data.user.id.0,
                         category,
                     )
                     .await
@@ -184,7 +184,7 @@ pub(crate) async fn set_category(
                     database,
                     event_data.guild_id.0,
                     channel_id.0,
-                    event_data.user_id.0,
+                    event_data.user.id.0,
                     category,
                 )
                 .await
@@ -255,13 +255,13 @@ pub(crate) async fn remove(
 
     let reply_context = event_data.reply_context();
     if let Some(&"all") = args.peek() {
-        db::remove_all_threads(database, event_data.guild_id.0, event_data.user_id.0, None).await?;
+        db::remove_all_threads(database, event_data.guild_id.0, event_data.user.id.0, None).await?;
         reply_context
             .send_success_embed(
                 "Tracked threads removed",
                 &format!(
                     "All registered threads for user {:} removed.",
-                    event_data.user_id.mention()
+                    event_data.user.id.mention()
                 ),
                 message_cache,
             )
@@ -279,7 +279,7 @@ pub(crate) async fn remove(
                 database,
                 event_data.guild_id.0,
                 channel_id.0,
-                event_data.user_id.0,
+                event_data.user.id.0,
             )
             .await;
 
@@ -300,7 +300,7 @@ pub(crate) async fn remove(
             match db::remove_all_threads(
                 database,
                 event_data.guild_id.0,
-                event_data.user_id.0,
+                event_data.user.id.0,
                 Some(thread_or_category),
             )
             .await
@@ -478,7 +478,7 @@ pub(crate) async fn get_random_thread(
             Some(user) => {
                 let last_author_name =
                     get_nick_or_name(&user, event_data.guild_id, event_data.http()).await;
-                if user.id != event_data.user_id && !muses.contains(&last_author_name) {
+                if user.id != event_data.user.id && !muses.contains(&last_author_name) {
                     pending_threads.push((last_author_name, thread));
                 }
             },
@@ -682,8 +682,8 @@ async fn get_thread_link(
 /// Trim the given string to the maximum length, and append ellipsis if the string was trimmed.
 fn trim_string(name: &str, max_length: usize) -> String {
     if name.chars().count() > max_length {
-        let (cutoff, _) = name.char_indices().nth(max_length - 1).unwrap();
-        format!("{}…", &name[0..cutoff].trim())
+        let trimmed = substring(name, max_length);
+        format!("{}…", trimmed.trim())
     }
     else {
         name.to_owned()

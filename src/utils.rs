@@ -12,7 +12,7 @@ pub(crate) struct GuildUser {
 
 impl From<&EventData> for GuildUser {
     fn from(value: &EventData) -> Self {
-        Self { user_id: value.user_id, guild_id: value.guild_id }
+        Self { user_id: value.user.id, guild_id: value.guild_id }
     }
 }
 
@@ -24,7 +24,7 @@ impl From<&ThreadWatcher> for GuildUser {
 
 /// Metadata from the received message event.
 pub(crate) struct EventData {
-    pub user_id: UserId,
+    pub user: User,
     pub guild_id: GuildId,
     pub channel_id: ChannelId,
     pub message_id: MessageId,
@@ -110,4 +110,15 @@ pub(crate) fn error_on_additional_arguments(unrecognised_args: Vec<&str>) -> any
 pub(crate) fn message_is_command(content: &str) -> bool {
     let prefix: String = content.chars().take(3).flat_map(|c| c.to_lowercase()).collect();
     prefix == "tt!" || prefix == "tt?"
+}
+
+/// Trim the given string to the maximum length in characters.
+pub(crate) fn substring(name: &str, max_length: usize) -> &str {
+    if name.chars().count() > max_length {
+        let (cutoff, _) = name.char_indices().nth(max_length - 1).unwrap();
+        &name[0..cutoff].trim()
+    }
+    else {
+        name
+    }
 }

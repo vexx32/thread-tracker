@@ -62,7 +62,7 @@ pub(crate) async fn add<'a>(
 
     let mut result = MessageBuilder::new();
     result.push("To do list entry ").push(Italic + entry);
-    match db::add_todo(database, event_data.guild_id.0, event_data.user_id.0, entry, category)
+    match db::add_todo(database, event_data.guild_id.0, event_data.user.id.0, entry, category)
         .await?
     {
         true => {
@@ -124,17 +124,17 @@ pub(crate) async fn remove(
     let result = match category {
         Some("all") => {
             message.push("To do-list entries were ");
-            db::remove_all_todos(database, event_data.guild_id.0, event_data.user_id.0, None)
+            db::remove_all_todos(database, event_data.guild_id.0, event_data.user.id.0, None)
                 .await?
         },
         Some(cat) => {
             message.push(format!("To do list entries in category `{}` were ", cat));
-            db::remove_all_todos(database, event_data.guild_id.0, event_data.user_id.0, Some(cat))
+            db::remove_all_todos(database, event_data.guild_id.0, event_data.user.id.0, Some(cat))
                 .await?
         },
         None => {
             message.push("To do list entry ").push(Italic + entry).push(" was ");
-            db::remove_todo(database, event_data.guild_id.0, event_data.user_id.0, entry).await?
+            db::remove_todo(database, event_data.guild_id.0, event_data.user.id.0, entry).await?
         },
     };
 
@@ -181,7 +181,7 @@ pub(crate) async fn send_list(
 
     if !todos.is_empty() {
         let categories = categorise(todos);
-        message.mention(&event_data.user_id).push_line("'s to do list:");
+        message.mention(&event_data.user.id).push_line("'s to do list:");
 
         for (name, todos) in categories {
             if let Some(n) = name {

@@ -1,21 +1,30 @@
 use std::{future::Future, sync::Arc};
 
-use serenity::{builder::CreateEmbed, http::Http, model::prelude::*, prelude::*, utils::Colour};
+use serenity::{
+    builder::CreateEmbed,
+    model::prelude::*,
+    prelude::*,
+    utils::{Colour, MessageBuilder},
+};
 use tracing::{error, info};
 
-use crate::{cache::MessageCache, consts::*, CommandError::*};
+use crate::{
+    cache::MessageCache,
+    consts::*,
+    CommandError::{self, *},
+};
 
 /// Wrapper struct to keep track of which channel and message is being replied to.
 pub(crate) struct ReplyContext {
     channel_id: ChannelId,
     message_id: MessageId,
-    http: Arc<Http>,
+    context: Context,
 }
 
 impl ReplyContext {
     /// Create a new `ReplyContext`
-    pub(crate) fn new(channel_id: ChannelId, message_id: MessageId, http: &Arc<Http>) -> Self {
-        Self { channel_id, message_id, http: Arc::clone(http) }
+    pub(crate) fn new(channel_id: ChannelId, message_id: MessageId, ctx: &Context) -> Self {
+        Self { channel_id, message_id, context: ctx.clone() }
     }
 
     /// Sends a custom embed.
@@ -47,7 +56,7 @@ impl ReplyContext {
     {
         info!("Sending custom embed `{}` with content `{}`", title.to_string(), body.to_string());
         self.channel_id
-            .send_message(&self.http, |msg| {
+            .send_message(&self.context, |msg| {
                 msg.embed(|embed| f(embed.title(title).description(body)))
                     .reference_message((self.channel_id, self.message_id))
             })
@@ -135,13 +144,14 @@ impl From<&crate::EventData> for ReplyContext {
         Self {
             channel_id: value.channel_id,
             message_id: value.message_id,
-            http: Arc::clone(&value.context.http),
+            context: value.context.clone(),
         }
     }
 }
 
 /// Mapping enum to select appropriate help messages for various commands and retrieve the associated text.
 pub(crate) enum HelpMessage {
+    Bugs,
     Main,
     Muses,
     Threads,
@@ -156,6 +166,7 @@ impl HelpMessage {
     /// - `command` - the command string to fetch a help message for.
     pub fn from_command(command: &str) -> Option<Self> {
         match command {
+            "tt?bug" | "tt?bugs" => Some(Self::Bugs),
             "tt!help" | "tt?help" => Some(Self::Main),
             "tt?muses" | "tt?addmuse" | "tt?removemuse" => Some(Self::Muses),
             "tt?threads" | "tt?replies" | "tt?add" | "tt?track" | "tt?remove" | "tt?untrack"
@@ -170,6 +181,7 @@ impl HelpMessage {
         use help::*;
 
         match self {
+            Self::Bugs => BUGS,
             Self::Main => MAIN,
             Self::Muses => MUSES,
             Self::Threads => THREADS,
@@ -182,6 +194,7 @@ impl HelpMessage {
         use help::*;
 
         match self {
+            Self::Bugs => BUGS_TITLE,
             Self::Main => MAIN_TITLE,
             Self::Muses => MUSES_TITLE,
             Self::Threads => THREADS_TITLE,
@@ -224,4 +237,47 @@ pub(crate) async fn send_unknown_command(
     reply_context
         .send_error_embed("Unknown command", UnknownCommand(command.to_owned()), message_cache)
         .await;
+}
+
+pub(crate) async fn submit_bug_report(
+    message: &str,
+    attachments: Vec<Attachment>,
+    reporting_user: User,
+    message_cache: &MessageCache,
+    reply_context: &ReplyContext,
+) -> anyhow::Result<Arc<Message>> {
+    if message.trim().is_empty() {
+        return Err(CommandError::MissingArguments("Please provide a summary of the bug, reproduction steps, and a screenshot if you're comfortable doing so.".to_owned()).into());
+    }
+
+    let mut report = MessageBuilder::new();
+    report.push_line("## Bug Report").push_line("").push_line(message);
+
+    let target_user = UserId(DEBUG_USER);
+
+    let message = target_user
+        .to_user(&reply_context.context)
+        .await?
+        .direct_message(&reply_context.context, |msg| {
+            msg.content(report)
+                .add_files(
+                    attachments
+                        .iter()
+                        .filter_map(|a| url::Url::parse(&a.url).ok())
+                        .map(|u| AttachmentType::Image(u)),
+                )
+                .embed(|embed| {
+                    embed
+                        .title("User Information")
+                        .field(
+                            "User",
+                            format!("{} #{}", reporting_user.name, reporting_user.discriminator),
+                            true,
+                        )
+                        .field("User ID", reporting_user.id, true)
+                })
+        })
+        .await?;
+
+    Ok(message_cache.store((message.channel_id, message.id).into(), message).await)
 }

@@ -32,13 +32,13 @@ pub(crate) async fn add<'a>(
 
     let mut result = MessageBuilder::new();
     result.push("Muse ").push(Italic + &muse_name);
-    match db::add_muse(database, event_data.guild_id.0, event_data.user_id.0, &muse_name).await? {
+    match db::add_muse(database, event_data.guild_id.0, event_data.user.id.0, &muse_name).await? {
         true => {
             result.push_line(" added successfully.");
             reply_context.send_success_embed("Muse added", result, message_cache).await;
         },
         false => {
-            result.push(" is already known for ").mention(&event_data.user_id).push_line(".");
+            result.push(" is already known for ").mention(&event_data.user.id).push_line(".");
             reply_context.send_error_embed("Error adding muse", result, message_cache).await;
         },
     };
@@ -71,7 +71,7 @@ pub(crate) async fn remove(
 
     let mut result = MessageBuilder::new();
     result.push("Muse ").push(Italic + &muse_name);
-    match db::remove_muse(database, event_data.guild_id.0, event_data.user_id.0, &muse_name).await?
+    match db::remove_muse(database, event_data.guild_id.0, event_data.user.id.0, &muse_name).await?
     {
         0 => {
             result.push_line(" was not found.");
@@ -102,7 +102,7 @@ pub(crate) async fn send_list(
     let muses = list(database, &event_data.user()).await?;
 
     if !muses.is_empty() {
-        result.push("Muses registered for ").mention(&event_data.user_id).push_line(":");
+        result.push("Muses registered for ").mention(&event_data.user.id).push_line(":");
 
         for muse in muses {
             result.push_line(format!("• {}", muse));

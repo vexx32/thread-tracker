@@ -60,7 +60,11 @@ impl ThreadTrackerBot {
     ///
     /// - `database` - database pool connection
     fn new(database: Database) -> Self {
-        Self { database, message_cache: MessageCache::new(), user_id: Arc::new(RwLock::new(None)) }
+        Self {
+            database,
+            message_cache: MessageCache::new(),
+            user_id: Arc::new(RwLock::new(None)),
+        }
     }
 
     /// Sets the current user ID for the bot
@@ -85,7 +89,13 @@ impl ThreadTrackerBot {
     /// - `event_data` - information about the context and metadata of the message that triggered the command.
     /// - `command` - string slice containing the command keyword, which should start with `tt!`
     /// - `args` - string slice containing the rest of the message that follows the command
-    async fn process_command(&self, event_data: EventData, command: &str, args: &str) {
+    async fn process_command(
+        &self,
+        event_data: EventData,
+        command: &str,
+        args: &str,
+        attachments: Vec<Attachment>,
+    ) {
         let reply_context = event_data.reply_context();
         match command.to_lowercase().as_str() {
             "tt!add" | "tt!track" => {
@@ -219,7 +229,14 @@ impl ThreadTrackerBot {
                 if let Err(e) = stats::send_statistics(&reply_context, self).await {
                     reply_context
                         .send_error_embed("Error fetching statistics", e, &self.message_cache)
-                        .await
+                        .await;
+                }
+            },
+            "tt!bug" => {
+                if let Err(e) = messaging::submit_bug_report(args, attachments, event_data.user, &self.message_cache, &reply_context).await {
+                    reply_context
+                        .send_error_embed("Failed to submit bug report", e, &self.message_cache)
+                        .await;
                 }
             },
             cmd => match HelpMessage::from_command(cmd) {
@@ -242,11 +259,11 @@ impl ThreadTrackerBot {
 
     async fn process_direct_message(
         &self,
-        user_id: UserId,
+        user: User,
         reply_context: ReplyContext,
         message: Message,
     ) {
-        if user_id == DEBUG_USER {
+        if user.id == DEBUG_USER {
             handle_send_result(
                 reply_context.send_message_embed("Debug information", format!("{:?}", message)),
                 &self.message_cache,
@@ -276,7 +293,7 @@ impl EventHandler for ThreadTrackerBot {
 
         info!("Received reaction {} on message {}", reaction.emoji, reaction.message_id);
 
-        if DELETE_EMOJI.iter().any(|emoji| reaction.emoji.unicode_eq(emoji)) {
+        if DELETE_EMOJI.iter().any(|&emoji| reaction.emoji.unicode_eq(emoji)) {
             info!("Deletion action recognised from reaction");
 
             let channel_message = (reaction.channel_id, reaction.message_id).into();
@@ -313,8 +330,8 @@ impl EventHandler for ThreadTrackerBot {
             return;
         }
 
-        let user_id = message.author.id;
-        if Some(user_id) == self.user().await {
+        let user = message.author.clone();
+        if Some(user.id) == self.user().await {
             return;
         }
 
@@ -323,21 +340,25 @@ impl EventHandler for ThreadTrackerBot {
 
         if let Ok(Channel::Guild(guild_channel)) = channel_id.to_channel(&context.http).await {
             let guild_id = guild_channel.guild_id;
-            let event_data = EventData { user_id, guild_id, channel_id, message_id, context };
+            let event_data = EventData { user, guild_id, channel_id, message_id, context };
 
             if let Some(command) = message.content.split_ascii_whitespace().next() {
-                info!("[command] processing command `{}` from user `{}`", message.content, user_id);
+                info!(
+                    "[command] processing command `{}` from user `{}` ({})",
+                    message.content, event_data.user.name, event_data.user.id
+                );
                 self.process_command(
                     event_data,
                     command,
                     message.content[command.len()..].trim_start(),
+                    message.attachments,
                 )
                 .await;
             }
         }
         else {
-            let reply_context = ReplyContext::new(channel_id, message_id, &context.http);
-            self.process_direct_message(user_id, reply_context, message).await;
+            let reply_context = ReplyContext::new(channel_id, message_id, &context);
+            self.process_direct_message(user, reply_context, message).await;
         }
     }
 
@@ -361,7 +382,7 @@ async fn serenity(
     use anyhow::Context;
 
     // Get the discord token set in `Secrets.toml`
-    let token = if let Some(token) = secret_store.get("DISCORD_TOKEN") {
+    let discord_token = if let Some(token) = secret_store.get("DISCORD_TOKEN") {
         token
     }
     else {
@@ -381,8 +402,10 @@ async fn serenity(
         | GatewayIntents::DIRECT_MESSAGES;
 
     let bot = ThreadTrackerBot::new(database);
-    let client =
-        Client::builder(&token, intents).event_handler(bot).await.expect("Err creating client");
+    let client = Client::builder(&discord_token, intents)
+        .event_handler(bot)
+        .await
+        .expect("Err creating client");
 
     client.cache_and_http.cache.set_max_messages(1);
 

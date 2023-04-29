@@ -14,4 +14,8 @@ __**To Do Commands**__
 > `tt!todos`, `tt!todo`, `tt!done`
 > A personal to do list that you can update as needed. Use **`tt?todos`** for more information.
 
+__**Bug Reports**__
+> `tt!bug`
+> Report any bugs you come across! Use **`tt?bug`** for more information.
+
 _Titi's responses can be deleted by the user that triggered the request reacting with_ :no_entry_sign: _or_ :wastebasket:

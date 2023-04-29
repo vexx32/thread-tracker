@@ -71,13 +71,13 @@ pub(crate) async fn add(
     event_data: &EventData,
     bot: &ThreadTrackerBot,
 ) -> anyhow::Result<()> {
-    info!("[threadwatch] Adding watcher for user {}, categories {:?}", event_data.user_id, args);
+    info!("[threadwatch] Adding watcher for user {}, categories {:?}", event_data.user.id, args);
     let arguments = if !args.is_empty() { Some(args.join(" ")) } else { None };
 
     let message = threads::send_list_with_title(args, "Watching threads", event_data, bot).await?;
     db::add_watcher(
         &bot.database,
-        event_data.user_id.0,
+        event_data.user.id.0,
         message.id.0,
         event_data.channel_id.0,
         event_data.guild_id.0,
@@ -105,7 +105,7 @@ pub(crate) async fn remove(
         return Err(MissingArguments(String::from("Please provide a message URL to a watcher message, such as: `tt!unwatch <message url>`.")).into());
     }
 
-    info!("Removing watcher for user {}, categories {:?}", event_data.user_id, args);
+    info!("Removing watcher for user {}, categories {:?}", event_data.user.id, args);
 
     let message_url = args.next().unwrap();
     let (watcher_message_id, watcher_channel_id) = parse_message_link(message_url)?;
@@ -123,9 +123,9 @@ pub(crate) async fn remove(
             },
         };
 
-    if watcher.user_id != event_data.user_id {
+    if watcher.user_id != event_data.user.id {
         return Err(
-            NotAllowed(format!("User {} does not own the watcher.", event_data.user_id)).into()
+            NotAllowed(format!("User {} does not own the watcher.", event_data.user.id)).into()
         );
     }
 

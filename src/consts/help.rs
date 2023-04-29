@@ -1,3 +1,6 @@
+pub(crate) const BUGS_TITLE: &str = "Bug reports";
+pub(crate) const BUGS: &str = include_str!("../../help/bugs.md");
+
 pub(crate) const MAIN_TITLE: &str = "Help";
 pub(crate) const MAIN: &str = include_str!("../../help/main.md");
 
