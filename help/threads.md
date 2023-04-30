@@ -18,3 +18,4 @@ ____List____
 > **`tt!random`** _`category`_ — Find a random tracked thread that you don't have the last reply in. Optionally, provide a category to filter the choices.
 > **`tt!watch`** _`categories`_ — Same as `tt!threads`, but also periodically edits the message to update the generated list.
 > **`tt!unwatch`** `URL` — Link a watched message to delete it and stop watching.
+> **`tt!watching`** - List currently active watchers.

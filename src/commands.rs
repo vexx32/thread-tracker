@@ -59,6 +59,7 @@ impl<'a> CommandDispatcher<'a> {
             "tt!replies" | "tt!threads" => self.threads(args).await,
             "tt!random" => self.random(args).await,
             "tt!watch" => self.watch(args).await,
+            "tt!watching" => self.watching(args).await,
             "tt!unwatch" => self.unwatch(args).await,
             "tt!muses" => self.muses(args).await,
             "tt!addmuse" => self.addmuse(args).await,
@@ -122,6 +123,17 @@ impl<'a> CommandDispatcher<'a> {
         self.handle_command_errors(
             watchers::add(args, &self.event_data, self.bot).await,
             "Error adding watcher",
+        )
+        .await;
+    }
+
+    async fn watching(&self, args: &str) {
+        let args = args.split_ascii_whitespace().collect();
+        self.handle_command_errors(error_on_additional_arguments(args), "Too many arguments").await;
+
+        self.handle_command_errors(
+            watchers::list(&self.event_data, self.bot).await,
+            "Error listing watchers",
         )
         .await;
     }

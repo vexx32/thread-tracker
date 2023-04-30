@@ -1,4 +1,7 @@
-use serenity::model::prelude::*;
+use serenity::{
+    model::prelude::*,
+    utils::{EmbedMessageBuilding, MessageBuilder},
+};
 use thiserror::Error;
 use tracing::{error, info};
 use WatcherError::*;
@@ -9,7 +12,7 @@ use crate::{
     threads,
     utils::{ChannelMessage, GuildUser},
     EventData,
-    ThreadTrackerBot,
+    ThreadTrackerBot, messaging::handle_send_result,
 };
 
 type Result<T> = std::result::Result<T, WatcherError>;
@@ -57,6 +60,32 @@ enum WatcherError {
     NotFound(String),
     #[error("Not allowed: {0}")]
     NotAllowed(String),
+}
+
+pub(crate) async fn list(event_data: &EventData, bot: &ThreadTrackerBot) -> anyhow::Result<()> {
+    info!("listing watchers for {}", event_data.log_user());
+
+    let watchers: Vec<ThreadWatcher> =
+        db::list_watchers(&bot.database).await?.into_iter().map(|tw| tw.into()).collect();
+
+    let mut message = MessageBuilder::new();
+
+    for watcher in watchers {
+        let url = format!(
+            "https://discord.com/channels/{}/{}/{}",
+            watcher.guild_id, watcher.channel_id, watcher.message_id
+        );
+        message
+            .push_quote("• Categories: ")
+            .push(watcher.categories.as_deref().unwrap_or("All"))
+            .push(" - ")
+            .push_named_link("Link", url)
+            .push_line("");
+    }
+
+    handle_send_result(event_data.reply_context().send_message_embed("Currently active watchers", message), &bot.message_cache).await;
+
+    Ok(())
 }
 
 /// Add a new thread watcher and send the initial watcher message.

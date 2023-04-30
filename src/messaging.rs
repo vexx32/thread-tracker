@@ -176,7 +176,9 @@ impl HelpMessage {
             "tt!help" | "tt?help" => Some(Self::Main),
             "tt?muses" | "tt?addmuse" | "tt?removemuse" => Some(Self::Muses),
             "tt?threads" | "tt?replies" | "tt?add" | "tt?track" | "tt?remove" | "tt?untrack"
-            | "tt?watch" | "tt?unwatch" | "tt?random" | "tt?category" => Some(Self::Threads),
+            | "tt?watch" | "tt?unwatch" | "tt?watching" | "tt?random" | "tt?category" => {
+                Some(Self::Threads)
+            },
             "tt?todos" | "tt?todolist" | "tt?todo" | "tt?done" => Some(Self::Todos),
             _ => None,
         }
