@@ -4,16 +4,16 @@ Thread URLs can be found under `Copy Link` when you right click or long-press on
 
 Parameters in _`italics`_ are optional.
 
-____Add/Remove____
+__**Add/Remove**__
 > **`tt!track`** _`category`_ `URLs` - Track new threads, optionally with a category.
 > **`tt!untrack`** `URLs` - Remove tracked threads from your list.
 > **`tt!untrack`** `categories` - Remove all tracked threads in the given categories.
 > **`tt!untrack all`** - Remove all tracked threads.
 
-____Change Categories____
+__**Change Categories**__
 > **`tt!category`** `category` `URLs` - Change the category of already-tracked threads. Use `unset` or `none` as the category to remove the category.
 
-____List____
+__**List**__
 > **`tt!threads`** _`categories`_ — List tracked threads and to do-list items. Optionally, provide categories to filter the list.
 > **`tt!random`** _`category`_ — Find a random tracked thread that you don't have the last reply in. Optionally, provide a category to filter the choices.
 > **`tt!watch`** _`categories`_ — Same as `tt!threads`, but also periodically edits the message to update the generated list.
