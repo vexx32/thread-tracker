@@ -12,6 +12,14 @@ pub(crate) async fn list_watchers(database: &Database) -> Result<Vec<ThreadWatch
         .await
 }
 
+pub(crate) async fn list_current_watchers(database: &Database, user_id: u64, guild_id: u64) -> Result<Vec<ThreadWatcherRow>> {
+    sqlx::query_as("SELECT id, user_id, message_id, channel_id, guild_id, categories FROM watchers WHERE user_id = $1 AND guild_id = $2")
+        .bind(user_id as i64)
+        .bind(guild_id as i64)
+        .fetch_all(database)
+        .await
+}
+
 /// Get an entry from the watchers table by channel and message ID
 pub(crate) async fn get_watcher(
     database: &Database,

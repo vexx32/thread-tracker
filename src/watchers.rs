@@ -66,7 +66,7 @@ pub(crate) async fn list(event_data: &EventData, bot: &ThreadTrackerBot) -> anyh
     info!("listing watchers for {}", event_data.log_user());
 
     let watchers: Vec<ThreadWatcher> =
-        db::list_watchers(&bot.database).await?.into_iter().map(|tw| tw.into()).collect();
+        db::list_current_watchers(&bot.database, event_data.user.id.0, event_data.guild_id.0).await?.into_iter().map(|tw| tw.into()).collect();
 
     let mut message = MessageBuilder::new();
 
