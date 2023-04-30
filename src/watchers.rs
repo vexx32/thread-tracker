@@ -71,7 +71,7 @@ pub(crate) async fn add(
     event_data: &EventData,
     bot: &ThreadTrackerBot,
 ) -> anyhow::Result<()> {
-    info!("[threadwatch] Adding watcher for user {}, categories {:?}", event_data.user.id, args);
+    info!("adding watcher for {}, categories {:?}", event_data.log_user(), args);
     let arguments = if !args.is_empty() { Some(args.join(" ")) } else { None };
 
     let message = threads::send_list_with_title(args, "Watching threads", event_data, bot).await?;
@@ -105,7 +105,7 @@ pub(crate) async fn remove(
         return Err(MissingArguments(String::from("Please provide a message URL to a watcher message, such as: `tt!unwatch <message url>`.")).into());
     }
 
-    info!("Removing watcher for user {}, categories {:?}", event_data.user.id, args);
+    info!("removing watcher for {}, categories {:?}", event_data.log_user(), args);
 
     let message_url = args.next().unwrap();
     let (watcher_message_id, watcher_channel_id) = parse_message_link(message_url)?;

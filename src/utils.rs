@@ -46,6 +46,10 @@ impl EventData {
     pub fn user(&self) -> GuildUser {
         self.into()
     }
+
+    pub fn log_user(&self) -> String {
+        format!("`{}` ({})", self.user.name, self.user.id)
+    }
 }
 
 /// Wrapper struct for the MessageId and ChannelId of a Discord message.

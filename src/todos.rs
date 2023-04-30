@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use serenity::utils::{ContentModifier::*, MessageBuilder};
+use tracing::info;
 
 use crate::{
     commands::{error_on_additional_arguments, CommandError::*},
@@ -35,7 +36,6 @@ pub(crate) async fn add<'a>(
     bot: &ThreadTrackerBot,
 ) -> anyhow::Result<()> {
     let mut entry = args.trim();
-
     let category = match entry.split_ascii_whitespace().next() {
         Some(s) if s.starts_with('!') => {
             // Remove the category name from the todo entry
@@ -55,6 +55,8 @@ pub(crate) async fn add<'a>(
         ))
         .into());
     }
+
+    info!("adding todo `{}` for {}", entry, event_data.log_user());
 
     let (database, message_cache) = (&bot.database, &bot.message_cache);
     let reply_context = event_data.reply_context();
@@ -112,9 +114,14 @@ pub(crate) async fn remove(
             // After a category name / !all, no more arguments are recognised / allowed.
             error_on_additional_arguments(entry.trim().split_ascii_whitespace().collect())?;
 
-            Some(&cat[1..])
+            let cat = &cat[1..];
+            info!("remmoving all todos in category `{}` for {}", cat, event_data.log_user());
+            Some(cat)
         },
-        _ => None,
+        _ => {
+            info!("removing todo `{}` for {}", entry, event_data.log_user());
+            None
+        },
     };
 
     let (database, message_cache) = (&bot.database, &bot.message_cache);
@@ -170,9 +177,12 @@ pub(crate) async fn send_list(
     let (database, message_cache) = (&bot.database, &bot.message_cache);
 
     let todos = if args.peek().is_some() {
-        list(database, &event_data.user(), Some(args.collect())).await?
+        let categories: Vec<&str> = args.collect();
+        info!("sending todos in categories `{}` for {}", categories.join(", "), event_data.log_user());
+        list(database, &event_data.user(), Some(categories)).await?
     }
     else {
+        info!("sending all todos for {}", event_data.log_user());
         list(database, &event_data.user(), None).await?
     };
 

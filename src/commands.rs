@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 use serenity::model::prelude::Attachment;
 use thiserror::Error;
+use tracing::error;
 
 use crate::{
     messaging::{self, send_unknown_command, HelpMessage, ReplyContext},
@@ -50,7 +51,7 @@ impl<'a> CommandDispatcher<'a> {
     /// - `command` - the command which determines which action to take
     /// - `args` - any additional arguments that have been provided
     /// - `attachments` - attachments that were provided with the command
-    pub async fn dispatch_command(&self, command: &str, args: &str, attachments: &[Attachment]) {
+    pub async fn dispatch(&self, command: &str, args: &str, attachments: &[Attachment]) {
         match command {
             "tt!add" | "tt!track" => self.track(args).await,
             "tt!remove" | "tt!untrack" => self.untrack(args).await,
@@ -146,7 +147,6 @@ impl<'a> CommandDispatcher<'a> {
     }
 
     async fn addmuse(&self, args: &str) {
-        let args = args.split_ascii_whitespace().collect();
         self.handle_command_errors(
             muses::add(args, &self.event_data, self.bot).await,
             "Error adding muse",
@@ -155,7 +155,6 @@ impl<'a> CommandDispatcher<'a> {
     }
 
     async fn removemuse(&self, args: &str) {
-        let args = args.split_ascii_whitespace().collect();
         self.handle_command_errors(
             muses::remove(args, &self.event_data, self.bot).await,
             "Error removing muse",
@@ -234,10 +233,10 @@ impl<'a> CommandDispatcher<'a> {
 
     async fn handle_command_errors<T, E>(&self, result: Result<T, E>, error_summary: &str)
     where
-        T: Send,
-        E: Send + Display,
+        E: Display,
     {
         if let Err(e) = result {
+            error!("error processing command: {}", e);
             self.reply_context.send_error_embed(error_summary, e, &self.bot.message_cache).await;
         }
     }

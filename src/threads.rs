@@ -104,7 +104,10 @@ pub(crate) async fn add(
         if let Some(channel_id) = parse_channel_id(thread_id) {
             match channel_id.to_channel(event_data.http()).await {
                 Ok(channel) => {
-                    info!("Adding tracked thread {} for user {}", channel_id, event_data.user.id);
+                    info!(
+                        "Adding tracked thread {} for user `{}` ({})",
+                        channel_id, event_data.user.name, event_data.user.id
+                    );
                     cache_last_channel_message(
                         channel.guild().as_ref(),
                         event_data.http(),
@@ -190,6 +193,7 @@ pub(crate) async fn set_category(
 
     for thread_id in args {
         if let Some(channel_id) = parse_channel_id(thread_id) {
+            info!("updating category for thread `{}` to `{}`", thread_id, category.unwrap_or("none"));
             match channel_id.to_channel(event_data.http()).await {
                 Ok(_) => match db::update_thread_category(
                     database,
@@ -266,6 +270,7 @@ pub(crate) async fn remove(
 
     let reply_context = event_data.reply_context();
     if let Some(&"all") = args.peek() {
+        info!("removing all tracked threads for {}", event_data.log_user());
         db::remove_all_threads(database, event_data.guild_id.0, event_data.user.id.0, None).await?;
         reply_context
             .send_success_embed(
@@ -288,6 +293,7 @@ pub(crate) async fn remove(
 
     for thread_or_category in args {
         if let Some(channel_id) = parse_channel_id(thread_or_category) {
+            info!("removing tracked thread `{}` for {}", channel_id, event_data.log_user());
             let result = db::remove_thread(
                 database,
                 event_data.guild_id.0,
@@ -390,6 +396,8 @@ pub(crate) async fn send_list_with_title(
     let mut args = args.into_iter().peekable();
     let user = event_data.user();
 
+    info!("sending tracked threads list for {}", event_data.log_user());
+
     let mut threads: Vec<TrackedThread> = Vec::new();
     let mut todos: Vec<Todo> = Vec::new();
 
@@ -435,6 +443,7 @@ pub(crate) async fn send_random_thread(
         reply_context.send_error_embed("Too many arguments", e, &bot.message_cache).await;
     }
 
+    info!("sending a random thread for {}", event_data.log_user());
     match get_random_thread(category, event_data, bot).await? {
         None => {
             message.push("Congrats! You don't seem to have any threads that are waiting on your reply! :tada:");

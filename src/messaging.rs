@@ -22,9 +22,9 @@ pub(crate) struct ReplyContext {
 }
 
 impl ReplyContext {
-    /// Create a new `ReplyContext`
-    pub(crate) fn new(channel_id: ChannelId, message_id: MessageId, ctx: &Context) -> Self {
-        Self { channel_id, message_id, context: ctx.clone() }
+    /// Create a new ReplyContext.
+    pub(crate) fn new(channel_id: ChannelId, message_id: MessageId, ctx: Context) -> Self {
+        Self { channel_id, message_id, context: ctx }
     }
 
     /// Sends a custom embed.
@@ -40,12 +40,11 @@ impl ReplyContext {
         body: impl ToString,
         colour: Option<Colour>,
     ) -> Result<Message, SerenityError> {
-        info!("Sending embed `{}` with content `{}`", title.to_string(), body.to_string());
         self.send_custom_embed(title, body, |embed| embed.colour(colour.unwrap_or(Colour::PURPLE)))
             .await
     }
 
-    pub(crate) async fn send_custom_embed<F>(
+    async fn send_custom_embed<F>(
         &self,
         title: impl ToString,
         body: impl ToString,
@@ -54,7 +53,6 @@ impl ReplyContext {
     where
         F: FnOnce(&mut CreateEmbed) -> &mut CreateEmbed,
     {
-        info!("Sending custom embed `{}` with content `{}`", title.to_string(), body.to_string());
         self.channel_id
             .send_message(&self.context, |msg| {
                 msg.embed(|embed| f(embed.title(title).description(body)))
@@ -93,6 +91,7 @@ impl ReplyContext {
         body: impl ToString,
         message_cache: &MessageCache,
     ) {
+        error!("{}", body.to_string());
         handle_send_result(self.send_embed(title, body, Some(Colour::DARK_ORANGE)), message_cache)
             .await;
     }
@@ -111,6 +110,13 @@ impl ReplyContext {
         self.send_embed(title, body, None).await
     }
 
+    /// Sends an embed where the primary content is arranged in fields for representing structured data.
+    ///
+    /// ### Arguments
+    ///
+    /// - `title` - the embed title
+    /// - `body` - the contents of the embed
+    /// - `fields` - the data to display in the embed's fields
     pub(crate) async fn send_data_embed<T, U>(
         &self,
         title: impl ToString,

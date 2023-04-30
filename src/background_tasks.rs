@@ -2,7 +2,7 @@ use std::{fmt::Display, future::Future, sync::Arc, time::Duration};
 
 use chrono::Utc;
 use serenity::{model::prelude::*, prelude::*, utils::Colour};
-use tracing::{error, info};
+use tracing::{error, info, info_span, Instrument};
 
 use crate::{
     cache::MessageCache,
@@ -52,7 +52,8 @@ where
 
         loop {
             interval.tick().await;
-            task().await;
+            let span = info_span!("recurring task");
+            task().instrument(span).await;
         }
     });
 }
@@ -76,7 +77,8 @@ where
         loop {
             interval.tick().await;
 
-            if let Err(e) = task().await {
+            let span = info_span!("recurring task");
+            if let Err(e) = task().instrument(span).await {
                 error!("Error running periodic task: {}", e);
             }
         }
@@ -87,7 +89,7 @@ where
 pub(crate) async fn heartbeat(ctx: Arc<Context>) {
     ctx.set_presence(Some(Activity::watching("over your threads (tt!help)")), OnlineStatus::Online)
         .await;
-    info!("[heartbeat] Keep-alive heartbeat set_presence request completed")
+    info!("[heartbeat] set_presence request completed");
 }
 
 /// Updates all recorded watchers and edits their referenced messages with the new content.
@@ -96,12 +98,11 @@ pub(crate) async fn update_watchers(
     database: Arc<Database>,
     message_cache: Arc<MessageCache>,
 ) -> Result<(), anyhow::Error> {
-    info!("[threadwatch] Updating watchers");
     let watchers: Vec<ThreadWatcher> =
         db::list_watchers(&database).await?.into_iter().map(|w| w.into()).collect();
 
     for watcher in watchers {
-        info!("[threadwatch] Updating watcher {:?}", watcher);
+        info!("[update_watchers] Updating watcher {:?}", watcher);
         let mut message =
             match context.http.get_message(watcher.channel_id.0, watcher.message_id.0).await {
                 Ok(m) => m,
@@ -114,7 +115,7 @@ pub(crate) async fn update_watchers(
                         .map_or_else(|| "<unavailable channel>".to_owned(), |gc| gc.name);
 
                     error!(
-                    "[threadwatch] Could not find message {} in channel {}: {}. Removing watcher.",
+                    "[update_watchers] Could not find message {} in channel {}: {}. Removing watcher.",
                     watcher.message_id, channel_name, e
                 );
                     db::remove_watcher(&database, watcher.id)
@@ -181,5 +182,6 @@ pub(crate) async fn update_watchers(
 ///
 /// - `cache` - the message cache
 async fn purge_expired_cache_entries(cache: Arc<MessageCache>) {
+    info!("[cache] purging any expired cache entries");
     cache.purge_expired().await;
 }

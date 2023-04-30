@@ -1,7 +1,7 @@
 pub(crate) const BUGS_TITLE: &str = "Bug reports";
 pub(crate) const BUGS: &str = include_str!("../../help/bugs.md");
 
-pub(crate) const MAIN_TITLE: &str = "Help";
+pub(crate) const MAIN_TITLE: &str = "Thread Tracker help";
 pub(crate) const MAIN: &str = include_str!("../../help/main.md");
 
 pub(crate) const MUSES_TITLE: &str = "View or change registered muses.";

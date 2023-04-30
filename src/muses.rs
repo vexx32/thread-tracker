@@ -1,4 +1,5 @@
 use serenity::utils::{ContentModifier::*, MessageBuilder};
+use tracing::info;
 
 use crate::{
     commands::CommandError::*,
@@ -15,11 +16,12 @@ use crate::{
 /// - `event_data` - the event data
 /// - `bot` - the bot instance
 pub(crate) async fn add<'a>(
-    args: Vec<&str>,
+    args: &str,
     event_data: &EventData,
     bot: &ThreadTrackerBot,
 ) -> anyhow::Result<()> {
-    if args.is_empty() {
+    let muse_name = args.trim();
+    if muse_name.is_empty() {
         return Err(MissingArguments(String::from(
             "Please provide a muse name, such as: `tt!addmuse Annie Grey`",
         ))
@@ -28,11 +30,12 @@ pub(crate) async fn add<'a>(
 
     let reply_context = event_data.reply_context();
     let (database, message_cache) = (&bot.database, &bot.message_cache);
-    let muse_name = args.join(" ");
+
+    info!("adding muse `{}` for {}", muse_name, event_data.log_user());
 
     let mut result = MessageBuilder::new();
-    result.push("Muse ").push(Italic + &muse_name);
-    match db::add_muse(database, event_data.guild_id.0, event_data.user.id.0, &muse_name).await? {
+    result.push("Muse ").push(Italic + muse_name);
+    match db::add_muse(database, event_data.guild_id.0, event_data.user.id.0, muse_name).await? {
         true => {
             result.push_line(" added successfully.");
             reply_context.send_success_embed("Muse added", result, message_cache).await;
@@ -54,25 +57,26 @@ pub(crate) async fn add<'a>(
 /// - `event_data` - the event data
 /// - `bot` - the bot instance
 pub(crate) async fn remove(
-    args: Vec<&str>,
+    args: &str,
     event_data: &EventData,
     bot: &ThreadTrackerBot,
 ) -> anyhow::Result<()> {
-    if args.is_empty() {
+    let muse_name = args.trim();
+    if muse_name.is_empty() {
         return Err(MissingArguments(String::from(
             "Please provide a muse name, such as: `tt!removemuse Annie Grey`",
         ))
         .into());
     }
 
-    let muse_name = args.join(" ");
     let reply_context = event_data.reply_context();
     let (database, message_cache) = (&bot.database, &bot.message_cache);
 
+    info!("removing muse `{}` for {}", muse_name, event_data.log_user());
+
     let mut result = MessageBuilder::new();
-    result.push("Muse ").push(Italic + &muse_name);
-    match db::remove_muse(database, event_data.guild_id.0, event_data.user.id.0, &muse_name).await?
-    {
+    result.push("Muse ").push(Italic + muse_name);
+    match db::remove_muse(database, event_data.guild_id.0, event_data.user.id.0, muse_name).await? {
         0 => {
             result.push_line(" was not found.");
             reply_context.send_error_embed("Error removing muse", result, message_cache).await;
@@ -112,6 +116,7 @@ pub(crate) async fn send_list(
         result.push_line("You have not registered any muses yet.");
     }
 
+    info!("sending muse list for {}", event_data.log_user());
     event_data.reply_context().send_success_embed("Registered muses", result, message_cache).await;
 
     Ok(())

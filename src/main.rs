@@ -80,6 +80,7 @@ impl ThreadTrackerBot {
     /// - `event_data` - information about the context and metadata of the message that triggered the command.
     /// - `command` - string slice containing the command keyword, which should start with `tt!` or `tt?`
     /// - `args` - string slice containing the rest of the message that follows the command
+    /// - `attachments` - slice of attachments that were received along with the command message
     async fn process_command(
         &self,
         event_data: EventData,
@@ -87,6 +88,11 @@ impl ThreadTrackerBot {
         mut args: &str,
         attachments: &[Attachment],
     ) {
+        info!(
+            "processing command `{}` from user `{}` ({})",
+            command, event_data.user.name, event_data.user.id
+        );
+
         let reply_context = event_data.reply_context();
         let mut final_command = String::from(command);
         if final_command.len() == 3 {
@@ -94,25 +100,18 @@ impl ThreadTrackerBot {
             if let Some(command_fragment) = args.split_ascii_whitespace().next() {
                 final_command += command_fragment;
                 args = &args[command_fragment.len()..];
+
+                info!("command keyword missing, assuming command is `{}`", &final_command)
             }
         }
 
         CommandDispatcher::new(self, event_data, reply_context)
-            .dispatch_command(
-                final_command.to_ascii_lowercase().as_str(),
-                args,
-                attachments,
-            )
+            .dispatch(final_command.to_ascii_lowercase().as_str(), args, attachments)
             .await;
     }
 
-    async fn process_direct_message(
-        &self,
-        user: User,
-        reply_context: ReplyContext,
-        message: Message,
-    ) {
-        if user.id == DEBUG_USER {
+    async fn process_direct_message(&self, reply_context: ReplyContext, message: Message) {
+        if message.author.id == DEBUG_USER {
             handle_send_result(
                 reply_context.send_message_embed("Debug information", format!("{:?}", message)),
                 &self.message_cache,
@@ -180,11 +179,9 @@ impl EventHandler for ThreadTrackerBot {
             return;
         }
 
-        info!("Received reaction {} on message {}", reaction.emoji, reaction.message_id);
+        debug!("Received reaction {} on message {}", reaction.emoji, reaction.message_id);
 
         if DELETE_EMOJI.iter().any(|&emoji| reaction.emoji.unicode_eq(emoji)) {
-            info!("Deletion action recognised from reaction");
-
             let channel_message = (reaction.channel_id, reaction.message_id).into();
             if let Ok(message) = self
                 .message_cache
@@ -197,6 +194,7 @@ impl EventHandler for ThreadTrackerBot {
                 }
 
                 if let Some(referenced_message) = &message.referenced_message {
+                    info!("Processing deletion request for message {}", message.id);
                     if Some(referenced_message.author.id) == reaction.user_id {
                         if let Err(e) = message.delete(&context).await {
                             error!("Unable to delete message {:?}: {}", message, e);
@@ -215,16 +213,17 @@ impl EventHandler for ThreadTrackerBot {
     }
 
     async fn message(&self, context: Context, message: Message) {
-        if !message_is_command(&message.content) {
-            if self.tracking_thread(message.channel_id).await {
-                self.message_cache.store((message.channel_id, message.id).into(), message).await;
-            }
-
+        let user_id = message.author.id;
+        if Some(user_id) == self.user().await {
             return;
         }
 
-        let user = message.author.clone();
-        if Some(user.id) == self.user().await {
+        if !message_is_command(&message.content) {
+            if self.tracking_thread(message.channel_id).await {
+                debug!("Caching new message from tracked channel {}", message.channel_id);
+                self.message_cache.store((message.channel_id, message.id).into(), message).await;
+            }
+
             return;
         }
 
@@ -233,13 +232,10 @@ impl EventHandler for ThreadTrackerBot {
 
         if let Ok(Channel::Guild(guild_channel)) = channel_id.to_channel(&context.http).await {
             let guild_id = guild_channel.guild_id;
-            let event_data = EventData { user, guild_id, channel_id, message_id, context };
+            let event_data =
+                EventData { user: message.author, guild_id, channel_id, message_id, context };
 
             if let Some(command) = message.content.split_ascii_whitespace().next() {
-                info!(
-                    "[command] processing command `{}` from user `{}` ({})",
-                    message.content, event_data.user.name, event_data.user.id
-                );
                 self.process_command(
                     event_data,
                     command,
@@ -250,8 +246,8 @@ impl EventHandler for ThreadTrackerBot {
             }
         }
         else {
-            let reply_context = ReplyContext::new(channel_id, message_id, &context);
-            self.process_direct_message(user, reply_context, message).await;
+            let reply_context = ReplyContext::new(channel_id, message_id, context);
+            self.process_direct_message(reply_context, message).await;
         }
     }
 
@@ -305,6 +301,9 @@ async fn serenity(
         .expect("Err creating client");
 
     client.cache_and_http.cache.set_max_messages(1);
+
+    // Try to override Shuttle's default logging settings, sqlx is ridiculously noisy
+    std::env::set_var("RUST_LOG", "debug,sqlx=none");
 
     Ok(client.into())
 }

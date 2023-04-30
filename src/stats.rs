@@ -1,3 +1,5 @@
+use tracing::info;
+
 use crate::{
     db,
     messaging::{handle_send_result, ReplyContext},
@@ -25,6 +27,8 @@ pub(crate) async fn send_statistics(
         ("Muses", stats.muses),
         ("To Dos", stats.todos),
     ];
+
+    info!("sending bot statistics");
     handle_send_result(
         reply_context.send_data_embed("Thread Tracker Statistics", "", fields.into_iter()),
         &bot.message_cache,
