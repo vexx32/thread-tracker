@@ -1,9 +1,9 @@
 use serenity::utils::{ContentModifier::*, MessageBuilder};
 
 use crate::{
+    commands::CommandError::*,
     db::{self, Database},
     utils::{EventData, GuildUser},
-    CommandError::*,
     ThreadTrackerBot,
 };
 

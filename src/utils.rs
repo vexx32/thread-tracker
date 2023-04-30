@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serenity::{http::Http, model::prelude::*, prelude::*};
 
-use crate::{messaging::ReplyContext, watchers::ThreadWatcher, CommandError::*};
+use crate::{messaging::ReplyContext, watchers::ThreadWatcher};
 
 /// Wrapper struct to simplify passing around user/guild ID pair.
 pub(crate) struct GuildUser {
@@ -95,15 +95,6 @@ where
     }
 
     map
-}
-
-/// Returns `Err` if `unrecognised_args` is not empty.
-pub(crate) fn error_on_additional_arguments(unrecognised_args: Vec<&str>) -> anyhow::Result<()> {
-    if !unrecognised_args.is_empty() {
-        return Err(UnrecognisedArguments(unrecognised_args.join(", ")).into());
-    }
-
-    Ok(())
 }
 
 /// If the given string starts with `tt!` or `tt?` (case-insensitive), returns true.

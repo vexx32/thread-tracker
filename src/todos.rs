@@ -3,11 +3,10 @@ use std::collections::BTreeMap;
 use serenity::utils::{ContentModifier::*, MessageBuilder};
 
 use crate::{
+    commands::{error_on_additional_arguments, CommandError::*},
     db::{self, Database},
-    error_on_additional_arguments,
     messaging::handle_send_result,
     utils::*,
-    CommandError::*,
     ThreadTrackerBot,
 };
 

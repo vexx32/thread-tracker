@@ -4,10 +4,10 @@ use tracing::{error, info};
 use WatcherError::*;
 
 use crate::{
+    commands::CommandError::*,
     db,
     threads,
     utils::{ChannelMessage, GuildUser},
-    CommandError::*,
     EventData,
     ThreadTrackerBot,
 };

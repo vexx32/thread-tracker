@@ -10,8 +10,8 @@ use tracing::{error, info};
 
 use crate::{
     cache::MessageCache,
+    commands::CommandError::{self, *},
     consts::*,
-    CommandError::{self, *},
 };
 
 /// Wrapper struct to keep track of which channel and message is being replied to.
