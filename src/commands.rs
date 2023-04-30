@@ -248,7 +248,6 @@ impl<'a> CommandDispatcher<'a> {
         E: Display,
     {
         if let Err(e) = result {
-            error!("error processing command: {}", e);
             self.reply_context.send_error_embed(error_summary, e, &self.bot.message_cache).await;
         }
     }

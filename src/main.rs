@@ -302,8 +302,5 @@ async fn serenity(
 
     client.cache_and_http.cache.set_max_messages(1);
 
-    // Try to override Shuttle's default logging settings, sqlx is ridiculously noisy
-    std::env::set_var("RUST_LOG", "debug,sqlx=none");
-
     Ok(client.into())
 }

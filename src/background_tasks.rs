@@ -1,8 +1,13 @@
-use std::{fmt::Display, future::Future, sync::Arc, time::Duration};
+use std::{
+    fmt::Display,
+    future::Future,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use chrono::Utc;
 use serenity::{model::prelude::*, prelude::*, utils::Colour};
-use tracing::{error, info, info_span, Instrument};
+use tracing::{error, info};
 
 use crate::{
     cache::MessageCache,
@@ -52,8 +57,7 @@ where
 
         loop {
             interval.tick().await;
-            let span = info_span!("recurring task");
-            task().instrument(span).await;
+            task().await;
         }
     });
 }
@@ -77,8 +81,7 @@ where
         loop {
             interval.tick().await;
 
-            let span = info_span!("recurring task");
-            if let Err(e) = task().instrument(span).await {
+            if let Err(e) = task().await {
                 error!("Error running periodic task: {}", e);
             }
         }
@@ -89,7 +92,7 @@ where
 pub(crate) async fn heartbeat(ctx: Arc<Context>) {
     ctx.set_presence(Some(Activity::watching("over your threads (tt!help)")), OnlineStatus::Online)
         .await;
-    info!("[heartbeat] set_presence request completed");
+    info!("heartbeat set_presence request completed");
 }
 
 /// Updates all recorded watchers and edits their referenced messages with the new content.
@@ -102,29 +105,34 @@ pub(crate) async fn update_watchers(
         db::list_watchers(&database).await?.into_iter().map(|w| w.into()).collect();
 
     for watcher in watchers {
-        info!("[update_watchers] Updating watcher {:?}", watcher);
-        let mut message =
-            match context.http.get_message(watcher.channel_id.0, watcher.message_id.0).await {
-                Ok(m) => m,
-                Err(e) => {
-                    let channel_name = watcher
-                        .channel_id
-                        .to_channel(&context.http)
-                        .await
-                        .map_or(None, |c| c.guild())
-                        .map_or_else(|| "<unavailable channel>".to_owned(), |gc| gc.name);
+        info!("updating watched message for {:?}", &watcher);
+        let start_time = Instant::now();
 
-                    error!(
-                    "[update_watchers] Could not find message {} in channel {}: {}. Removing watcher.",
-                    watcher.message_id, channel_name, e
+        let mut message = match context
+            .http
+            .get_message(watcher.channel_id.0, watcher.message_id.0)
+            .await
+        {
+            Ok(m) => m,
+            Err(e) => {
+                let channel_name = watcher
+                    .channel_id
+                    .to_channel(&context.http)
+                    .await
+                    .map_or(None, |c| c.guild())
+                    .map_or_else(|| "<unavailable channel>".to_owned(), |gc| gc.name);
+
+                error!(
+                    "could not find message {} in channel {} for watcher {}: {}. Removing watcher.",
+                    watcher.message_id, channel_name, watcher.id, e
                 );
-                    db::remove_watcher(&database, watcher.id)
-                        .await
-                        .map_err(|e| error!("Failed to remove watcher: {}", e))
-                        .ok();
-                    continue;
-                },
-            };
+                db::remove_watcher(&database, watcher.id)
+                    .await
+                    .map_err(|e| error!("Failed to remove watcher: {}", e))
+                    .ok();
+                continue;
+            },
+        };
 
         let user = watcher.user();
 
@@ -171,6 +179,10 @@ pub(crate) async fn update_watchers(
             // Simply log these instead.
             error!("Could not edit message: {}", e);
         }
+        else {
+            let elapsed = Instant::now() - start_time;
+            info!("updated watcher {} in {:.2} ms", watcher.id, elapsed.as_millis());
+        }
     }
 
     Ok(())
@@ -182,6 +194,6 @@ pub(crate) async fn update_watchers(
 ///
 /// - `cache` - the message cache
 async fn purge_expired_cache_entries(cache: Arc<MessageCache>) {
-    info!("[cache] purging any expired cache entries");
+    info!("purging any expired cache entries");
     cache.purge_expired().await;
 }
