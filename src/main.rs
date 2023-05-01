@@ -263,7 +263,7 @@ impl EventHandler for ThreadTrackerBot {
 #[shuttle_runtime::main]
 async fn serenity(
     #[shuttle_shared_db::Postgres(
-        //local_uri = "postgres://postgres:{secrets.PASSWORD}@localhost:16695/postgres"
+        local_uri = "postgres://postgres:{secrets.PASSWORD}@localhost:16695/postgres"
     )]
     database: Database,
     #[shuttle_secrets::Secrets] secret_store: SecretStore,
