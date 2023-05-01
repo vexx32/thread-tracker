@@ -193,7 +193,11 @@ pub(crate) async fn set_category(
 
     for thread_id in args {
         if let Some(channel_id) = parse_channel_id(thread_id) {
-            info!("updating category for thread `{}` to `{}`", thread_id, category.unwrap_or("none"));
+            info!(
+                "updating category for thread `{}` to `{}`",
+                thread_id,
+                category.unwrap_or("none")
+            );
             match channel_id.to_channel(event_data.http()).await {
                 Ok(_) => match db::update_thread_category(
                     database,
