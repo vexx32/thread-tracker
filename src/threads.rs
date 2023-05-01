@@ -622,6 +622,12 @@ async fn get_last_responder(
     context: &Context,
     message_cache: &MessageCache,
 ) -> Option<User> {
+    // If we've already got cached messages from this thread, we *probably* have the most recent one,
+    // since the bot is listening to messages as they are received.
+    if let Some(msg) = message_cache.last_message_in_thread(thread.channel_id).await {
+        return Some(msg.author.clone());
+    }
+
     if let Ok(Channel::Guild(channel)) = context.http().get_channel(thread.channel_id.into()).await
     {
         if let Some(last_message_id) = channel.last_message_id {

@@ -12,6 +12,20 @@ use crate::{consts::CACHE_LIFETIME, utils::ChannelMessage};
 
 pub(crate) type MessageCache = MemoryCache<ChannelMessage, Message>;
 
+impl MessageCache {
+    pub async fn last_message_in_thread(&self, channel_id: ChannelId) -> Option<Arc<Message>> {
+        self.max_by_key(|k, v| {
+            if k.channel_id == channel_id {
+                v.timestamp
+            }
+            else {
+                // zero is a valid unix timestamp value, if this panics there're bigger problems
+                Timestamp::from_unix_timestamp(0).unwrap()
+            }
+        }).await
+    }
+}
+
 type CacheMap<TKey, TValue> = HashMap<TKey, Cached<TValue>>;
 
 #[derive(Debug)]
@@ -52,6 +66,16 @@ where
     /// Get an entry out of the cache.
     pub async fn get(&self, id: &TKey) -> Option<Arc<TData>> {
         self.storage.read().await.get(id).map(|c| Arc::clone(&c.data))
+    }
+
+    /// Returns the cache entry that gives the maximum value from the specified function.
+    pub async fn max_by_key<F, O>(&self, mut f: F) -> Option<Arc<TData>>
+    where
+        F: FnMut(&TKey, &Arc<TData>) -> O,
+        O: Ord,
+    {
+        let storage = self.storage.read().await;
+        storage.iter().max_by_key(|&(k, v)| f(k, &v.data)).map(|(k, v)| Arc::clone(&v.data))
     }
 
     /// Remove an entry from the cache.
