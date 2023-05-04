@@ -97,8 +97,11 @@ pub(crate) async fn update_watchers(
     let watchers: Vec<ThreadWatcher> =
         db::list_watchers(&database).await?.into_iter().map(|w| w.into()).collect();
 
+    let mut stagger_interval = tokio::time::interval(Duration::from_millis(100));
+
     let mut tasks = JoinSet::new();
     for watcher in watchers {
+        stagger_interval.tick().await;
         let context = Arc::clone(&context);
         let database = Arc::clone(&database);
         let message_cache = Arc::clone(&message_cache);
