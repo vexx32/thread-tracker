@@ -1,4 +1,9 @@
-use std::{fmt::Display, future::Future, sync::Arc, time::{Duration, Instant}};
+use std::{
+    fmt::Display,
+    future::Future,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use serenity::{model::prelude::*, prelude::*};
 use tokio::task::JoinSet;
@@ -94,30 +99,52 @@ pub(crate) async fn update_watchers(
     message_cache: Arc<MessageCache>,
 ) -> anyhow::Result<()> {
     let task_start = Instant::now();
-    let watchers: Vec<ThreadWatcher> =
-        db::list_watchers(&database).await?.into_iter().map(|w| w.into()).collect();
+    let watchers: Vec<Vec<ThreadWatcher>> = {
+        let mut vec = Vec::new();
+        let list: Vec<ThreadWatcher> = db::list_watchers(&database).await?.into_iter().map(|w| w.into()).collect();
+        let batch_size = list.len() / MAX_WATCHER_UPDATE_TASKS;
+
+        let mut list = list.into_iter().peekable();
+        while list.peek().is_some() {
+            vec.push(list.by_ref().take(batch_size).collect());
+        }
+
+        vec
+    };
 
     let mut stagger_interval = tokio::time::interval(Duration::from_millis(100));
 
     let mut tasks = JoinSet::new();
-    for watcher in watchers {
+    for watcher_batch in watchers {
         stagger_interval.tick().await;
         let context = Arc::clone(&context);
         let database = Arc::clone(&database);
         let message_cache = Arc::clone(&message_cache);
         tasks.spawn(async move {
-            watchers::update_watched_message(watcher, &context, &database, &message_cache).await
+            for watcher in watcher_batch {
+                let id = watcher.id;
+                let result =
+                    watchers::update_watched_message(watcher, &context, &database, &message_cache)
+                        .await;
+                if let Err(e) = result {
+                    error!("error updating watcher {}: {}", id, e);
+                }
+            }
         });
     }
 
     while let Some(res) = tasks.join_next().await {
-        if let Ok(Err(e)) = res {
-            error!("error updating watcher: {}", e);
+        if let Err(e) = res {
+            error!("{}", e);
         }
     }
 
     let task_duration = Instant::now() - task_start;
-    info!("updating all watchers completed in {:.2} s ({} ms)", task_duration.as_secs_f32(), task_duration.as_millis());
+    info!(
+        "updating all watchers completed in {:.2} s ({} ms)",
+        task_duration.as_secs_f32(),
+        task_duration.as_millis()
+    );
 
     Ok(())
 }
