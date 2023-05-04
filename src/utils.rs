@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use serenity::{http::Http, model::prelude::*, prelude::*};
+use serenity::{http::{Http, CacheHttp}, model::prelude::*, prelude::*};
 
 use crate::{messaging::ReplyContext, watchers::ThreadWatcher};
 
@@ -116,4 +116,12 @@ pub(crate) fn substring(name: &str, max_length: usize) -> &str {
     else {
         name
     }
+}
+
+pub(crate) async fn get_channel_name(channel_id: ChannelId, cache_http: impl CacheHttp) -> Option<String> {
+    channel_id
+        .to_channel(cache_http.http())
+        .await
+        .map_or(None, |c| c.guild())
+        .map(|gc| gc.name)
 }

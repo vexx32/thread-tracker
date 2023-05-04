@@ -736,7 +736,7 @@ async fn get_thread_name(thread: &TrackedThread, cache_http: impl CacheHttp) -> 
         Some(n)
     }
     else {
-        thread.channel_id.to_channel(cache_http).await.map_or(None, |c| c.guild()).map(|gc| gc.name)
+        get_channel_name(thread.channel_id, cache_http).await
     }
 }
 

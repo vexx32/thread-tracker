@@ -1,22 +1,14 @@
-use std::{
-    fmt::Display,
-    future::Future,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{fmt::Display, future::Future, sync::Arc, time::{Duration, Instant}};
 
-use chrono::Utc;
-use serenity::{model::prelude::*, prelude::*, utils::Colour};
+use serenity::{model::prelude::*, prelude::*};
+use tokio::task::JoinSet;
 use tracing::{error, info};
 
 use crate::{
     cache::MessageCache,
     consts::*,
     db::{self, Database},
-    muses,
-    threads::{self, TrackedThread},
-    todos::{self, Todo},
-    watchers::ThreadWatcher,
+    watchers::{self, ThreadWatcher},
     ThreadTrackerBot,
 };
 
@@ -100,90 +92,29 @@ pub(crate) async fn update_watchers(
     context: Arc<Context>,
     database: Arc<Database>,
     message_cache: Arc<MessageCache>,
-) -> Result<(), anyhow::Error> {
+) -> anyhow::Result<()> {
+    let task_start = Instant::now();
     let watchers: Vec<ThreadWatcher> =
         db::list_watchers(&database).await?.into_iter().map(|w| w.into()).collect();
 
+    let mut tasks = JoinSet::new();
     for watcher in watchers {
-        info!("updating watched message for {:?}", &watcher);
-        let start_time = Instant::now();
+        let context = Arc::clone(&context);
+        let database = Arc::clone(&database);
+        let message_cache = Arc::clone(&message_cache);
+        tasks.spawn(async move {
+            watchers::update_watched_message(watcher, &context, &database, &message_cache).await
+        });
+    }
 
-        let mut message = match context
-            .http
-            .get_message(watcher.channel_id.0, watcher.message_id.0)
-            .await
-        {
-            Ok(m) => m,
-            Err(e) => {
-                let channel_name = watcher
-                    .channel_id
-                    .to_channel(&context.http)
-                    .await
-                    .map_or(None, |c| c.guild())
-                    .map_or_else(|| "<unavailable channel>".to_owned(), |gc| gc.name);
-
-                error!(
-                    "could not find message {} in channel {} for watcher {}: {}. Removing watcher.",
-                    watcher.message_id, channel_name, watcher.id, e
-                );
-                db::remove_watcher(&database, watcher.id)
-                    .await
-                    .map_err(|e| error!("Failed to remove watcher: {}", e))
-                    .ok();
-                continue;
-            },
-        };
-
-        let user = watcher.user();
-
-        let mut threads: Vec<TrackedThread> = Vec::new();
-        let mut todos: Vec<Todo> = Vec::new();
-
-        match watcher.categories.as_deref() {
-            Some("") | None => {
-                threads.extend(threads::enumerate(&database, &user, None).await?);
-                todos.extend(todos::enumerate(&database, &user, None).await?);
-            },
-            Some(cats) => {
-                for category in cats.split(' ') {
-                    threads.extend(threads::enumerate(&database, &user, Some(category)).await?);
-                    todos.extend(todos::enumerate(&database, &user, Some(category)).await?);
-                }
-            },
-        }
-
-        let muses = muses::list(&database, &user).await?;
-        let threads_content = threads::get_formatted_list(
-            threads,
-            todos,
-            muses,
-            &watcher.user(),
-            &context,
-            &message_cache,
-        )
-        .await?;
-
-        let edit_result = message
-            .edit(&context.http, |msg| {
-                msg.embed(|embed| {
-                    embed
-                        .colour(Colour::PURPLE)
-                        .title("Watching threads")
-                        .description(threads_content)
-                        .footer(|footer| footer.text(format!("Last updated: {}", Utc::now())))
-                })
-            })
-            .await;
-        if let Err(e) = edit_result {
-            // If we return here, an error updating one watcher message would prevent the rest from being updated.
-            // Simply log these instead.
-            error!("Could not edit message: {}", e);
-        }
-        else {
-            let elapsed = Instant::now() - start_time;
-            info!("updated watcher {} in {:.2} ms", watcher.id, elapsed.as_millis());
+    while let Some(res) = tasks.join_next().await {
+        if let Ok(Err(e)) = res {
+            error!("error updating watcher: {}", e);
         }
     }
+
+    let task_duration = Instant::now() - task_start;
+    info!("updating all watchers completed in {:.2} s ({} ms)", task_duration.as_secs_f32(), task_duration.as_millis());
 
     Ok(())
 }
