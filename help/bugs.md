@@ -1,4 +1,4 @@
-If you come across a bug in Thread Tracker, you can ask Titi to report it for you! Bug reports can also be submitted on the [Thread Tracker Github](https://github.com/vexx32/thread-tracker).
+If you come across a bug in Thread Tracker, you can ask Titi to report it for you! Bug reports can also be submitted via our [Discord server](https://discord.gg/DxdufuEkJR) or on the [Thread Tracker Github](https://github.com/vexx32/thread-tracker).
 
 Please include as much information and context as you can and are comfortable with. Linebreaks and normal Markdown formatting are allowed. Ideally, include the following:
 
