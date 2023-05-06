@@ -156,7 +156,7 @@ pub(crate) async fn list_threads(
     category: Option<&str>,
 ) -> Result<Vec<TrackedThreadRow>> {
     let query = match category {
-        Some(c) => sqlx::query_as("SELECT channel_id, category, guild_id, id FROM threads WHERE user_id = $1 AND guild_id = $2 AND category = $3 ORDER BY id")
+        Some(c) => sqlx::query_as("SELECT channel_id, category, guild_id, id FROM threads WHERE user_id = $1 AND guild_id = $2 AND lower(category) = lower($3) ORDER BY id")
             .bind(user_id as i64)
             .bind(guild_id as i64)
             .bind(c),
@@ -219,7 +219,7 @@ pub(crate) async fn get_muse(
     muse: &str,
 ) -> Result<Option<MuseRow>> {
     sqlx::query_as(
-        "SELECT id, muse_name FROM muses WHERE user_id = $1 AND guild_id = $2 AND muse_name = $3",
+        "SELECT id, muse_name FROM muses WHERE user_id = $1 AND guild_id = $2 AND lower(muse_name) = lower($3)",
     )
     .bind(user_id as i64)
     .bind(guild_id as i64)
@@ -249,7 +249,7 @@ pub(crate) async fn remove_muse(
     muse: &str,
 ) -> Result<u64> {
     let result =
-        sqlx::query("DELETE FROM muses WHERE muse_name = $1 AND user_id = $2 AND guild_id = $3")
+        sqlx::query("DELETE FROM muses WHERE lower(muse_name) = lower($1) AND user_id = $2 AND guild_id = $3")
             .bind(muse)
             .bind(user_id as i64)
             .bind(guild_id as i64)
@@ -269,7 +269,7 @@ pub(crate) async fn add_todo(
 ) -> Result<bool> {
     match get_todo(database, guild_id, user_id, content).await? {
         Some(t) if t.category.as_deref() != category => {
-            sqlx::query("UPDATE todos SET category = $1 WHERE user_id = $2 AND guild_id = $3 AND content = $4")
+            sqlx::query("UPDATE todos SET category = $1 WHERE user_id = $2 AND guild_id = $3 AND lower(content) = lower($4)")
                 .bind(category)
                 .bind(user_id as i64)
                 .bind(guild_id as i64)
@@ -302,7 +302,7 @@ pub(crate) async fn get_todo(
     user_id: u64,
     content: &str,
 ) -> Result<Option<TodoRow>> {
-    sqlx::query_as("SELECT id, content, category FROM todos WHERE user_id = $1 AND guild_id = $2 AND content = $3")
+    sqlx::query_as("SELECT id, content, category FROM todos WHERE user_id = $1 AND guild_id = $2 AND lower(content) = lower($3)")
         .bind(user_id as i64)
         .bind(guild_id as i64)
         .bind(content)
@@ -317,7 +317,7 @@ pub(crate) async fn list_todos(
     category: Option<&str>,
 ) -> Result<Vec<TodoRow>> {
     let query = match category {
-        Some(cat) => sqlx::query_as("SELECT id, content, category FROM todos WHERE category = $1 AND user_id = $2 AND guild_id = $3")
+        Some(cat) => sqlx::query_as("SELECT id, content, category FROM todos WHERE lower(category) = lower($1) AND user_id = $2 AND guild_id = $3")
             .bind(cat),
         None => sqlx::query_as("SELECT id, content, category FROM todos WHERE user_id = $1 AND guild_id = $2"),
     };
@@ -333,7 +333,7 @@ pub(crate) async fn remove_todo(
     content: &str,
 ) -> Result<u64> {
     let result =
-        sqlx::query("DELETE FROM todos WHERE content = $1 AND user_id = $2 AND guild_id = $3")
+        sqlx::query("DELETE FROM todos WHERE lower(content) = lower($1) AND user_id = $2 AND guild_id = $3")
             .bind(content)
             .bind(user_id as i64)
             .bind(guild_id as i64)
@@ -352,7 +352,7 @@ pub(crate) async fn remove_all_todos(
 ) -> Result<u64> {
     let query = match category {
         Some(cat) => {
-            sqlx::query("DELETE FROM todos WHERE category = $1 AND user_id = $2 AND guild_id = $3")
+            sqlx::query("DELETE FROM todos WHERE lower(category) = lower($1) AND user_id = $2 AND guild_id = $3")
                 .bind(cat)
         },
         None => sqlx::query("DELETE FROM todos WHERE user_id = $1 AND guild_id = $2"),
