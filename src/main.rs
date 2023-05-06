@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, sync::{Arc, atomic::{AtomicUsize, Ordering}}};
 
 use anyhow::anyhow;
 use cache::MessageCache;
@@ -41,6 +41,8 @@ struct ThreadTrackerBot {
     user_id: Arc<RwLock<Option<UserId>>>,
     /// The current list of tracked threads
     tracked_threads: Arc<RwLock<HashSet<ChannelId>>>,
+    /// The total number of guilds the bot is in
+    guild_count: AtomicUsize,
 }
 
 impl ThreadTrackerBot {
@@ -55,6 +57,7 @@ impl ThreadTrackerBot {
             message_cache: MessageCache::new(),
             user_id: Arc::new(RwLock::new(None)),
             tracked_threads: Arc::new(RwLock::new(HashSet::new())),
+            guild_count: AtomicUsize::new(0),
         }
     }
 
@@ -251,10 +254,29 @@ impl EventHandler for ThreadTrackerBot {
         }
     }
 
+    async fn guild_create(&self, _ctx: Context, guild: Guild, is_new: bool) {
+        if is_new {
+            info!("notified that Titi was added to a new guild: `{}` ({})!", guild.name, guild.id);
+            self.guild_count.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    async fn guild_delete(&self, _ctx: Context, guild_partial: UnavailableGuild, guild_full: Option<Guild>) {
+        if !guild_partial.unavailable {
+            let guild_name = guild_full.map(|g| g.name).unwrap_or_else(|| format!("{}", guild_partial.id));
+            info!("notified that Titi has been removed from the `{}` guild ({})", guild_name, guild_partial.id);
+            self.guild_count.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
     async fn ready(&self, ctx: Context, ready: Ready) {
-        info!("{} is connected!", ready.user.name);
+        let guild_count = ready.guilds.len();
+
+        info!("connected to Discord successfully as `{}`", ready.user.name);
+        info!("currently active in {} guilds", guild_count);
 
         self.set_user(ready.user.id).await;
+        self.guild_count.store(guild_count, Ordering::Relaxed);
 
         run_periodic_tasks(ctx.into(), self).await;
     }

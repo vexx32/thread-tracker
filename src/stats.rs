@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use tracing::info;
 
 use crate::{
@@ -20,9 +22,10 @@ pub(crate) async fn send_statistics(
 
     let fields = [
         ("Unique users", stats.users),
-        ("Servers", stats.servers),
-        ("Unique threads", stats.threads_distinct),
-        ("Total threads", stats.threads_total),
+        ("Servers (Active)", stats.servers),
+        ("Servers (Total)", bot.guild_count.load(Ordering::Relaxed) as i64),
+        ("Threads (Unique)", stats.threads_distinct),
+        ("Threads (Total)", stats.threads_total),
         ("Watchers", stats.watchers),
         ("Muses", stats.muses),
         ("To Dos", stats.todos),
