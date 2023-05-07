@@ -682,7 +682,7 @@ async fn push_thread_line<'a>(
                 message.push_line(Bold + last_author_name)
             }
         },
-        None => message.push(Bold + "No replies yet"),
+        None => message.push_line(Bold + "No replies yet"),
     }
 }
 
