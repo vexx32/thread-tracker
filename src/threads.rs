@@ -626,23 +626,33 @@ async fn get_last_responder(
     context: &Context,
     message_cache: &MessageCache,
 ) -> Option<User> {
-    if let Ok(Channel::Guild(channel)) = context.http().get_channel(thread.channel_id.into()).await
-    {
-        if let Some(last_message_id) = channel.last_message_id {
-            let channel_message = (last_message_id, channel.id).into();
-            message_cache
-                .get_or_else(&channel_message, || channel_message.fetch(context))
-                .await
-                .ok()
-                .map(|m| m.author.clone())
-        }
-        else {
-            None
-        }
+    match context.http().get_channel(thread.channel_id.into()).await {
+        Ok(Channel::Guild(channel)) => {
+            let last_message = if let Some(last_message_id) = channel.last_message_id {
+                let channel_message = (last_message_id, channel.id).into();
+                message_cache
+                    .get_or_else(&channel_message, || channel_message.fetch(context))
+                    .await
+                    .ok()
+            }
+            else {
+                None
+            };
+
+            // This fallback is necessary as Discord may not report a correct or available message as the last_message_id.
+            // Messages can be deleted or otherwise unavailable, so this fallback should get the most recent
+            // *available* message in the channel.
+            match last_message {
+                Some(m) => Some(m.author.clone()),
+                None => get_last_channel_message(channel, context).await.map(|m| m.author),
+            }
+        },
+        _ => None,
     }
-    else {
-        None
-    }
+}
+
+async fn get_last_channel_message(channel: GuildChannel, context: &Context) -> Option<Message> {
+    channel.messages(context, |messages| messages.limit(1)).await.ok().and_then(|mut m| m.pop())
 }
 
 /// Get the user's nickname in the given guild, or their username.
