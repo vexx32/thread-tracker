@@ -310,7 +310,8 @@ async fn serenity(
     let intents = GatewayIntents::GUILD_MESSAGES
         | GatewayIntents::MESSAGE_CONTENT
         | GatewayIntents::GUILD_MESSAGE_REACTIONS
-        | GatewayIntents::DIRECT_MESSAGES;
+        | GatewayIntents::DIRECT_MESSAGES
+        | GatewayIntents::GUILDS;
 
     let bot = ThreadTrackerBot::new(database);
     if let Err(e) = bot.update_tracked_threads().await {
