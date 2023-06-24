@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::{Arc, atomic::{AtomicUsize, Ordering}}};
+use std::{collections::HashSet, sync::{Arc, atomic::{AtomicUsize, Ordering}}, time::Duration};
 
 use anyhow::anyhow;
 use cache::MessageCache;
@@ -8,8 +8,9 @@ use serenity::{
     model::{channel::Message, prelude::*},
     prelude::*,
 };
-use shuttle_secrets::SecretStore;
-use sqlx::Executor;
+use sqlx::{Executor, postgres::PgPoolOptions};
+use tokio::time::sleep;
+use toml::Table;
 use tracing::{debug, error, info};
 
 mod background_tasks;
@@ -282,23 +283,27 @@ impl EventHandler for ThreadTrackerBot {
     }
 }
 
-#[shuttle_runtime::main]
-async fn serenity(
-    #[shuttle_shared_db::Postgres(
-        local_uri = "postgres://postgres:{secrets.PASSWORD}@localhost:16695/postgres"
-    )]
-    database: Database,
-    #[shuttle_secrets::Secrets] secret_store: SecretStore,
-) -> shuttle_serenity::ShuttleSerenity {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     use anyhow::Context;
 
+    tracing_subscriber::fmt::init();
+
+    let configuration = include_str!("../Secrets.toml").parse::<Table>().unwrap();
+
     // Get the discord token set in `Secrets.toml`
-    let discord_token = if let Some(token) = secret_store.get("DISCORD_TOKEN") {
-        token
+    let token_entry = if cfg!(debug_assertions) {
+        "DISCORD_TOKEN_DEV"
     }
     else {
-        return Err(anyhow!("'DISCORD_TOKEN' was not found").into());
+        "DISCORD_TOKEN"
     };
+
+    let discord_token = configuration[token_entry].as_str().unwrap();
+
+    let database = PgPoolOptions::new()
+        .max_connections(10)
+        .connect(configuration["CONNECTION_STRING"].as_str().unwrap()).await?;
 
     // Run the schema migration
     database
@@ -315,15 +320,36 @@ async fn serenity(
 
     let bot = ThreadTrackerBot::new(database);
     if let Err(e) = bot.update_tracked_threads().await {
-        return Err(anyhow!(e).into());
+        return Err(anyhow!(e));
     }
 
-    let client = Client::builder(&discord_token, intents)
+    let mut client = Client::builder(discord_token, intents)
         .event_handler(bot)
         .await
         .expect("Err creating client");
 
     client.cache_and_http.cache.set_max_messages(1);
 
-    Ok(client.into())
+    let manager = client.shard_manager.clone();
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_secs(30)).await;
+
+            let lock = manager.lock().await;
+            let runners = lock.runners.lock().await;
+
+            for (id, runner) in runners.iter() {
+                info!(
+                    "Shard ID {} is {} with a latency of {:?}",
+                    id, runner.stage, runner.latency
+                );
+            }
+        }
+    });
+
+    if let Err(why) = client.start_shards(2).await {
+        error!("Client error: {:?}", why);
+    }
+
+    Ok(())
 }
