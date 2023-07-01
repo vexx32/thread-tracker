@@ -11,7 +11,7 @@ use serenity::{
 use sqlx::{Executor, postgres::{PgPoolOptions, PgConnectOptions}, ConnectOptions};
 use tokio::time::sleep;
 use toml::Table;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, log::LevelFilter};
 
 mod background_tasks;
 mod cache;
@@ -350,7 +350,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    if let Err(why) = client.start_shards(2).await {
+    if let Err(why) = client.start_autosharded().await {
         error!("Client error: {:?}", why);
     }
 
