@@ -8,7 +8,7 @@ use serenity::{
     model::{channel::Message, prelude::*},
     prelude::*,
 };
-use sqlx::{Executor, postgres::PgPoolOptions};
+use sqlx::{Executor, postgres::{PgPoolOptions, PgConnectOptions}, ConnectOptions};
 use tokio::time::sleep;
 use toml::Table;
 use tracing::{debug, error, info};
@@ -301,9 +301,12 @@ async fn main() -> anyhow::Result<()> {
 
     let discord_token = configuration[token_entry].as_str().unwrap();
 
+    let mut options: PgConnectOptions = configuration["CONNECTION_STRING"].as_str().unwrap().parse()?;
+    options.log_statements(LevelFilter::Trace);
     let database = PgPoolOptions::new()
         .max_connections(10)
-        .connect(configuration["CONNECTION_STRING"].as_str().unwrap()).await?;
+        .connect_with(options).await?;
+
 
     // Run the schema migration
     database
