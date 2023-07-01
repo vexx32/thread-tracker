@@ -1,3 +1,4 @@
 /target
 /keys
 Secrets*.toml
+*.log
