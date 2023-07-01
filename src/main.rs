@@ -6,7 +6,7 @@ use commands::CommandDispatcher;
 use serenity::{
     async_trait,
     model::{channel::Message, prelude::*},
-    prelude::*,
+    prelude::*, utils::MessageBuilder,
 };
 use sqlx::{Executor, postgres::{PgPoolOptions, PgConnectOptions}, ConnectOptions};
 use tokio::time::sleep;
@@ -116,8 +116,11 @@ impl ThreadTrackerBot {
 
     async fn process_direct_message(&self, reply_context: ReplyContext, message: Message) {
         if message.author.id == DEBUG_USER {
+            let mut body = MessageBuilder::new();
+            body.push_codeblock_safe(format!("{:?}", message), Some("json"));
+
             handle_send_result(
-                reply_context.send_message_embed("Debug information", format!("{:?}", message)),
+                reply_context.send_message_embed("Debug information", body),
                 &self.message_cache,
             )
             .await;
