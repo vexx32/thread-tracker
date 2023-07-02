@@ -680,7 +680,7 @@ async fn push_thread_line<'a>(
     let link =
         get_thread_link(thread, guild_threads.get(&thread.channel_id).cloned(), context).await;
     // Thread entries in blockquotes
-    message.push_quote("• ").push(link).push(" — ");
+    message.push("- ").push(link).push(" — ");
 
     match last_message_author {
         Some(user) => {

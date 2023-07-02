@@ -267,5 +267,5 @@ pub(crate) fn push_todo_line<'a>(
     message: &'a mut MessageBuilder,
     todo: &Todo,
 ) -> &'a mut MessageBuilder {
-    message.push_quote_line(format!("• {}", &todo.content))
+    message.push_line(format!("- {}", &todo.content))
 }
