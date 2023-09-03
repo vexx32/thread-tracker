@@ -1,30 +1,75 @@
-use std::future::Future;
+use std::{future::Future, borrow::Cow};
 
 use serenity::{
     builder::CreateEmbed,
     model::prelude::*,
     prelude::*,
-    utils::{Colour, MessageBuilder},
+    utils::Colour,
 };
-use tracing::{error, info};
+use tracing::error;
 
 use crate::{
     cache::MessageCache,
-    commands::CommandError::{self, *},
-    consts::*,
+    consts::*, utils::subdivide_string,
 };
+
+pub struct InteractionResponse {
+    title: Cow<'static, str>,
+    content: Cow<'static, str>,
+    error: bool,
+    ephemeral: bool,
+}
+
+impl InteractionResponse {
+    fn new(title: impl Into<Cow<'static, str>>, content: impl Into<Cow<'static, str>>, error: bool, ephemeral: bool) -> Vec<Self> {
+        let content = content.into();
+        let title = title.into();
+
+        subdivide_string(&content, MAX_EMBED_CHARS)
+            .iter()
+            .map(|&s| Self { title: title.clone(), content: s.to_owned().into(), error, ephemeral })
+            .collect()
+    }
+
+    pub(crate) fn reply(title: impl Into<Cow<'static, str>>, content: impl Into<Cow<'static, str>>) -> Vec<Self> {
+        Self::new(title, content, false, false)
+    }
+
+    pub(crate) fn ephemeral_reply(title: impl Into<Cow<'static, str>>, content: impl Into<Cow<'static, str>>) -> Vec<Self> {
+        Self::new(title, content, false, true)
+    }
+
+    pub(crate) fn help(message: HelpMessage) -> Vec<Self> {
+        Self::reply(message.title(), message.text())
+    }
+
+    pub fn error(title: impl Into<Cow<'static, str>>, content: impl Into<Cow<'static, str>>) -> Vec<Self> {
+        Self::new(title, content, true, false)
+    }
+
+    pub fn ephemeral_error(title: impl Into<Cow<'static, str>>, content: impl Into<Cow<'static, str>>) -> Vec<Self> {
+        Self::new(title, content, true, true)
+    }
+
+    pub fn is_error(&self) -> bool { self.error }
+
+    pub fn is_ephemeral(&self) -> bool { self.ephemeral }
+
+    pub fn title(&self) -> &str { &self.title }
+
+    pub fn content(&self) -> &str { &self.content }
+}
 
 /// Wrapper struct to keep track of which channel and message is being replied to.
 pub(crate) struct ReplyContext {
     channel_id: ChannelId,
-    message_id: MessageId,
     context: Context,
 }
 
 impl ReplyContext {
     /// Create a new ReplyContext.
-    pub(crate) fn new(channel_id: ChannelId, message_id: MessageId, ctx: Context) -> Self {
-        Self { channel_id, message_id, context: ctx }
+    pub(crate) fn new(channel_id: ChannelId, ctx: Context) -> Self {
+        Self { channel_id, context: ctx }
     }
 
     /// Sends a custom embed.
@@ -56,27 +101,26 @@ impl ReplyContext {
         self.channel_id
             .send_message(&self.context, |msg| {
                 msg.embed(|embed| f(embed.title(title).description(body)))
-                    .reference_message((self.channel_id, self.message_id))
             })
             .await
     }
 
-    /// Sends a 'success' confirmation embed.
-    ///
-    /// ### Arguments
-    ///
-    /// - `title` - the title of the embed
-    /// - `body` - the content of the embed
-    /// - `message_cache` - the cache to store sent messages in
-    pub(crate) async fn send_success_embed(
-        &self,
-        title: impl ToString,
-        body: impl ToString,
-        message_cache: &MessageCache,
-    ) {
-        handle_send_result(self.send_embed(title, body, Some(Colour::FABLED_PINK)), message_cache)
-            .await;
-    }
+    // /// Sends a 'success' confirmation embed.
+    // ///
+    // /// ### Arguments
+    // ///
+    // /// - `title` - the title of the embed
+    // /// - `body` - the content of the embed
+    // /// - `message_cache` - the cache to store sent messages in
+    // pub(crate) async fn send_success_embed(
+    //     &self,
+    //     title: impl ToString,
+    //     body: impl ToString,
+    //     message_cache: &MessageCache,
+    // ) {
+    //     handle_send_result(self.send_embed(title, body, Some(Colour::FABLED_PINK)), message_cache)
+    //         .await;
+    // }
 
     /// Sends an error embed.
     ///
@@ -110,49 +154,28 @@ impl ReplyContext {
         self.send_embed(title, body, None).await
     }
 
-    /// Sends an embed where the primary content is arranged in fields for representing structured data.
-    ///
-    /// ### Arguments
-    ///
-    /// - `title` - the embed title
-    /// - `body` - the contents of the embed
-    /// - `fields` - the data to display in the embed's fields
-    pub(crate) async fn send_data_embed<T, U>(
-        &self,
-        title: impl ToString,
-        body: impl ToString,
-        fields: impl Iterator<Item = (T, U)>,
-    ) -> Result<Message, SerenityError>
-    where
-        T: ToString,
-        U: ToString,
-    {
-        self.send_custom_embed(title, body, |embed| {
-            embed.colour(Colour::TEAL).fields(fields.map(|(name, value)| (name, value, true)))
-        })
-        .await
-    }
-
-    /// Sends the bot's help message to the channel.
-    ///
-    /// ### Arguments
-    ///
-    /// - `message` - the type of help message to send
-    /// - `reply_context` - the bot context and channel to reply to
-    pub(crate) async fn send_help(&self, message: HelpMessage, message_cache: &MessageCache) {
-        handle_send_result(self.send_message_embed(message.title(), message.text()), message_cache)
-            .await;
-    }
-}
-
-impl From<&crate::EventData> for ReplyContext {
-    fn from(value: &crate::EventData) -> Self {
-        Self {
-            channel_id: value.channel_id,
-            message_id: value.message_id,
-            context: value.context.clone(),
-        }
-    }
+    // /// Sends an embed where the primary content is arranged in fields for representing structured data.
+    // ///
+    // /// ### Arguments
+    // ///
+    // /// - `title` - the embed title
+    // /// - `body` - the contents of the embed
+    // /// - `fields` - the data to display in the embed's fields
+    // pub(crate) async fn send_data_embed<T, U>(
+    //     &self,
+    //     title: impl ToString,
+    //     body: impl ToString,
+    //     fields: impl Iterator<Item = (T, U)>,
+    // ) -> Result<Message, SerenityError>
+    // where
+    //     T: ToString,
+    //     U: ToString,
+    // {
+    //     self.send_custom_embed(title, body, |embed| {
+    //         embed.colour(Colour::TEAL).fields(fields.map(|(name, value)| (name, value, true)))
+    //     })
+    //     .await
+    // }
 }
 
 /// Mapping enum to select appropriate help messages for various commands and retrieve the associated text.
@@ -165,22 +188,13 @@ pub(crate) enum HelpMessage {
 }
 
 impl HelpMessage {
-    /// Gets the appropriate `HelpMessage` for a given bot command.
-    ///
-    /// ### Arguments
-    ///
-    /// - `command` - the command string to fetch a help message for.
-    pub fn from_command(command: &str) -> Option<Self> {
-        match command {
-            "tt?bug" | "tt?bugs" => Some(Self::Bugs),
-            "tt!help" | "tt?help" => Some(Self::Main),
-            "tt?muses" | "tt?addmuse" | "tt?removemuse" => Some(Self::Muses),
-            "tt?threads" | "tt?replies" | "tt?add" | "tt?track" | "tt?remove" | "tt?untrack"
-            | "tt?watch" | "tt?unwatch" | "tt?watching" | "tt?random" | "tt?category" => {
-                Some(Self::Threads)
-            },
-            "tt?todos" | "tt?todolist" | "tt?todo" | "tt?done" => Some(Self::Todos),
-            _ => None,
+    pub fn from_category(category: Option<&str>) -> Self {
+        match category.map(|s| s.to_ascii_lowercase()).as_deref() {
+            Some("bugs") => Self::Bugs,
+            Some("muses") => Self::Muses,
+            Some("threads") => Self::Threads,
+            Some("todos") => Self::Todos,
+            _ => Self::Main,
         }
     }
 
@@ -229,76 +243,58 @@ pub(crate) async fn handle_send_result(
     };
 }
 
-/// Sends an error embed indicating the input command is not recognised.
-///
-/// ### Arguments
-///
-/// - `reply_context` - the context to use when sending the reply
-/// - `command` - the unrecognised command
-/// - `message_cache` - the cache to store sent message in
-pub(crate) async fn send_unknown_command(
-    reply_context: &ReplyContext,
-    command: &str,
-    message_cache: &MessageCache,
-) {
-    info!("Unknown command received: {}", command);
-    reply_context
-        .send_error_embed("Unknown command", UnknownCommand(command.to_owned()), message_cache)
-        .await;
-}
+// pub(crate) async fn submit_bug_report(
+//     message: &str,
+//     attachments: &[Attachment],
+//     reporting_user: &User,
+//     message_cache: &MessageCache,
+//     reply_context: &ReplyContext,
+// ) -> anyhow::Result<()> {
+//     if message.trim().is_empty() {
+//         return Ok(());
+//     }
 
-pub(crate) async fn submit_bug_report(
-    message: &str,
-    attachments: &[Attachment],
-    reporting_user: &User,
-    message_cache: &MessageCache,
-    reply_context: &ReplyContext,
-) -> anyhow::Result<()> {
-    if message.trim().is_empty() {
-        return Err(CommandError::MissingArguments("Please provide a summary of the bug, reproduction steps, and a screenshot if you're comfortable doing so.".to_owned()).into());
-    }
+//     let mut report = MessageBuilder::new();
+//     report
+//         .push("__**Bug Report**__ from ")
+//         .push_line(reporting_user.mention())
+//         .push_line("")
+//         .push_line(message);
 
-    let mut report = MessageBuilder::new();
-    report
-        .push("__**Bug Report**__ from ")
-        .push_line(reporting_user.mention())
-        .push_line("")
-        .push_line(message);
+//     let target_user = UserId(DEBUG_USER);
 
-    let target_user = UserId(DEBUG_USER);
+//     let dm = target_user
+//         .to_user(&reply_context.context)
+//         .await?
+//         .direct_message(&reply_context.context, |msg| {
+//             msg.content(report)
+//                 .add_files(
+//                     attachments
+//                         .iter()
+//                         .filter_map(|a| url::Url::parse(&a.url).ok())
+//                         .map(AttachmentType::Image),
+//                 )
+//                 .embed(|embed| {
+//                     embed
+//                         .title("Reported By")
+//                         .field(
+//                             "User",
+//                             format!("{} #{}", reporting_user.name, reporting_user.discriminator),
+//                             true,
+//                         )
+//                         .field("User ID", reporting_user.id, true)
+//                 })
+//         })
+//         .await?;
 
-    let dm = target_user
-        .to_user(&reply_context.context)
-        .await?
-        .direct_message(&reply_context.context, |msg| {
-            msg.content(report)
-                .add_files(
-                    attachments
-                        .iter()
-                        .filter_map(|a| url::Url::parse(&a.url).ok())
-                        .map(AttachmentType::Image),
-                )
-                .embed(|embed| {
-                    embed
-                        .title("Reported By")
-                        .field(
-                            "User",
-                            format!("{} #{}", reporting_user.name, reporting_user.discriminator),
-                            true,
-                        )
-                        .field("User ID", reporting_user.id, true)
-                })
-        })
-        .await?;
+//     message_cache.store((dm.channel_id, dm.id).into(), dm).await;
+//     reply_context
+//         .send_success_embed(
+//             "Bug report submitted successfully!",
+//             "Your bug report has been sent.",
+//             message_cache,
+//         )
+//         .await;
 
-    message_cache.store((dm.channel_id, dm.id).into(), dm).await;
-    reply_context
-        .send_success_embed(
-            "Bug report submitted successfully!",
-            "Your bug report has been sent.",
-            message_cache,
-        )
-        .await;
-
-    Ok(())
-}
+//     Ok(())
+// }

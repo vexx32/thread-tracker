@@ -11,9 +11,9 @@ use tracing::{error, info};
 
 use crate::{
     cache::MessageCache,
+    commands::watchers::{self, ThreadWatcher},
     consts::*,
     db::{self, Database},
-    watchers::{self, ThreadWatcher},
     ThreadTrackerBot,
 };
 
@@ -101,7 +101,8 @@ pub(crate) async fn update_watchers(
     let task_start = Instant::now();
     let watchers: Vec<Vec<ThreadWatcher>> = {
         let mut vec = Vec::new();
-        let list: Vec<ThreadWatcher> = db::list_watchers(&database).await?.into_iter().map(|w| w.into()).collect();
+        let list: Vec<ThreadWatcher> =
+            db::list_watchers(&database).await?.into_iter().map(|w| w.into()).collect();
         let batch_size = list.len() / MAX_WATCHER_UPDATE_TASKS;
 
         let mut list = list.into_iter().peekable();

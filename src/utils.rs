@@ -1,8 +1,15 @@
 use std::collections::BTreeMap;
 
-use serenity::{http::{Http, CacheHttp}, model::prelude::*, prelude::*};
+use serenity::{
+    http::{CacheHttp, Http},
+    model::prelude::{
+        interaction::application_command::{CommandDataOption, CommandDataOptionValue},
+        *,
+    },
+    prelude::*,
+};
 
-use crate::{messaging::ReplyContext, watchers::ThreadWatcher};
+use crate::commands::watchers::ThreadWatcher;
 
 /// Wrapper struct to simplify passing around user/guild ID pair.
 pub(crate) struct GuildUser {
@@ -10,45 +17,9 @@ pub(crate) struct GuildUser {
     pub guild_id: GuildId,
 }
 
-impl From<&EventData> for GuildUser {
-    fn from(value: &EventData) -> Self {
-        Self { user_id: value.user.id, guild_id: value.guild_id }
-    }
-}
-
 impl From<&ThreadWatcher> for GuildUser {
     fn from(value: &ThreadWatcher) -> Self {
         Self { user_id: value.user_id, guild_id: value.guild_id }
-    }
-}
-
-/// Metadata from the received message event.
-pub(crate) struct EventData {
-    pub user: User,
-    pub guild_id: GuildId,
-    pub channel_id: ChannelId,
-    pub message_id: MessageId,
-    pub context: Context,
-}
-
-impl EventData {
-    /// Get the Http from the event context.
-    pub fn http(&self) -> &Http {
-        &self.context.http
-    }
-
-    /// Get a ReplyContext from the event data.
-    pub fn reply_context(&self) -> ReplyContext {
-        self.into()
-    }
-
-    /// Get the associated GuildUser for this event.
-    pub fn user(&self) -> GuildUser {
-        self.into()
-    }
-
-    pub fn log_user(&self) -> String {
-        format!("`{}` ({})", self.user.name, self.user.id)
     }
 }
 
@@ -118,10 +89,60 @@ pub(crate) fn substring(name: &str, max_length: usize) -> &str {
     }
 }
 
-pub(crate) async fn get_channel_name(channel_id: ChannelId, cache_http: impl CacheHttp) -> Option<String> {
-    channel_id
-        .to_channel(cache_http.http())
-        .await
-        .map_or(None, |c| c.guild())
-        .map(|gc| gc.name)
+pub(crate) async fn get_channel_name(
+    channel_id: ChannelId,
+    cache_http: impl CacheHttp,
+) -> Option<String> {
+    channel_id.to_channel(cache_http.http()).await.map_or(None, |c| c.guild()).map(|gc| gc.name)
+}
+
+pub(crate) fn subdivide_string(s: &str, max_chunk_length: usize) -> Vec<&str> {
+    let mut result = Vec::with_capacity(s.len() / max_chunk_length);
+    let mut iter = s.chars();
+    let mut pos = 0;
+
+    while pos < s.len() {
+        let mut len = 0;
+        for ch in iter.by_ref().take(max_chunk_length) {
+            len += ch.len_utf8();
+        }
+        result.push(&s[pos..pos + len]);
+        pos += len;
+    }
+
+    result
+}
+
+pub(crate) fn find_string_option<'a>(
+    args: &'a [CommandDataOption],
+    name: &str,
+) -> Option<&'a str> {
+    match find_named_option(args, name) {
+        Some(CommandDataOptionValue::String(s)) => Some(s),
+        _ => None,
+    }
+}
+
+pub(crate) fn find_channel_option<'a>(
+    args: &'a [CommandDataOption],
+    name: &str,
+) -> Option<&'a PartialChannel> {
+    match find_named_option(args, name) {
+        Some(CommandDataOptionValue::Channel(s)) => Some(s),
+        _ => None,
+    }
+}
+
+// pub(crate) fn find_integer_option(args: &[CommandDataOption], name: &str) -> Option<i64> {
+//     match find_named_option(args, name) {
+//         Some(&CommandDataOptionValue::Integer(i)) => Some(i),
+//         _ => None,
+//     }
+// }
+
+fn find_named_option<'a>(
+    args: &'a [CommandDataOption],
+    name: &str,
+) -> Option<&'a CommandDataOptionValue> {
+    args.iter().find(|opt| opt.name == name).and_then(|opt| opt.resolved.as_ref())
 }

@@ -1,263 +1,121 @@
-use std::fmt::Display;
+pub(crate) mod help;
+pub(crate) mod muses;
+pub(crate) mod threads;
+pub(crate) mod todos;
+pub(crate) mod watchers;
 
-use serenity::model::prelude::Attachment;
-use thiserror::Error;
+use serenity::{
+    builder::CreateApplicationCommands,
+    model::application::interaction::application_command::*,
+    prelude::Context,
+    utils::Colour,
+};
 use tracing::error;
 
-use crate::{
-    messaging::{self, send_unknown_command, HelpMessage, ReplyContext},
-    muses,
-    stats,
-    threads,
-    todos,
-    utils::EventData,
-    watchers,
-    ThreadTrackerBot,
-};
+use crate::{messaging::InteractionResponse, ThreadTrackerBot};
 
-/// Command parsing errors
-#[derive(Debug, Error)]
-pub(crate) enum CommandError {
-    #[error("Additional arguments are required. {0}")]
-    MissingArguments(String),
+pub fn register_commands(
+    commands: &mut CreateApplicationCommands,
+) -> &mut CreateApplicationCommands {
+    commands.create_application_command(|command| help::register(command));
 
-    #[error("Unrecognised arguments: {0}")]
-    UnrecognisedArguments(String),
+    threads::register_commands(commands);
+    muses::register_commands(commands);
+    todos::register_commands(commands);
+    watchers::register_commands(commands);
 
-    #[error("Unknown command `{0}`. Use `tt!help` for a list of commands.")]
-    UnknownCommand(String),
+    commands
 }
 
-/// Handles mapping an input command and arguments to the bot actions.
-pub(crate) struct CommandDispatcher<'a> {
-    bot: &'a ThreadTrackerBot,
-    event_data: EventData,
-    reply_context: ReplyContext,
-}
+pub(crate) async fn interaction(
+    command: ApplicationCommandInteraction,
+    bot: &ThreadTrackerBot,
+    context: &Context,
+) {
+    let responses = match command.data.name.as_str() {
+        "tt!track" => threads::add(&command, bot, context).await,
+        "tt!untrack" => threads::remove(&command, bot).await,
+        "tt!cat" | "tt!category" => threads::set_category(&command, &bot.database, context).await,
+        "tt!replies" | "tt!threads" => threads::send_list(&command, bot, context).await,
+        "tt!random" => threads::send_random_thread(&command, bot, context).await,
+        "tt!watch" => watchers::add(&command, bot, context).await,
+        "tt!watching" => watchers::list(&command, bot).await,
+        "tt!unwatch" => watchers::remove(&command, bot, context).await,
+        "tt!muses" => muses::list(&command, bot).await,
+        "tt!addmuse" => muses::add(&command, bot).await,
+        "tt!removemuse" => muses::remove(&command, bot).await,
+        "tt!todo" => todos::add(&command, bot).await,
+        "tt!done" => todos::remove(&command, bot).await,
+        "tt!todos" | "tt!todolist" => todos::list(&command, bot).await,
+        cmd => {
+            if cmd.starts_with("tt?") {
+                help::run(&command)
+            }
+            else {
+                handle_unknown_command(cmd).await
+            }
+        },
+    };
 
-impl<'a> CommandDispatcher<'a> {
-    pub fn new(
-        bot: &'a ThreadTrackerBot,
-        event_data: EventData,
-        reply_context: ReplyContext,
-    ) -> Self {
-        Self { bot, event_data, reply_context }
-    }
+    let mut messages = responses.iter();
+    if let Some(message) = messages.next() {
+        let mut embed_colour = if message.is_error() { Colour::RED } else { Colour::PURPLE };
+        let result = command
+            .create_interaction_response(&context, |response| {
+                response.interaction_response_data(|data| {
+                    data.embed(|embed| {
+                        embed
+                            .title(message.title())
+                            .description(message.content())
+                            .colour(embed_colour)
+                    })
+                    .ephemeral(message.is_ephemeral())
+                })
+            })
+            .await;
 
-    /// Run the action associated with the input command.
-    ///
-    /// ### Arguments
-    ///
-    /// - `command` - the command which determines which action to take
-    /// - `args` - any additional arguments that have been provided
-    /// - `attachments` - attachments that were provided with the command
-    pub async fn dispatch(&self, command: &str, args: &str, attachments: &[Attachment]) {
-        match command {
-            "tt!add" | "tt!track" => self.track(args).await,
-            "tt!remove" | "tt!untrack" => self.untrack(args).await,
-            "tt!cat" | "tt!category" => self.category(args).await,
-            "tt!replies" | "tt!threads" => self.threads(args).await,
-            "tt!random" => self.random(args).await,
-            "tt!watch" => self.watch(args).await,
-            "tt!watching" => self.watching(args).await,
-            "tt!unwatch" => self.unwatch(args).await,
-            "tt!muses" => self.muses(args).await,
-            "tt!addmuse" => self.addmuse(args).await,
-            "tt!removemuse" => self.removemuse(args).await,
-            "tt!todo" => self.todo(args).await,
-            "tt!done" => self.done(args).await,
-            "tt!todos" | "tt!todolist" => self.todolist(args).await,
-            "tt!stats" => self.stats(args).await,
-            "tt!bug" => self.bug(args, attachments).await,
-            cmd => self.handle_unknown_command(cmd, args).await,
+        log_interaction_response_errors(result);
+
+        for message in responses {
+            embed_colour = if message.is_error() { Colour::RED } else { Colour::PURPLE };
+            let result = command
+                .create_followup_message(&context, |response| {
+                    response
+                        .embed(|embed| {
+                            embed
+                                .title(message.title())
+                                .description(message.content())
+                                .colour(embed_colour)
+                        })
+                        .ephemeral(message.is_ephemeral())
+                })
+                .await;
+
+            log_interaction_response_errors(result);
         }
     }
-
-    async fn track(&self, args: &str) {
-        let args = args.split_ascii_whitespace().collect();
-        self.handle_command_errors(
-            threads::add(args, &self.event_data, self.bot).await,
-            "Error adding tracked thread(s)",
-        )
-        .await;
-    }
-
-    async fn untrack(&self, args: &str) {
-        let args = args.split_ascii_whitespace().collect();
-        self.handle_command_errors(
-            threads::remove(args, &self.event_data, self.bot).await,
-            "Error removing tracked thread(s)",
-        )
-        .await;
-    }
-
-    async fn category(&self, args: &str) {
-        let args = args.split_ascii_whitespace().collect();
-        self.handle_command_errors(
-            threads::set_category(args, &self.event_data, self.bot).await,
-            "Error updating thread categories",
-        )
-        .await;
-    }
-
-    async fn threads(&self, args: &str) {
-        let args = args.split_ascii_whitespace().collect();
-        self.handle_command_errors(
-            threads::send_list(args, &self.event_data, self.bot).await,
-            "Error retrieving thread list",
-        )
-        .await;
-    }
-
-    async fn random(&self, args: &str) {
-        let args = args.split_ascii_whitespace().collect();
-        self.handle_command_errors(
-            threads::send_random_thread(args, &self.event_data, self.bot).await,
-            "Error retrieving a random thread",
-        )
-        .await;
-    }
-
-    async fn watch(&self, args: &str) {
-        let args = args.split_ascii_whitespace().collect();
-        self.handle_command_errors(
-            watchers::add(args, &self.event_data, self.bot).await,
-            "Error adding watcher",
-        )
-        .await;
-    }
-
-    async fn watching(&self, args: &str) {
-        let args = args.split_ascii_whitespace().collect();
-        self.handle_command_errors(error_on_additional_arguments(args), "Too many arguments").await;
-
-        self.handle_command_errors(
-            watchers::list(&self.event_data, self.bot).await,
-            "Error listing watchers",
-        )
-        .await;
-    }
-
-    async fn unwatch(&self, args: &str) {
-        let args = args.split_ascii_whitespace().collect();
-        self.handle_command_errors(
-            watchers::remove(args, &self.event_data, self.bot).await,
-            "Error removing watcher",
-        )
-        .await;
-    }
-
-    async fn muses(&self, args: &str) {
-        let args = args.split_ascii_whitespace().collect();
-        self.handle_command_errors(error_on_additional_arguments(args), "Too many arguments").await;
-
-        self.handle_command_errors(
-            muses::send_list(&self.event_data, self.bot).await,
-            "Error finding muses",
-        )
-        .await;
-    }
-
-    async fn addmuse(&self, args: &str) {
-        self.handle_command_errors(
-            muses::add(args, &self.event_data, self.bot).await,
-            "Error adding muse",
-        )
-        .await;
-    }
-
-    async fn removemuse(&self, args: &str) {
-        self.handle_command_errors(
-            muses::remove(args, &self.event_data, self.bot).await,
-            "Error removing muse",
-        )
-        .await;
-    }
-
-    async fn todo(&self, args: &str) {
-        self.handle_command_errors(
-            todos::add(args, &self.event_data, self.bot).await,
-            "Error adding to do-list item",
-        )
-        .await;
-    }
-
-    async fn done(&self, args: &str) {
-        self.handle_command_errors(
-            todos::remove(args, &self.event_data, self.bot).await,
-            "Error removing to do-list item",
-        )
-        .await;
-    }
-
-    async fn todolist(&self, args: &str) {
-        let args = args.split_ascii_whitespace().collect();
-        self.handle_command_errors(
-            todos::send_list(args, &self.event_data, self.bot).await,
-            "Error getting to do-list",
-        )
-        .await;
-    }
-
-    async fn stats(&self, args: &str) {
-        let args = args.split_ascii_whitespace().collect();
-        self.handle_command_errors(error_on_additional_arguments(args), "Too many arguments").await;
-
-        self.handle_command_errors(
-            stats::send_statistics(&self.reply_context, self.bot).await,
-            "Error fetching statistics",
-        )
-        .await;
-    }
-
-    async fn bug(&self, args: &str, attachments: &[Attachment]) {
-        self.handle_command_errors(
-            messaging::submit_bug_report(
-                args,
-                attachments,
-                &self.event_data.user,
-                &self.bot.message_cache,
-                &self.reply_context,
-            )
-            .await,
-            "Failed to submit bug report",
-        )
-        .await;
-    }
-
-    async fn handle_unknown_command(&self, command: &str, args: &str) {
-        match HelpMessage::from_command(command) {
-            Some(help_message) => {
-                let args = args.split_ascii_whitespace().collect();
-                if let Err(e) = error_on_additional_arguments(args) {
-                    self.reply_context
-                        .send_error_embed("Too many arguments", e, &self.bot.message_cache)
-                        .await;
-                };
-
-                self.reply_context.send_help(help_message, &self.bot.message_cache).await;
-            },
-            None => {
-                send_unknown_command(&self.reply_context, command, &self.bot.message_cache).await;
-            },
-        }
-    }
-
-    async fn handle_command_errors<T, E>(&self, result: Result<T, E>, error_summary: &str)
-    where
-        E: Display,
-    {
-        if let Err(e) = result {
-            self.reply_context.send_error_embed(error_summary, e, &self.bot.message_cache).await;
-        }
+    else {
+        error!(
+            "Command '{}' resulted in no response!\nUser: {} ({})\nGuild: {}\nOptions: {:?}",
+            command.data.name,
+            command.user.name,
+            command.user.id,
+            command.guild_id.map_or("nil".to_owned(), |g| g.to_string()),
+            command.data.options
+        );
     }
 }
 
-/// Returns `Err` if `unrecognised_args` is not empty.
-pub(crate) fn error_on_additional_arguments(unrecognised_args: Vec<&str>) -> anyhow::Result<()> {
-    if !unrecognised_args.is_empty() {
-        return Err(CommandError::UnrecognisedArguments(unrecognised_args.join(", ")).into());
-    }
+async fn handle_unknown_command(command_name: &str) -> Vec<InteractionResponse> {
+    error!("Received unknown command `{}`, check command mappings", command_name);
+    InteractionResponse::error(
+        "Unknown command",
+        format!("The command `{}` is not recognised.", command_name),
+    )
+}
 
-    Ok(())
+fn log_interaction_response_errors<T>(result: serenity::Result<T>) {
+    if let Err(e) = result {
+        error!("Error sending interaction response: {}", e);
+    }
 }

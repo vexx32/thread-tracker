@@ -1,14 +1,29 @@
-use std::{collections::HashSet, sync::{Arc, atomic::{AtomicUsize, Ordering}}, time::Duration};
+use std::{
+    collections::HashSet,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use anyhow::anyhow;
 use cache::MessageCache;
-use commands::CommandDispatcher;
+use commands::threads;
 use serenity::{
     async_trait,
-    model::{channel::Message, prelude::*},
-    prelude::*, utils::MessageBuilder,
+    model::{
+        channel::Message,
+        prelude::{command::Command, interaction::Interaction, *},
+    },
+    prelude::*,
+    utils::MessageBuilder,
 };
-use sqlx::{Executor, postgres::{PgPoolOptions, PgConnectOptions}, ConnectOptions};
+use sqlx::{
+    postgres::{PgConnectOptions, PgPoolOptions},
+    ConnectOptions,
+    Executor,
+};
 use tokio::time::sleep;
 use toml::Table;
 use tracing::{debug, error, info, log::LevelFilter};
@@ -19,18 +34,14 @@ mod commands;
 mod consts;
 mod db;
 mod messaging;
-mod muses;
 mod stats;
-mod threads;
-mod todos;
 mod utils;
-mod watchers;
 
 use background_tasks::*;
 use consts::*;
 use db::Database;
 use messaging::*;
-use utils::{message_is_command, EventData};
+use utils::message_is_command;
 
 /// Primary bot state struct that will be passed to all event handlers.
 struct ThreadTrackerBot {
@@ -75,43 +86,6 @@ impl ThreadTrackerBot {
     /// Gets the current user ID for the bot, if it's been set
     async fn user(&self) -> Option<UserId> {
         *self.user_id.read().await
-    }
-
-    /// Handles processing commands received by the bot.
-    ///
-    /// ### Arguments
-    ///
-    /// - `event_data` - information about the context and metadata of the message that triggered the command.
-    /// - `command` - string slice containing the command keyword, which should start with `tt!` or `tt?`
-    /// - `args` - string slice containing the rest of the message that follows the command
-    /// - `attachments` - slice of attachments that were received along with the command message
-    async fn process_command(
-        &self,
-        event_data: EventData,
-        command: &str,
-        mut args: &str,
-        attachments: &[Attachment],
-    ) {
-        info!(
-            "processing command `{}` from user `{}` ({})",
-            command, event_data.user.name, event_data.user.id
-        );
-
-        let reply_context = event_data.reply_context();
-        let mut final_command = String::from(command);
-        if final_command.len() == 3 {
-            // This should only ever be "tt!" or "tt?", no other commands should reach this method
-            if let Some(command_fragment) = args.split_ascii_whitespace().next() {
-                final_command += command_fragment;
-                args = &args[command_fragment.len()..];
-
-                info!("command keyword missing, assuming command is `{}`", &final_command)
-            }
-        }
-
-        CommandDispatcher::new(self, event_data, reply_context)
-            .dispatch(final_command.to_ascii_lowercase().as_str(), args, attachments)
-            .await;
     }
 
     async fn process_direct_message(&self, reply_context: ReplyContext, message: Message) {
@@ -234,26 +208,13 @@ impl EventHandler for ThreadTrackerBot {
             return;
         }
 
-        let message_id = message.id;
         let channel_id = message.channel_id;
 
-        if let Ok(Channel::Guild(guild_channel)) = channel_id.to_channel(&context.http).await {
-            let guild_id = guild_channel.guild_id;
-            let event_data =
-                EventData { user: message.author, guild_id, channel_id, message_id, context };
-
-            if let Some(command) = message.content.split_ascii_whitespace().next() {
-                self.process_command(
-                    event_data,
-                    command,
-                    message.content[command.len()..].trim_start(),
-                    &message.attachments,
-                )
-                .await;
-            }
+        if let Ok(Channel::Guild(_)) = channel_id.to_channel(&context.http).await {
+            info!("Ignored guild message: '{}'", message.content);
         }
         else {
-            let reply_context = ReplyContext::new(channel_id, message_id, context);
+            let reply_context = ReplyContext::new(channel_id, context);
             self.process_direct_message(reply_context, message).await;
         }
     }
@@ -265,10 +226,19 @@ impl EventHandler for ThreadTrackerBot {
         }
     }
 
-    async fn guild_delete(&self, _ctx: Context, guild_partial: UnavailableGuild, guild_full: Option<Guild>) {
+    async fn guild_delete(
+        &self,
+        _ctx: Context,
+        guild_partial: UnavailableGuild,
+        guild_full: Option<Guild>,
+    ) {
         if !guild_partial.unavailable {
-            let guild_name = guild_full.map(|g| g.name).unwrap_or_else(|| format!("{}", guild_partial.id));
-            info!("notified that Titi has been removed from the `{}` guild ({})", guild_name, guild_partial.id);
+            let guild_name =
+                guild_full.map(|g| g.name).unwrap_or_else(|| format!("{}", guild_partial.id));
+            info!(
+                "notified that Titi has been removed from the `{}` guild ({})",
+                guild_name, guild_partial.id
+            );
             self.guild_count.fetch_sub(1, Ordering::SeqCst);
         }
     }
@@ -282,7 +252,39 @@ impl EventHandler for ThreadTrackerBot {
         self.set_user(ready.user.id).await;
         self.guild_count.store(guild_count, Ordering::Relaxed);
 
+        if cfg!(debug_assertions) {
+            for guild in ready.guilds {
+                log_slash_commands(
+                    guild
+                        .id
+                        .set_application_commands(&ctx, |bot_commands| {
+                            commands::register_commands(bot_commands)
+                        })
+                        .await,
+                    Some(guild.id),
+                );
+            }
+        }
+        else {
+            log_slash_commands(
+                Command::set_global_application_commands(&ctx, |bot_commands| {
+                    commands::register_commands(bot_commands)
+                })
+                .await,
+                None,
+            );
+        }
+
         run_periodic_tasks(ctx.into(), self).await;
+    }
+
+    async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
+        if let Interaction::ApplicationCommand(command) = interaction {
+            commands::interaction(command, self, &ctx).await;
+        }
+        else {
+            error!("Unsupported interaction type received: {:?}", interaction)
+        }
     }
 }
 
@@ -295,21 +297,14 @@ async fn main() -> anyhow::Result<()> {
     let configuration = include_str!("../Secrets.toml").parse::<Table>().unwrap();
 
     // Get the discord token set in `Secrets.toml`
-    let token_entry = if cfg!(debug_assertions) {
-        "DISCORD_TOKEN_DEV"
-    }
-    else {
-        "DISCORD_TOKEN"
-    };
+    let token_entry = if cfg!(debug_assertions) { "DISCORD_TOKEN_DEV" } else { "DISCORD_TOKEN" };
 
     let discord_token = configuration[token_entry].as_str().unwrap();
 
-    let mut options: PgConnectOptions = configuration["CONNECTION_STRING"].as_str().unwrap().parse()?;
+    let mut options: PgConnectOptions =
+        configuration["CONNECTION_STRING"].as_str().unwrap().parse()?;
     options.log_statements(LevelFilter::Trace);
-    let database = PgPoolOptions::new()
-        .max_connections(10)
-        .connect_with(options).await?;
-
+    let database = PgPoolOptions::new().max_connections(10).connect_with(options).await?;
 
     // Run the schema migration
     database
@@ -319,7 +314,6 @@ async fn main() -> anyhow::Result<()> {
 
     // Set gateway intents, which decides what events the bot will be notified about
     let intents = GatewayIntents::GUILD_MESSAGES
-        | GatewayIntents::MESSAGE_CONTENT
         | GatewayIntents::GUILD_MESSAGE_REACTIONS
         | GatewayIntents::DIRECT_MESSAGES
         | GatewayIntents::GUILDS;
@@ -345,10 +339,7 @@ async fn main() -> anyhow::Result<()> {
             let runners = lock.runners.lock().await;
 
             for (id, runner) in runners.iter() {
-                info!(
-                    "Shard ID {} is {} with a latency of {:?}",
-                    id, runner.stage, runner.latency
-                );
+                info!("Shard ID {} is {} with a latency of {:?}", id, runner.stage, runner.latency);
             }
         }
     });
@@ -358,4 +349,25 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn log_slash_commands(result: serenity::Result<Vec<Command>>, guild_id: Option<GuildId>) {
+    match result {
+        Ok(c) => {
+            let commands_registered = c.iter().fold(String::new(), |mut s, cmd| {
+                if s.is_empty() {
+                    s.push_str(", ");
+                }
+
+                s.push_str(&cmd.name);
+                s
+            });
+
+            info!("Commands registered: {}", commands_registered);
+        },
+        Err(e) => match guild_id {
+            Some(g) => error!("Error setting slash commands for guild {}: {}", g, e),
+            None => error!("Error setting global slash commands: {}", e),
+        },
+    };
 }
