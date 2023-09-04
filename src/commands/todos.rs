@@ -36,7 +36,7 @@ pub fn register_commands(
     commands
         .create_application_command(|command| {
             command
-                .name("tt!todo")
+                .name("tt_todo")
                 .description("Add a new to do list item")
                 .kind(CommandType::ChatInput)
                 .create_option(|option| {
@@ -54,7 +54,7 @@ pub fn register_commands(
         })
         .create_application_command(|command| {
             command
-                .name("tt!done")
+                .name("tt_done")
                 .description("Cross off a to do list item, or remove an entire category of todo list items")
                 .kind(CommandType::ChatInput)
                 .create_option(|option| option
@@ -68,7 +68,7 @@ pub fn register_commands(
         })
         .create_application_command(|command| {
             command
-                .name("tt!todolist")
+                .name("tt_todolist")
                 .description("Show your current to do list")
                 .kind(CommandType::ChatInput)
                 .create_option(|option| option

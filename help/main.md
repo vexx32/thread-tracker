@@ -1,18 +1,18 @@
 Thanks for using Thread Tracker! You can call me Titi. To report bugs or make feature requests, you can drop in to our [Discord server](https://discord.gg/DxdufuEkJR) or file issues directly on the [Thread Tracker GitHub page](https://github.com/vexx32/thread-tracker/).
 
-**`tt!help`** - Shows this help message. You can use it if you ever have any questions about the current functionality of Thread Tracker.
+**`tt_help`** - Shows this help message. You can use it if you ever have any questions about the current functionality of Thread Tracker.
 
 __**Thread Commands**__
-> `/tt!threads`, `/tt!track`, `/tt!untrack`, `/tt!category`, `/tt!watch`, `/tt!unwatch`, `/tt!watching`
-> Track your Discord threads and let you know who last responded to them. Use **`/tt!help threads`** for more information.
+> `/tt_threads`, `/tt_track`, `/tt_untrack`, `/tt_category`, `/tt_watch`, `/tt_unwatch`, `/tt_watching`
+> Track your Discord threads and let you know who last responded to them. Use **`/tt_help threads`** for more information.
 
 __**Muse Commands**__
-> `/tt!muses`, `/tt!addmuse`, `/tt!removemuse`
-> Register muse names to help Titi determine which replies are yours. Use **`/tt!help muses`** for more information.
+> `/tt_muses`, `/tt_addmuse`, `/tt_removemuse`
+> Register muse names to help Titi determine which replies are yours. Use **`/tt_help muses`** for more information.
 
 __**To Do Commands**__
-> `/tt!todos`, `/tt!todo`, `/tt!done`
-> A personal to do list that you can update as needed. Use **`/tt!help todos`** for more information.
+> `/tt_todos`, `/tt_todo`, `/tt_done`
+> A personal to do list that you can update as needed. Use **`/tt_help todos`** for more information.
 
 __**Bug Reports**__
 

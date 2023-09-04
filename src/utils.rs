@@ -72,10 +72,10 @@ where
     map
 }
 
-/// If the given string starts with `tt!` or `tt?` (case-insensitive), returns true.
+/// If the given string starts with `tt_` or `tt?` (case-insensitive), returns true.
 pub(crate) fn message_is_command(content: &str) -> bool {
     let prefix: String = content.chars().take(3).flat_map(|c| c.to_lowercase()).collect();
-    prefix == "tt!" || prefix == "tt?"
+    prefix == "tt_" || prefix == "tt?"
 }
 
 /// Trim the given string to the maximum length in characters.

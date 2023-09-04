@@ -23,7 +23,7 @@ pub fn register_commands(
     commands
         .create_application_command(|command| {
             command
-                .name("tt!addmuse")
+                .name("tt_addmuse")
                 .description("Add a new muse")
                 .kind(CommandType::ChatInput)
                 .create_option(|option| {
@@ -36,7 +36,7 @@ pub fn register_commands(
         })
         .create_application_command(|command| {
             command
-                .name("tt!removemuse")
+                .name("tt_removemuse")
                 .description("Remove a muse")
                 .kind(CommandType::ChatInput)
                 .create_option(|option| {
@@ -49,7 +49,7 @@ pub fn register_commands(
         })
         .create_application_command(|command| {
             command
-                .name("tt!muses")
+                .name("tt_muses")
                 .description("Show your currently tracked muses")
                 .kind(CommandType::ChatInput)
         })

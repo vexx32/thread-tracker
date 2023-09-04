@@ -10,7 +10,7 @@ use crate::messaging::{HelpMessage, InteractionResponse};
 
 pub fn register(command: &mut CreateApplicationCommand) -> &mut CreateApplicationCommand {
     command
-        .name("tt!help")
+        .name("tt_help")
         .description("Show the help information for Thread Tracker")
         .kind(CommandType::ChatInput)
         .create_option(|option| {

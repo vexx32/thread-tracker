@@ -81,7 +81,7 @@ pub fn register_commands(
     commands
         .create_application_command(|command| {
             command
-                .name("tt!watch")
+                .name("tt_watch")
                 .description(
                     "Get the list of tracked threads and have Titi periodically update the list",
                 )
@@ -95,7 +95,7 @@ pub fn register_commands(
         })
         .create_application_command(|command| {
             command
-                .name("tt!unwatch")
+                .name("tt_unwatch")
                 .description("Stop updating a watched thread list and delete the message")
                 .kind(CommandType::ChatInput)
                 .create_option(|option| {
@@ -108,7 +108,7 @@ pub fn register_commands(
         })
         .create_application_command(|command| {
             command
-                .name("tt!watching")
+                .name("tt_watching")
                 .description("Show all watched messages Titi is tracking for you")
                 .kind(CommandType::ChatInput)
         })
@@ -342,7 +342,7 @@ pub(crate) async fn remove(
         responses
     }
     else {
-        error!("Missing required option `message_link` for tt!unwatch");
+        error!("Missing required option `message_link` for tt_unwatch");
         Vec::new()
     }
 }

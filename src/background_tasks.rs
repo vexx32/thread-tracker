@@ -87,7 +87,7 @@ where
 
 /// Performs a set_presence request to ensure the Activity is set correctly.
 pub(crate) async fn heartbeat(ctx: Arc<Context>) {
-    ctx.set_presence(Some(Activity::watching("over your threads (tt!help)")), OnlineStatus::Online)
+    ctx.set_presence(Some(Activity::watching("over your threads (tt_help)")), OnlineStatus::Online)
         .await;
     info!("heartbeat set_presence request completed");
 }

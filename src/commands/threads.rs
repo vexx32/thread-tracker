@@ -79,7 +79,7 @@ pub fn register_commands(
 ) -> &mut CreateApplicationCommands {
     commands
         .create_application_command(|command| command
-            .name("tt!track")
+            .name("tt_track")
             .description("Add a new tracked thread")
             .kind(CommandType::ChatInput)
             .create_option(|option| option
@@ -93,7 +93,7 @@ pub fn register_commands(
                 .description("Set the category for the new thread (optional)")
                 .kind(CommandOptionType::String)))
         .create_application_command(|command| command
-            .name("tt!category")
+            .name("tt_category")
             .description("Update or remove the category for an already-tracked thread")
             .kind(CommandType::ChatInput)
             .create_option(|option| option
@@ -107,7 +107,7 @@ pub fn register_commands(
                 .description("Set the category for the thread (optional, omit to un-set the category)")
                 .kind(CommandOptionType::String)))
         .create_application_command(|command| command
-            .name("tt!untrack")
+            .name("tt_untrack")
             .description("Remove a currently tracked thread")
             .kind(CommandType::ChatInput)
             .create_option(|option| option
@@ -125,7 +125,7 @@ pub fn register_commands(
                     .kind(CommandOptionType::String)
                     .required(true))))
         .create_application_command(|command| command
-            .name("tt!replies")
+            .name("tt_replies")
             .description("List currently tracked threads")
             .kind(CommandType::ChatInput)
             .create_option(|option| option
@@ -133,7 +133,7 @@ pub fn register_commands(
                 .description("The specific category to list threads from")
                 .kind(CommandOptionType::String)))
         .create_application_command(|command| command
-            .name("tt!random")
+            .name("tt_random")
             .description("Get a random thread that is waiting for your reply")
             .kind(CommandType::ChatInput)
             .create_option(|option| option

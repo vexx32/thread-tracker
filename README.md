@@ -9,7 +9,7 @@ A simple Discord bot built in Rust with [Serenity](https://docs.rs/serenity/late
 
 ## Usage
 
-Use `tt!help` to have Thread Tracker list its available commands.
+Use `/tt_help` to have Thread Tracker list its available commands.
 
 ## Data Stored
 
