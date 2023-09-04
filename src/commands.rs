@@ -47,14 +47,8 @@ pub(crate) async fn interaction(
         "tt_todo" => todos::add(&command, bot).await,
         "tt_done" => todos::remove(&command, bot).await,
         "tt_todos" | "tt_todolist" => todos::list(&command, bot).await,
-        cmd => {
-            if cmd.starts_with("tt?") {
-                help::run(&command)
-            }
-            else {
-                handle_unknown_command(cmd).await
-            }
-        },
+        "tt_help" => help::run(&command),
+        cmd => handle_unknown_command(cmd).await,
     };
 
     let mut messages = responses.iter();
