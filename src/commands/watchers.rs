@@ -364,14 +364,23 @@ pub(crate) async fn update_watched_message(
                     .await
                     .unwrap_or_else(|| "<unavailable channel>".to_owned());
 
-                warn!(
-                    "could not find message {} in channel {} for watcher {}: {}. Removing watcher.",
-                    watcher.message_id, channel_name, watcher.id, e
-                );
-                db::remove_watcher(database, watcher.id)
-                    .await
-                    .map_err(|e| error!("Failed to remove watcher: {}", e))
-                    .ok();
+                if cfg!(debug_assertions) {
+                    warn!(
+                        "could not find message {} in channel {} for watcher {}: {}.",
+                        watcher.message_id, channel_name, watcher.id, e
+                    );
+                }
+                else {
+                    warn!(
+                        "could not find message {} in channel {} for watcher {}: {}. Removing watcher.",
+                        watcher.message_id, channel_name, watcher.id, e
+                    );
+                    db::remove_watcher(database, watcher.id)
+                        .await
+                        .map_err(|e| error!("Failed to remove watcher: {}", e))
+                        .ok();
+                }
+
                 return Ok(());
             },
         };
