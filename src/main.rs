@@ -355,7 +355,7 @@ fn log_slash_commands(result: serenity::Result<Vec<Command>>, guild_id: Option<G
     match result {
         Ok(c) => {
             let commands_registered = c.iter().fold(String::new(), |mut s, cmd| {
-                if s.is_empty() {
+                if !s.is_empty() {
                     s.push_str(", ");
                 }
 
