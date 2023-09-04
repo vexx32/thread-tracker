@@ -12,7 +12,7 @@ serenity = { version = "0.11.5", default-features = false, features = ["client",
 tokio = "1.27.0"
 tracing = "0.1.37"
 serde = "1.0.159"
-sqlx = { version = "0.6.3", features = ["runtime-tokio-native-tls", "postgres"] }
+sqlx = { version = "0.7.1", features = ["runtime-tokio-native-tls", "postgres"] }
 postgres = "0.19.5"
 chrono = "0.4.24"
 thiserror = "1.0.40"
