@@ -122,6 +122,7 @@ pub fn register_commands(
                 .create_sub_option(|option| option
                     .name("category")
                     .description("The category to untrack all threads from; specify 'all' to untrack all threads")
+                    .kind(CommandOptionType::String)
                     .required(true))))
         .create_application_command(|command| command
             .name("tt!replies")
