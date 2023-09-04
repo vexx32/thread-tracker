@@ -301,9 +301,9 @@ async fn main() -> anyhow::Result<()> {
 
     let discord_token = configuration[token_entry].as_str().unwrap();
 
-    let mut options: PgConnectOptions =
-        configuration["CONNECTION_STRING"].as_str().unwrap().parse()?;
-    options.log_statements(LevelFilter::Trace);
+    let options =
+        configuration["CONNECTION_STRING"].as_str().unwrap().parse::<PgConnectOptions>()?
+        .log_statements(LevelFilter::Trace);
     let database = PgPoolOptions::new().max_connections(10).connect_with(options).await?;
 
     // Run the schema migration
