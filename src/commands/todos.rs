@@ -100,7 +100,7 @@ pub(crate) async fn add(
     };
     let database = &bot.database;
 
-    let todo_text = find_string_option(&command.data.options, "text");
+    let todo_text = find_string_option(&command.data.options, "entry");
     let category = find_string_option(&command.data.options, "category");
 
     if let Some(text) = todo_text {
