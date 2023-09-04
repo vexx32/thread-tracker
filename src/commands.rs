@@ -70,7 +70,7 @@ pub(crate) async fn interaction(
 
         log_interaction_response_errors(result);
 
-        for message in responses {
+        for message in messages {
             embed_colour = if message.is_error() { Colour::RED } else { Colour::PURPLE };
             let result = command
                 .create_followup_message(&context, |response| {
