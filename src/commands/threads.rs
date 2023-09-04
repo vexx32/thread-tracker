@@ -116,14 +116,9 @@ pub fn register_commands(
                 .kind(CommandOptionType::Channel)
                 .channel_types(&TRACKABLE_CHANNEL_TYPES))
             .create_option(|option| option
-                .name("category")
-                .description("Removes all threads in the category")
-                .kind(CommandOptionType::SubCommand)
-                .create_sub_option(|option| option
                     .name("category")
                     .description("The category to untrack all threads from; specify 'all' to untrack all threads")
-                    .kind(CommandOptionType::String)
-                    .required(true))))
+                    .kind(CommandOptionType::String)))
         .create_application_command(|command| command
             .name("tt_replies")
             .description("List currently tracked threads")
@@ -373,12 +368,7 @@ pub(crate) async fn remove(
         };
     }
 
-    let target_category = args
-        .iter()
-        .find(|opt| opt.name == "category")
-        .and_then(|opt| find_string_option(&opt.options, "category"));
-
-    if let Some(category) = target_category {
+    if let Some(category) = find_string_option(args, "category") {
         if category == "all" {
             info!("removing all tracked threads for {} ({})", command.user.name, command.user.id);
             match db::remove_all_threads(database, guild_id.0, command.user.id.0, None).await {
