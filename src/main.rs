@@ -4,7 +4,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    time::Duration,
+    time::Duration, borrow::Cow,
 };
 
 use anyhow::anyhow;
@@ -16,6 +16,7 @@ use sqlx::{
     ConnectOptions,
     Executor,
 };
+use serenity::utils::Colour;
 use tokio::time::sleep;
 use toml::Table;
 use tracing::{debug, error, info, log::LevelFilter, warn};
@@ -47,8 +48,26 @@ use serenity::{
 
 use crate::{consts::DELETE_EMOJI, background_tasks::run_periodic_tasks};
 
-type Error = Box<dyn std::error::Error + Send + Sync>;
-type Context<'a> = poise::Context<'a, Handler, Error>;
+type TitiError = Box<dyn std::error::Error + Send + Sync>;
+type TitiContext<'a> = poise::Context<'a, Data, TitiError>;
+
+#[async_trait]
+trait TitiResponse {
+    async fn reply_success(&self, title: &str, description: &str) -> Result<poise::ReplyHandle<'_>, serenity::Error>;
+
+    async fn reply_error(&self, title: &str, description: &str) -> Result<poise::ReplyHandle<'_>, serenity::Error>;
+}
+
+#[async_trait]
+impl TitiResponse for TitiContext<'_> {
+    async fn reply_success(&self, title: &str, description: &str) -> Result<poise::ReplyHandle<'_>, serenity::Error> {
+        self.send(|reply| reply.embed(|embed| embed.title(title).description(description).colour(Colour::PURPLE))).await
+    }
+
+    async fn reply_error(&self, title: &str, description: &str) -> Result<poise::ReplyHandle<'_>, serenity::Error> {
+        self.send(|reply| reply.embed(|embed| embed.title(title).description(description).colour(Colour::RED))).await
+    }
+}
 
 struct Data {
     /// Postgres database pool
@@ -77,7 +96,7 @@ struct Handler {
     /// The shared command data
     data: Arc<RwLock<Data>>,
     /// The Poise framework options
-    options: poise::FrameworkOptions<Data, Error>,
+    options: poise::FrameworkOptions<Data, TitiError>,
     /// The Serenity shard manager
     shard_manager: Mutex<Option<std::sync::Arc<tokio::sync::Mutex<ShardManager>>>>,
     /// The bot's user id
@@ -90,7 +109,7 @@ impl Handler {
     /// ### Arguments
     ///
     /// - `database` - database pool connection
-    fn new(options: poise::FrameworkOptions<Data, Error>, database: Database) -> Self {
+    fn new(options: poise::FrameworkOptions<Data, TitiError>, database: Database) -> Self {
         Self {
             data: Arc::new(RwLock::new(Data::new(database))),
             options,
@@ -302,7 +321,7 @@ impl EventHandler for Handler {
         let framework_data = poise::FrameworkContext {
             bot_id: self.user_id.unwrap_or_default(),
             options: &self.options,
-            user_data: &self.data.read().await,
+            user_data: &*self.data.read().await,
             shard_manager: &shard_manager,
         };
 
@@ -310,7 +329,7 @@ impl EventHandler for Handler {
     }
 }
 
-async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
+async fn on_error(error: poise::FrameworkError<'_, Data, TitiError>) {
     // This is our custom error handler
     // They are many errors that can occur, so we only handle the ones we want to customize
     // and forward the rest to the default handler
@@ -328,8 +347,9 @@ async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+async fn main() -> anyhow::Result<()> {
     use anyhow::Context;
+    use commands::*;
 
     tracing_subscriber::fmt::init();
 
@@ -343,7 +363,8 @@ async fn main() -> Result<(), anyhow::Error> {
     let options =
         configuration["CONNECTION_STRING"].as_str().unwrap().parse::<PgConnectOptions>()?
         .log_statements(LevelFilter::Trace);
-    let database = PgPoolOptions::new().max_connections(10).connect_with(options).await?;
+    let database = PgPoolOptions::new().max_connections(10).connect_with(options).await
+        .context("Could not connect to Postgres database")?;
 
     // Run the schema migration
     database
@@ -354,7 +375,7 @@ async fn main() -> Result<(), anyhow::Error> {
     // FrameworkOptions contains all of poise's configuration option in one struct
     // Every option can be omitted to use its default value
     let options = poise::FrameworkOptions {
-        commands: vec![todo!()],
+        commands: vec![help::help()],
         /// The global error handler for all error cases that may occur
         on_error: |error| Box::pin(on_error(error)),
         /// This code is run before every command
@@ -403,14 +424,9 @@ async fn main() -> Result<(), anyhow::Error> {
     //     return Err(anyhow!(e));
     // }
     let handler = std::sync::Arc::new(handler);
-    let client = Client::builder(discord_token, intents)
+    let mut client = Client::builder(discord_token, intents)
         .event_handler_arc(Arc::clone(&handler))
-        .await;
-
-    let mut client = match client {
-        Ok(c) => c,
-        Err(e) => return Err(e),
-    };
+        .await?;
 
     client.cache_and_http.cache.set_max_messages(1);
 
@@ -430,10 +446,8 @@ async fn main() -> Result<(), anyhow::Error> {
 
     *handler.shard_manager.lock().unwrap() = Some(client.shard_manager.clone());
 
-    if let Err(why) = client.start_autosharded().await {
-        error!("Client error: {:?}", why);
-        return Err(why);
-    }
+    client.start_autosharded().await
+        .context("Error starting client")?;
 
     Ok(())
 }

@@ -1,59 +1,16 @@
+use anyhow::anyhow;
 use serenity::{
-    builder::CreateApplicationCommands,
-    model::prelude::{
-        command::{CommandOptionType, CommandType},
-        interaction::application_command::ApplicationCommandInteraction,
-        GuildId,
-        UserId,
-    },
+    model::prelude::{GuildId, UserId},
     utils::{ContentModifier::*, MessageBuilder},
 };
 use tracing::{error, info};
 
 use crate::{
     db::{self, Database},
-    messaging::InteractionResponse,
-    utils::find_string_option,
-    ThreadTrackerBot,
+    TitiContext,
+    TitiError,
+    TitiResponse,
 };
-
-pub fn register_commands(
-    commands: &mut CreateApplicationCommands,
-) -> &mut CreateApplicationCommands {
-    commands
-        .create_application_command(|command| {
-            command
-                .name("tt_addmuse")
-                .description("Add a new muse")
-                .kind(CommandType::ChatInput)
-                .create_option(|option| {
-                    option
-                        .name("name")
-                        .description("The name of the muse to add to your list")
-                        .kind(CommandOptionType::String)
-                        .required(true)
-                })
-        })
-        .create_application_command(|command| {
-            command
-                .name("tt_removemuse")
-                .description("Remove a muse")
-                .kind(CommandType::ChatInput)
-                .create_option(|option| {
-                    option
-                        .name("name")
-                        .description("The name of the muse to remove from your list")
-                        .kind(CommandOptionType::String)
-                        .required(true)
-                })
-        })
-        .create_application_command(|command| {
-            command
-                .name("tt_muses")
-                .description("Show your currently tracked muses")
-                .kind(CommandType::ChatInput)
-        })
-}
 
 /// Add a new muse to the user's list.
 ///
@@ -61,48 +18,45 @@ pub fn register_commands(
 ///
 /// - `command` - the slash command interaction data
 /// - `bot` - the bot instance
+#[poise::command(slash_command, guild_only, rename = "tt_addmuse")]
 pub(crate) async fn add(
-    command: &ApplicationCommandInteraction,
-    bot: &ThreadTrackerBot,
-) -> Vec<InteractionResponse> {
+    ctx: TitiContext<'_>,
+    #[description = "The name of the muse to add"]
+    muse_name: String,
+) -> Result<(), TitiError> {
     const ERROR_TITLE: &str = "Error adding muse";
-    let guild_id = match command.guild_id {
+    let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => {
-            return InteractionResponse::error(
-                ERROR_TITLE,
-                "Unable to manage muses outside of a server",
-            )
-        },
+        None => return Err(anyhow!("Unable to manage muses outside of a server").into()),
     };
-    let database = &bot.database;
 
-    let name_option = find_string_option(&command.data.options, "name");
+    let user = ctx.author();
+    let database = &ctx.data().database;
 
-    if let Some(muse_name) = name_option {
-        info!("adding muse `{}` for {} ({})", muse_name, command.user.name, command.user.id);
+    info!("adding muse `{}` for {} ({})", &muse_name, user.name, user.id);
 
-        let mut result = MessageBuilder::new();
-        let mut errors = MessageBuilder::new();
-        result.push("Muse ").push(Italic + muse_name);
-        match db::add_muse(database, guild_id.0, command.user.id.0, muse_name).await {
-            Ok(true) => {
-                result.push_line(" added successfully.");
-                InteractionResponse::reply("Add muse", result.build())
-            },
-            Ok(false) => {
-                result.push(" is already known for ").mention(&command.user.id).push_line(".");
-                InteractionResponse::error(ERROR_TITLE, result.build())
-            },
-            Err(e) => {
-                error!("Error adding muse for {}: {}", command.user.name, e);
-                errors.push_line(e);
-                InteractionResponse::error(ERROR_TITLE, errors.build())
-            },
-        }
-    }
-    else {
-        Vec::new()
+    let mut result = MessageBuilder::new();
+    let mut errors = MessageBuilder::new();
+    result.push("Muse ").push(Italic + &muse_name);
+    match db::add_muse(database, guild_id.0, user.id.0, &muse_name).await {
+        Ok(true) => {
+            result.push_line(" added successfully.");
+            ctx.reply_success("Add muse", &result.build()).await;
+            Ok(())
+        },
+        Ok(false) => {
+            result.push(" is already known for ").mention(&user.id).push_line(".");
+            let error = result.build();
+            ctx.reply_error(ERROR_TITLE, &error).await;
+            Err(anyhow!(error).into())
+        },
+        Err(e) => {
+            error!("Error adding muse for {}: {}", user.name, e);
+            errors.push_line(e);
+            let error = errors.build();
+            ctx.reply_error(ERROR_TITLE, &error).await;
+            Err(anyhow!(error).into())
+        },
     }
 }
 
@@ -112,81 +66,65 @@ pub(crate) async fn add(
 ///
 /// - `command` - the slash command interaction data
 /// - `bot` - the bot instance
+#[poise::command(slash_command, guild_only, rename = "tt_removemuse")]
 pub(crate) async fn remove(
-    command: &ApplicationCommandInteraction,
-    bot: &ThreadTrackerBot,
-) -> Vec<InteractionResponse> {
+    ctx: TitiContext<'_>,
+    #[description = "The name of the muse to remove"]
+    muse_name: String,
+) -> Result<(), TitiError> {
     const ERROR_TITLE: &str = "Error removing muse";
-    let guild_id = match command.guild_id {
+    let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => {
-            return InteractionResponse::error(
-                ERROR_TITLE,
-                "Unable to manage muses outside of a server",
-            )
-        },
+        None => return Err(anyhow!("Unable to manage muses outside of a server").into()),
     };
-    let database = &bot.database;
 
-    let name_option = find_string_option(&command.data.options, "name");
+    let user = ctx.author();
+    let database = &ctx.data().database;
 
-    if let Some(muse_name) = name_option {
-        info!("removing muse `{}` for {} ({})", muse_name, command.user.name, command.user.id);
+    info!("removing muse `{}` for {} ({})", &muse_name, user.name, user.id);
 
-        let mut result = MessageBuilder::new();
-        result.push("Muse ").push(Italic + muse_name);
-        match db::remove_muse(database, guild_id.0, command.user.id.0, muse_name).await {
-            Ok(0) => {
-                result.push_line(" was not found.");
-                InteractionResponse::error(ERROR_TITLE, result.build())
-            },
-            Ok(_) => {
-                result.push_line(" was successfully removed.");
-                InteractionResponse::reply("Muse removed", result.build())
-            },
-            Err(e) => {
-                result.push_line(" could not be removed due to an error: ").push_line(e);
-                InteractionResponse::error(ERROR_TITLE, result.build())
-            },
-        }
-    }
-    else {
-        Vec::new()
+    let mut result = MessageBuilder::new();
+    result.push("Muse ").push(Italic + &muse_name);
+    match db::remove_muse(database, guild_id.0, user.id.0, &muse_name).await {
+        Ok(0) => {
+            result.push_line(" was not found.");
+            let error = result.build();
+            ctx.reply_error(ERROR_TITLE, &error).await;
+            Err(anyhow!(error).into())
+        },
+        Ok(_) => {
+            result.push_line(" was successfully removed.");
+            ctx.reply_success("Muse removed", &result.build()).await;
+            Ok(())
+        },
+        Err(e) => {
+            result.push_line(" could not be removed due to an error: ").push_line(e);
+            let error = result.build();
+            ctx.reply_error(ERROR_TITLE, &error).await;
+            Err(anyhow!(error).into())
+        },
     }
 }
 
 /// Sends the list of muses as a reply to the received command.
-///
-/// ### Arguments
-///
-/// - `command` - the slash command interaction data
-/// - `bot` - the bot instance
-pub(crate) async fn list(
-    command: &ApplicationCommandInteraction,
-    bot: &ThreadTrackerBot,
-) -> Vec<InteractionResponse> {
+#[poise::command(slash_command, guild_only, rename = "tt_list")]
+pub(crate) async fn list(ctx: TitiContext<'_>) -> Result<(), TitiError> {
     const ERROR_TITLE: &str = "Error listing muses";
-    let guild_id = match command.guild_id {
+    let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => {
-            return InteractionResponse::error(
-                ERROR_TITLE,
-                "Unable to list muses outside of a server",
-            )
-        },
+        None => return Err(anyhow!("Unable to list muses outside of a server").into()),
     };
-    let database = &bot.database;
+    let database = &ctx.data().database;
+    let user = ctx.author();
 
-    let muses = match get_list(database, command.user.id, guild_id).await {
+    let muses = match get_list(database, user.id, guild_id).await {
         Ok(m) => m,
-        Err(e) => {
-            return InteractionResponse::error(ERROR_TITLE, format!("Error listing muses: {}", e));
-        },
+        Err(e) => return Err(anyhow!("Error listing muses: {}", e).into()),
     };
 
     let mut result = MessageBuilder::new();
     if !muses.is_empty() {
-        result.push("Muses registered for ").mention(&command.user.id).push_line(":");
+        result.push("Muses registered for ").mention(&user.id).push_line(":");
 
         for muse in muses {
             result.push_line(format!("• {}", muse));
@@ -196,8 +134,9 @@ pub(crate) async fn list(
         result.push_line("You have not registered any muses yet.");
     }
 
-    info!("sending muse list for {} ({})", command.user.name, command.user.id);
-    InteractionResponse::reply("Registered muses", result.build())
+    info!("sending muse list for {} ({})", user.name, user.id);
+    ctx.reply_success("Registered muses", &result.build()).await;
+    Ok(())
 }
 
 /// Get the list of muses for the user out of the database.
