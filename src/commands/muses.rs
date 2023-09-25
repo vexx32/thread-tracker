@@ -6,24 +6,19 @@ use serenity::{
 use tracing::{error, info};
 
 use crate::{
+    commands::CommandResult,
     db::{self, Database},
     TitiContext,
-    TitiError,
     TitiResponse,
 };
 
-/// Add a new muse to the user's list.
-///
-/// ### Arguments
-///
-/// - `command` - the slash command interaction data
-/// - `bot` - the bot instance
-#[poise::command(slash_command, guild_only, rename = "tt_addmuse")]
+/// Add a new muse to your list.
+#[poise::command(slash_command, guild_only, rename = "tt_addmuse", category = "muses")]
 pub(crate) async fn add(
     ctx: TitiContext<'_>,
     #[description = "The name of the muse to add"]
     muse_name: String,
-) -> Result<(), TitiError> {
+) -> CommandResult<()> {
     const ERROR_TITLE: &str = "Error adding muse";
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
@@ -60,18 +55,13 @@ pub(crate) async fn add(
     }
 }
 
-/// Removes a muse from the user's list.
-///
-/// ### Arguments
-///
-/// - `command` - the slash command interaction data
-/// - `bot` - the bot instance
-#[poise::command(slash_command, guild_only, rename = "tt_removemuse")]
+/// Removes a muse from your list.
+#[poise::command(slash_command, guild_only, rename = "tt_removemuse", category = "muses")]
 pub(crate) async fn remove(
     ctx: TitiContext<'_>,
     #[description = "The name of the muse to remove"]
     muse_name: String,
-) -> Result<(), TitiError> {
+) -> CommandResult<()> {
     const ERROR_TITLE: &str = "Error removing muse";
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
@@ -106,9 +96,9 @@ pub(crate) async fn remove(
     }
 }
 
-/// Sends the list of muses as a reply to the received command.
-#[poise::command(slash_command, guild_only, rename = "tt_list")]
-pub(crate) async fn list(ctx: TitiContext<'_>) -> Result<(), TitiError> {
+/// Show your list of muses.
+#[poise::command(slash_command, guild_only, rename = "tt_muses", category = "muses")]
+pub(crate) async fn list(ctx: TitiContext<'_>) -> CommandResult<()> {
     const ERROR_TITLE: &str = "Error listing muses";
     let guild_id = match ctx.guild_id() {
         Some(id) => id,

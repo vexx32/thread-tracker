@@ -4,7 +4,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    time::Duration, borrow::Cow,
+    time::Duration, result,
 };
 
 use anyhow::anyhow;
@@ -53,19 +53,32 @@ type TitiContext<'a> = poise::Context<'a, Data, TitiError>;
 
 #[async_trait]
 trait TitiResponse {
-    async fn reply_success(&self, title: &str, description: &str) -> Result<poise::ReplyHandle<'_>, serenity::Error>;
+    async fn send_chunked_reply(&self, title: &str, description: &str, colour: Colour) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
 
-    async fn reply_error(&self, title: &str, description: &str) -> Result<poise::ReplyHandle<'_>, serenity::Error>;
+    async fn reply_success(&self, title: &str, description: &str) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
+
+    async fn reply_error(&self, title: &str, description: &str) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
 }
 
 #[async_trait]
 impl TitiResponse for TitiContext<'_> {
-    async fn reply_success(&self, title: &str, description: &str) -> Result<poise::ReplyHandle<'_>, serenity::Error> {
-        self.send(|reply| reply.embed(|embed| embed.title(title).description(description).colour(Colour::PURPLE))).await
+    async fn send_chunked_reply(&self, title: &str, description: &str, colour: Colour) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
+        let messages = utils::split_into_chunks(description, consts::MAX_EMBED_CHARS);
+        let mut results = Vec::new();
+
+        for msg in messages {
+            results.push(self.send(|reply| reply.embed(|embed| embed.title(title).description(msg).colour(colour))).await);
+        }
+
+        results
     }
 
-    async fn reply_error(&self, title: &str, description: &str) -> Result<poise::ReplyHandle<'_>, serenity::Error> {
-        self.send(|reply| reply.embed(|embed| embed.title(title).description(description).colour(Colour::RED))).await
+    async fn reply_success(&self, title: &str, description: &str) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
+        self.send_chunked_reply(title, description, Colour::PURPLE).await
+    }
+
+    async fn reply_error(&self, title: &str, description: &str) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
+        self.send_chunked_reply(title, description, Colour::RED).await
     }
 }
 
@@ -77,7 +90,7 @@ struct Data {
     /// Threadsafe memory cache for messages the bot has sent or looked up
     message_cache: MessageCache,
     /// The current list of tracked threads
-    tracked_threads: HashSet<ChannelId>,
+    tracked_threads: Arc<RwLock<HashSet<ChannelId>>>,
 }
 
 impl Data {
@@ -85,9 +98,49 @@ impl Data {
         Self {
             database,
             message_cache: MessageCache::new(),
-            tracked_threads: HashSet::new(),
+            tracked_threads: Arc::new(RwLock::new(HashSet::new())),
             guild_count: AtomicUsize::new(0),
         }
+    }
+
+
+    /// Retrieve the full list of tracked threads from the database to populate the in-memory
+    /// list of tracked threads.
+    async fn update_tracked_threads(&self) -> sqlx::Result<()> {
+        let mut tracked_threads = self.tracked_threads.write().await;
+        tracked_threads.clear();
+
+        threads::enumerate_tracked_channel_ids(&self.database).await?.for_each(|id| {
+            tracked_threads.insert(id);
+        });
+
+        Ok(())
+    }
+
+    /// Add a newly tracked thread ID into the in-memory list of tracked threads.
+    async fn add_tracked_thread(&self, channel_id: ChannelId) {
+        self.tracked_threads.write().await.insert(channel_id);
+    }
+
+    /// Call this function after removing a tracked thread from the database to update the in-memory
+    /// list of tracked threads. The thread will only be removed from the list if it is no longer
+    /// being tracked by any users.
+    async fn remove_tracked_thread(&self, channel_id: ChannelId) -> sqlx::Result<()> {
+
+        let still_tracked = threads::enumerate_tracked_channel_ids(&self.database)
+            .await?
+            .any(|id| id == channel_id);
+
+        if !still_tracked {
+            self.tracked_threads.write().await.remove(&channel_id);
+        }
+
+        Ok(())
+    }
+
+    /// Check if the given channel_id is in the list of tracked threads.
+    async fn tracking_thread(&self, channel_id: ChannelId) -> bool {
+        self.tracked_threads.read().await.contains(&channel_id)
     }
 }
 
@@ -137,49 +190,7 @@ impl Handler {
         self.user_id
     }
 
-    /// Retrieve the full list of tracked threads from the database to populate the in-memory
-    /// list of tracked threads.
-    async fn update_tracked_threads(&self) -> sqlx::Result<()> {
-        let mut data = self.data.write().await;
-
-        data.tracked_threads.clear();
-
-        threads::enumerate_tracked_channel_ids(&data.database).await?.for_each(|id| {
-            data.tracked_threads.insert(id);
-        });
-
-        Ok(())
-    }
-
-    /// Add a newly tracked thread ID into the in-memory list of tracked threads.
-    async fn add_tracked_thread(&self, channel_id: ChannelId) {
-        let mut data = self.data.write().await;
-        data.tracked_threads.insert(channel_id);
-    }
-
-    /// Call this function after removing a tracked thread from the database to update the in-memory
-    /// list of tracked threads. The thread will only be removed from the list if it is no longer
-    /// being tracked by any users.
-    async fn remove_tracked_thread(&self, channel_id: ChannelId) -> sqlx::Result<()> {
-
-        let still_tracked = threads::enumerate_tracked_channel_ids(&self.data.read().await.database)
-            .await?
-            .any(|id| id == channel_id);
-
-        if !still_tracked {
-            let mut data = self.data.write().await;
-            data.tracked_threads.remove(&channel_id);
-        }
-
-        Ok(())
-    }
-
-    /// Check if the given channel_id is in the list of tracked threads.
-    async fn tracking_thread(&self, channel_id: ChannelId) -> bool {
-        self.data.read().await.tracked_threads.contains(&channel_id)
-    }
-
-    async fn process_direct_message(&self, reply_context: ReplyContext, message: Message) {
+    async fn process_direct_message(&self, _reply_context: ReplyContext, message: Message) {
         warn!("Received direct message from user {} ({}), ignoring.", message.author.name, message.author.id);
     }
 }
@@ -235,7 +246,11 @@ impl EventHandler for Handler {
         }
 
         if !message_is_command(&message.content) {
-            if self.tracking_thread(message.channel_id).await {
+            let is_tracking_thread = {
+                self.data.read().await.tracking_thread(message.channel_id).await
+            };
+
+            if is_tracking_thread {
                 let mut data = self.data.write().await;
                 debug!("Caching new message from tracked channel {}", message.channel_id);
                 data.message_cache.store((message.channel_id, message.id).into(), message).await;
@@ -288,29 +303,6 @@ impl EventHandler for Handler {
 
         self.set_user(ready.user.id).await;
         self.data.read().await.guild_count.store(guild_count, Ordering::Relaxed);
-
-        if cfg!(debug_assertions) {
-            for guild in ready.guilds {
-                log_slash_commands(
-                    guild
-                        .id
-                        .set_application_commands(&ctx, |bot_commands| {
-                            commands::register_commands(bot_commands)
-                        })
-                        .await,
-                    Some(guild.id),
-                );
-            }
-        }
-        else {
-            log_slash_commands(
-                Command::set_global_application_commands(&ctx, |bot_commands| {
-                    commands::register_commands(bot_commands)
-                })
-                .await,
-                None,
-            );
-        }
 
         run_periodic_tasks(ctx.into(), self).await;
     }
@@ -375,7 +367,7 @@ async fn main() -> anyhow::Result<()> {
     // FrameworkOptions contains all of poise's configuration option in one struct
     // Every option can be omitted to use its default value
     let options = poise::FrameworkOptions {
-        commands: vec![help::help()],
+        commands: commands::list(),
         /// The global error handler for all error cases that may occur
         on_error: |error| Box::pin(on_error(error)),
         /// This code is run before every command

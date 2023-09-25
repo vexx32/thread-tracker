@@ -1,14 +1,12 @@
 use std::{
-    borrow::Cow,
     collections::{BTreeMap, BTreeSet, HashMap},
 };
 
+use anyhow::anyhow;
 use rand::Rng;
 use serenity::{
-    builder::CreateApplicationCommands,
     http::{CacheHttp, Http},
     model::prelude::{
-        command::{CommandOptionType, CommandType},
         interaction::application_command::ApplicationCommandInteraction,
         *,
     },
@@ -23,13 +21,14 @@ use crate::{
         muses,
         todos::{self, Todo},
     },
-    consts::{THREAD_NAME_LENGTH, TRACKABLE_CHANNEL_TYPES},
+    consts::THREAD_NAME_LENGTH,
     db::{self},
     messaging::*,
     utils::*,
-    Database,
-    ThreadTrackerBot,
+    Database, TitiContext, TitiResponse, Data,
 };
+
+use super::CommandResult;
 
 pub(crate) struct TrackedThread {
     pub channel_id: ChannelId,
@@ -74,124 +73,52 @@ pub(crate) async fn enumerate_tracked_channel_ids(
         .map(|t| ChannelId(t.channel_id as u64)))
 }
 
-pub fn register_commands(
-    commands: &mut CreateApplicationCommands,
-) -> &mut CreateApplicationCommands {
-    commands
-        .create_application_command(|command| command
-            .name("tt_track")
-            .description("Add a new tracked thread")
-            .kind(CommandType::ChatInput)
-            .create_option(|option| option
-                .name("thread")
-                .description("The thread to track")
-                .kind(CommandOptionType::Channel)
-                .channel_types(&TRACKABLE_CHANNEL_TYPES)
-                .required(true))
-            .create_option(|option| option
-                .name("category")
-                .description("Set the category for the new thread (optional)")
-                .kind(CommandOptionType::String)))
-        .create_application_command(|command| command
-            .name("tt_category")
-            .description("Update or remove the category for an already-tracked thread")
-            .kind(CommandType::ChatInput)
-            .create_option(|option| option
-                .name("thread")
-                .description("The thread to update")
-                .kind(CommandOptionType::Channel)
-                .channel_types(&TRACKABLE_CHANNEL_TYPES)
-                .required(true))
-            .create_option(|option| option
-                .name("category")
-                .description("Set the category for the thread (optional, omit to un-set the category)")
-                .kind(CommandOptionType::String)))
-        .create_application_command(|command| command
-            .name("tt_untrack")
-            .description("Remove a currently tracked thread")
-            .kind(CommandType::ChatInput)
-            .create_option(|option| option
-                .name("thread")
-                .description("The thread to remove")
-                .kind(CommandOptionType::Channel)
-                .channel_types(&TRACKABLE_CHANNEL_TYPES))
-            .create_option(|option| option
-                    .name("category")
-                    .description("The category to untrack all threads from; specify 'all' to untrack all threads")
-                    .kind(CommandOptionType::String)))
-        .create_application_command(|command| command
-            .name("tt_replies")
-            .description("List currently tracked threads")
-            .kind(CommandType::ChatInput)
-            .create_option(|option| option
-                .name("category")
-                .description("The specific category to list threads from")
-                .kind(CommandOptionType::String)))
-        .create_application_command(|command| command
-            .name("tt_random")
-            .description("Get a random thread that is waiting for your reply")
-            .kind(CommandType::ChatInput)
-            .create_option(|option| option
-                .name("category")
-                .description("The specific category to find a thread from")
-                .kind(CommandOptionType::String)))
-}
-
-/// Adds an entry to the threads table
-///
-/// ### Arguments
-///
-/// - `command` - the slash command interaction data
-/// - `bot` - the bot instance
-/// - `context` - the interaction context
+/// Add thread(s) to tracking.
+#[poise::command(slash_command, guild_only, rename = "tt_track", aliases("tt_add"))]
 pub(crate) async fn add(
-    command: &ApplicationCommandInteraction,
-    bot: &ThreadTrackerBot,
-    context: &Context,
-) -> Vec<InteractionResponse> {
+    ctx: TitiContext<'_>,
+    #[description = "The thread or channel to track"]
+    #[channel_types("NewsThread", "PrivateThread", "PublicThread", "Text")]
+    threads: Vec<GuildChannel>,
+    #[description = "The category to track the thread under"]
+    category: Option<String>,
+) -> CommandResult<()> {
     const ERROR_TITLE: &str = "Error adding tracked thread";
 
-    let guild_id = match command.guild_id {
+    let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => {
-            return InteractionResponse::error(
-                ERROR_TITLE,
-                "Unable to track threads outside of a server",
-            )
-        },
+        None => return Err(anyhow!("Unable to track threads outside of a server").into()),
     };
 
-    let user_id = command.user.id;
+    let user = ctx.author();
 
-    let args = &command.data.options;
-    let (database, message_cache) = (&bot.database, &bot.message_cache);
-
-    let category = find_string_option(args, "category");
+    let data = ctx.data();
+    let (database, message_cache) = (&data.database, &data.message_cache);
 
     let mut threads_added = MessageBuilder::new();
     let mut errors = MessageBuilder::new();
 
-    if let Some(thread) = find_channel_option(args, "thread") {
-        match thread.id.to_channel(context).await {
+    for thread in threads {
+        match thread.id.to_channel(ctx).await {
             Ok(channel) => {
                 info!(
                     "Adding tracked thread {} for user `{}` ({})",
-                    thread.id, command.user.name, command.user.id
+                    thread.id, user.name, user.id
                 );
-                cache_last_channel_message(channel.guild().as_ref(), context, message_cache)
+                cache_last_channel_message(channel.guild().as_ref(), ctx, message_cache)
                     .await;
 
                 let result = db::add_thread(
                     database,
                     guild_id.0,
                     thread.id.0,
-                    user_id.0,
-                    category,
+                    user.id.0,
+                    category.as_deref(),
                 )
                 .await;
                 match result {
                     Ok(true) => {
-                        bot.add_tracked_thread(thread.id).await;
+                        data.add_tracked_thread(thread.id).await;
                         threads_added.push("- ").mention(&thread.id).push_line("")
                     },
                     Ok(false) => threads_added
@@ -210,14 +137,10 @@ pub(crate) async fn add(
                 .push_line_safe(format!(": {}", e)),
         };
     }
-    else {
-        errors.push_line("- No thread or channel id was provided.");
-    }
 
-    let mut messages = Vec::new();
     if !errors.0.is_empty() {
-        messages.extend(InteractionResponse::error(ERROR_TITLE, errors.build()).into_iter());
         error!("Errors handling thread registration:\n{}", errors);
+        ctx.reply_error(ERROR_TITLE, &errors.build()).await;
     }
 
     if !threads_added.0.is_empty() {
@@ -226,83 +149,68 @@ pub(crate) async fn add(
             None => "Tracked threads added".to_owned(),
         };
 
-        messages.extend(InteractionResponse::reply(title, threads_added.build()).into_iter());
+        ctx.reply_success(&title, &threads_added.build()).await;
     }
 
-    messages
+    Ok(())
 }
 
-/// Change the category of an existing entry in the threads table
-///
-/// ### Arguments
-///
-/// - `command` - the slash command interaction data
-/// - `database` - the database to update
-/// - `context` - the interaction context
+/// Change the category of an already tracked thread.
+#[poise::command(slash_command, guild_only, rename = "tt_category", aliases("tt_setcategory", "tt_cat"))]
 pub(crate) async fn set_category(
-    command: &ApplicationCommandInteraction,
-    database: &Database,
-    context: &Context,
-) -> Vec<InteractionResponse> {
+    ctx: TitiContext<'_>,
+    #[description = "The thread or channel to update category for"]
+    #[channel_types("NewsThread", "PrivateThread", "PublicThread", "Text")]
+    thread: GuildChannel,
+    #[description = "The category to assign to the thread, if any"]
+    category: Option<String>,
+) -> CommandResult<()> {
     const ERROR_TITLE: &str = "Error updating tracked thread category";
-    let guild_id = match command.guild_id {
+    let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => {
-            return InteractionResponse::error(
-                ERROR_TITLE,
-                "Unable to managed tracked threads outside of a server",
-            )
-        },
+        None => return Err(anyhow!("Unable to managed tracked threads outside of a server").into()),
     };
 
-    let user_id = command.user.id;
-
-    let args = &command.data.options;
-    let category = find_string_option(args, "category");
+    let user = ctx.author();
+    let database = &ctx.data().database;
 
     let mut threads_updated = MessageBuilder::new();
     let mut errors = MessageBuilder::new();
 
-    if let Some(thread) = find_channel_option(args, "thread") {
-        info!(
-            "updating category for thread `{}` to `{}`",
-            thread.id,
-            category.unwrap_or("none")
-        );
-        match thread.id.to_channel(context).await {
-            Ok(_) => match db::update_thread_category(
-                database,
-                guild_id.0,
-                thread.id.0,
-                user_id.0,
-                category,
-            )
-            .await
-            {
-                Ok(true) => threads_updated.push("- ").mention(&thread.id).push_line(""),
-                Ok(false) => errors
-                    .push("- ")
-                    .mention(&thread.id)
-                    .push_line(" is not currently being tracked"),
-                Err(e) => errors
-                    .push("- Failed to update thread category for ")
-                    .mention(&thread.id)
-                    .push_line_safe(format!(": {}", e)),
-            },
-            Err(e) => errors
-                .push("- Cannot access channel ")
+    info!(
+        "updating category for thread `{}` to `{}`",
+        thread.id,
+        category.as_deref().unwrap_or("none")
+    );
+    match thread.id.to_channel(ctx).await {
+        Ok(_) => match db::update_thread_category(
+            database,
+            guild_id.0,
+            thread.id.0,
+            user.id.0,
+            category.as_deref(),
+        )
+        .await
+        {
+            Ok(true) => threads_updated.push("- ").mention(&thread.id).push_line(""),
+            Ok(false) => errors
+                .push("- ")
                 .mention(&thread.id)
-                .push_line(format!(": {}", e)),
-        }
-    }
-    else {
-        errors.push_line("- No thread or channel id was provided.")
+                .push_line(" is not currently being tracked"),
+            Err(e) => errors
+                .push("- Failed to update thread category for ")
+                .mention(&thread.id)
+                .push_line_safe(format!(": {}", e)),
+        },
+        Err(e) => errors
+            .push("- Cannot access channel ")
+            .mention(&thread.id)
+            .push_line(format!(": {}", e)),
     };
 
-    let mut messages = Vec::new();
     if !errors.0.is_empty() {
         error!("Errors updating thread categories:\n{}", errors);
-        messages.extend(InteractionResponse::error(ERROR_TITLE, errors.build()).into_iter());
+        ctx.reply_error(ERROR_TITLE, &errors.build()).await;
     }
 
     if !threads_updated.0.is_empty() {
@@ -311,53 +219,52 @@ pub(crate) async fn set_category(
             None => String::from("Tracked threads' categories removed"),
         };
 
-        messages.extend(InteractionResponse::reply(title, threads_updated.build()).into_iter());
+        ctx.reply_success(&title, &threads_updated.build()).await;
     }
 
-    messages
+    Ok(())
 }
 
-/// Remove an entry for the threads table.
-///
-/// ### Arguments
-///
-/// - `command` - the slash command interaction data
-/// - `bot` - the bot instance
-/// - `context` - the interaction context
+/// Remove thread(s) from tracking.
+#[poise::command(slash_command, guild_only, rename = "tt_untrack", aliases("tt_remove"))]
 pub(crate) async fn remove(
-    command: &ApplicationCommandInteraction,
-    bot: &ThreadTrackerBot,
-) -> Vec<InteractionResponse> {
+    ctx: TitiContext<'_>,
+    #[description = "The thread or channel to remove from tracking"]
+    #[channel_types("NewsThread", "PrivateThread", "PublicThread", "Text")]
+    thread: Option<GuildChannel>,
+    #[description = "Category to untrack all threads from; use 'all' to untrack everything"]
+    category: Option<String>,
+) -> CommandResult<()> {
     const ERROR_TITLE: &str = "Error adding tracked thread";
 
-    let guild_id = match command.guild_id {
+    let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => {
-            return InteractionResponse::error(
-                ERROR_TITLE,
-                "Unable to manage tracked threads outside of a server",
-            )
-        },
+        None => return Err(anyhow!("Unable to manage tracked threads outside of a server").into()),
     };
 
-    let args = &command.data.options;
-    let database = &bot.database;
+    if thread.is_none() && category.is_none() {
+        return Err(anyhow!("tt_untrack called with neither thread nor category to remove").into());
+    }
+
+    let data = ctx.data();
+    let database = &data.database;
+    let user = ctx.author();
 
     let mut threads_removed = MessageBuilder::new();
     let mut errors = MessageBuilder::new();
 
-    if let Some(thread) = find_channel_option(args, "thread") {
+    if let Some(thread) = thread {
         info!(
             "removing tracked thread `{}` for {} ({})",
-            thread.id, command.user.name, command.user.id
+            thread.id, user.name, user.id
         );
-        let result = db::remove_thread(database, guild_id.0, thread.id.0, command.user.id.0).await;
+        let result = db::remove_thread(database, guild_id.0, thread.id.0, user.id.0).await;
 
         match result {
             Ok(0) => errors
                 .push_line(format!("- {} is not currently being tracked", thread.id.mention())),
             Ok(_) => {
-                bot.remove_tracked_thread(thread.id).await.ok();
+                data.remove_tracked_thread(thread.id).await.ok();
                 threads_removed.push_line(format!("- {:}", thread.id.mention()))
             },
             Err(e) => errors.push_line(format!(
@@ -368,84 +275,74 @@ pub(crate) async fn remove(
         };
     }
 
-    if let Some(category) = find_string_option(args, "category") {
-        if category == "all" {
-            info!("removing all tracked threads for {} ({})", command.user.name, command.user.id);
-            match db::remove_all_threads(database, guild_id.0, command.user.id.0, None).await {
-                Ok(0) => {
-                    threads_removed.push_line("No threads are currently being tracked.")
-                },
-                Ok(count) => threads_removed
-                    .push_line(format!("All {} threads removed from tracking.", count)),
-                Err(e) => {
-                    error!(
-                        "Error untracking all threads for user {} ({}): {}",
-                        command.user.name, command.user.id, e
-                    );
-                    errors.push_line(format!("Error untracking all threads: {}", e))
-                },
-            };
+    if let Some(category) = category {
+        let (category, category_message) = match category.to_lowercase().as_str() {
+            "all" => (None, String::new()),
+            _ => (Some(category.as_str()), format!(" in category {}", category)),
+        };
 
-            if let Err(e) = bot.update_tracked_threads().await {
-                error!("Error updating in-memory list of tracked threads: {}", e)
-            };
-        }
+        info!("removing all tracked threads{} for {} ({})", category_message, user.name, user.id);
+        match db::remove_all_threads(database, guild_id.0, user.id.0, category).await {
+            Ok(0) => {
+                threads_removed.push_line(format!("No threads are currently being tracked{}.", category_message))
+            },
+            Ok(count) => threads_removed
+                .push_line(format!("All {} threads{} removed from tracking.", count, category_message)),
+            Err(e) => {
+                error!(
+                    "Error untracking all threads{} for user {} ({}): {}",
+                    category_message,
+                    user.name, user.id, e
+                );
+                errors.push_line(format!("Error untracking all threads{}: {}", category_message, e))
+            },
+        };
+
+        if let Err(e) = data.update_tracked_threads().await {
+            error!("Error updating in-memory list of tracked threads: {}", e)
+        };
     }
-
-    let mut result = Vec::new();
 
     if !errors.0.is_empty() {
         error!("Errors handling thread removal:\n{}", errors);
-        result.extend(InteractionResponse::error(ERROR_TITLE, errors.build()).into_iter());
+        ctx.reply_error(ERROR_TITLE, &errors.build()).await;
     }
 
     if !threads_removed.0.is_empty() {
-        result.extend(
-            InteractionResponse::reply("Tracked threads removed", threads_removed.build())
-                .into_iter(),
-        );
+        ctx.reply_error("Tracked threads removed", &threads_removed.build()).await;
     }
 
-    result
+    Ok(())
 }
 
-/// Send the list of threads and todos with the default title.
-///
-/// ### Arguments
-///
-/// - `command` - the slash command interaction data
-/// - `bot` - the bot instance
-/// - `context` - the interaction context
+/// Show the list of all tracked threads.
+#[poise::command(slash_command, guild_only, rename = "tt_threads", aliases("tt_replies"))]
 pub(crate) async fn send_list(
-    command: &ApplicationCommandInteraction,
-    bot: &ThreadTrackerBot,
-    context: &Context,
-) -> Vec<InteractionResponse> {
+    ctx: TitiContext<'_>,
+    #[description = "Only show threads from this category"]
+    category: Option<String>,
+) -> CommandResult<()> {
     const ERROR_TITLE: &str = "Error fetching tracked threads";
 
-    let guild_id = match command.guild_id {
+    let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => {
-            return InteractionResponse::error(
-                ERROR_TITLE,
-                "Unable to manage tracked threads outside of a server",
-            )
-        },
+        None => return Err(anyhow!("Unable to manage tracked threads outside of a server").into()),
     };
 
-    let args = &command.data.options;
+    let title = "Currently tracked threads";
 
-    let category = find_string_option(args, "category");
-
-    get_list_with_title(
-        "Currently tracked threads".into(),
-        &command.user,
+    let threads_list = get_list_with_title(
+        ctx.author(),
         guild_id,
-        category,
-        bot,
-        context,
+        category.as_deref(),
+        ctx.data(),
+        &ctx,
     )
-    .await
+    .await?;
+
+    ctx.reply_success(title, &threads_list).await;
+
+    Ok(())
 }
 
 /// Send the list of threads and todos with a custom title.
@@ -459,13 +356,12 @@ pub(crate) async fn send_list(
 /// - `bot` - the bot instance
 /// - `context` - the Serenity context
 pub(crate) async fn get_list_with_title(
-    title: Cow<'static, str>,
     user: &User,
     guild_id: GuildId,
     category: Option<&str>,
-    bot: &ThreadTrackerBot,
-    context: &Context,
-) -> Vec<InteractionResponse> {
+    data: &Data,
+    context: &impl CacheHttp,
+) -> CommandResult<String> {
     const ERROR_TITLE: &str = "Error collating tracked threads";
     info!("Getting tracked threads and todo list for {} ({})", user.name, user.id);
 
@@ -474,57 +370,42 @@ pub(crate) async fn get_list_with_title(
     let mut threads: Vec<TrackedThread> = Vec::new();
     let mut todos: Vec<Todo> = Vec::new();
 
-    let mut errors = MessageBuilder::new();
-
-    match enumerate(&bot.database, &guild_user, category).await {
+    match enumerate(&data.database, &guild_user, category).await {
         Ok(t) => threads.extend(t),
         Err(e) => {
             error!("Error listing tracked threads for {}: {}", user.name, e);
-            errors.push("- ").push_line(e);
+            return Err(anyhow!("Error listing tracked threads for {}: {}", user.name, e).into());
         },
     }
 
-    match todos::enumerate(&bot.database, &guild_user, category).await {
+    match todos::enumerate(&data.database, &guild_user, category).await {
         Ok(t) => todos.extend(t),
         Err(e) => {
             error!("Error listing todos for {}: {}", user.name, e);
-            errors.push("- ").push_line(e);
+            return Err(anyhow!("Error listing todos for {}: {}", user.name, e).into());
         },
     }
 
-    let muses = match muses::get_list(&bot.database, guild_user.user_id, guild_user.guild_id).await {
+    let muses = match muses::get_list(&data.database, guild_user.user_id, guild_user.guild_id).await {
         Ok(m) => m,
         Err(e) => {
             error!("Error finding muse list for {}: {}", user.name, e);
-            errors.push("- ").push_line(e);
-            Vec::new()
+            return Err(anyhow!("Error finding muse list for {}: {}", user.name, e).into());
         },
     };
 
     let message =
-        match get_formatted_list(threads, todos, muses, &guild_user, context, &bot.message_cache)
+        match get_formatted_list(threads, todos, muses, &guild_user, context, &data.message_cache)
             .await
         {
             Ok(m) => m,
             Err(e) => {
                 error!("Error collating tracked threads for {}: {}", user.name, e);
-                errors.push("- ").push_line(e);
-                String::new()
+                return Err(anyhow!("Error collating tracked threads for {}: {}", user.name, e).into());
             },
         };
 
-    let mut result = Vec::new();
-
-    if !errors.0.is_empty() {
-        error!("Errors getting tracked threads list for {}: {}", user.name, errors);
-        result.extend(InteractionResponse::error(ERROR_TITLE, errors.build()).into_iter());
-    }
-
-    if !message.is_empty() {
-        result.extend(InteractionResponse::reply(title, message).into_iter());
-    }
-
-    result
+    Ok(message)
 }
 
 /// Select and send a random thread to the user that is awaiting their reply.
@@ -657,7 +538,7 @@ pub(crate) async fn get_formatted_list(
     todos: Vec<Todo>,
     muses: Vec<String>,
     user: &GuildUser,
-    context: &Context,
+    context: &impl CacheHttp,
     message_cache: &MessageCache,
 ) -> Result<String, SerenityError> {
     let threads = categorise(threads);
@@ -737,7 +618,7 @@ fn categorise(threads: Vec<TrackedThread>) -> BTreeMap<Option<String>, Vec<Track
 /// Get the last user that responded to the thread, if any.
 async fn get_last_responder(
     thread: &TrackedThread,
-    context: &Context,
+    context: impl CacheHttp,
     message_cache: &MessageCache,
 ) -> Option<User> {
     match context.http().get_channel(thread.channel_id.into()).await {
@@ -745,7 +626,7 @@ async fn get_last_responder(
             let last_message = if let Some(last_message_id) = channel.last_message_id {
                 let channel_message = (last_message_id, channel.id).into();
                 message_cache
-                    .get_or_else(&channel_message, || channel_message.fetch(context))
+                    .get_or_else(&channel_message, || channel_message.fetch(context.http()))
                     .await
                     .ok()
             }
@@ -765,8 +646,8 @@ async fn get_last_responder(
     }
 }
 
-async fn get_last_channel_message(channel: GuildChannel, context: &Context) -> Option<Message> {
-    channel.messages(context, |messages| messages.limit(1)).await.ok().and_then(|mut m| m.pop())
+async fn get_last_channel_message(channel: GuildChannel, context: impl CacheHttp) -> Option<Message> {
+    channel.messages(context.http(), |messages| messages.limit(1)).await.ok().and_then(|mut m| m.pop())
 }
 
 /// Get the user's nickname in the given guild, or their username.
@@ -784,7 +665,7 @@ async fn push_thread_line<'a>(
     message: &'a mut MessageBuilder,
     thread: &TrackedThread,
     guild_threads: &HashMap<ChannelId, String>,
-    context: &Context,
+    context: &impl CacheHttp,
     message_cache: &MessageCache,
     user_id: UserId,
     muses: &[String],

@@ -12,19 +12,17 @@ use serenity::{
 };
 use tracing::error;
 
-use crate::{messaging::InteractionResponse, ThreadTrackerBot};
+use crate::TitiError;
 
-pub fn register_commands(
-    commands: &mut CreateApplicationCommands,
-) -> &mut CreateApplicationCommands {
-    commands.create_application_command(|command| help::register(command));
+type CommandResult<T> = std::result::Result<T, TitiError>;
 
-    threads::register_commands(commands);
-    muses::register_commands(commands);
-    todos::register_commands(commands);
-    watchers::register_commands(commands);
-
-    commands
+pub(crate) fn list() -> Vec<poise::Command<crate::Data, crate::TitiError>> {
+    vec![
+        help::help(),
+        muses::add(),
+        muses::remove(),
+        muses::list(),
+    ]
 }
 
 pub(crate) async fn interaction(

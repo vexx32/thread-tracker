@@ -113,6 +113,40 @@ pub(crate) fn subdivide_string(s: &str, max_chunk_length: usize) -> Vec<&str> {
     result
 }
 
+pub(crate) fn split_into_chunks(s: &str, max_chunk_length: usize) -> Vec<String> {
+    if s.len() <= max_chunk_length {
+        return vec![s.to_owned()];
+    }
+
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    for line in s.split('\n') {
+        if current.len() + line.len() > max_chunk_length {
+            if current.is_empty() {
+                let fragments = subdivide_string(line, max_chunk_length);
+                for fragment in fragments {
+                    current.push_str(fragment);
+
+                    if current.len() >= max_chunk_length {
+                        chunks.push(current);
+                        current = String::new();
+                    }
+                }
+            }
+            else {
+                chunks.push(current);
+                current = line.to_owned();
+            }
+        }
+        else {
+            current.push('\n');
+            current.push_str(line);
+        }
+    }
+
+    chunks
+}
+
 pub(crate) fn find_string_option<'a>(
     args: &'a [CommandDataOption],
     name: &str,
