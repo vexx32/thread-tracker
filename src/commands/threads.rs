@@ -1,20 +1,16 @@
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
-};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use anyhow::anyhow;
 use rand::Rng;
 use serenity::{
     http::{CacheHttp, Http},
-    model::prelude::{
-        interaction::application_command::ApplicationCommandInteraction,
-        *,
-    },
+    model::prelude::*,
     prelude::*,
     utils::{ContentModifier::*, EmbedMessageBuilding, MessageBuilder},
 };
 use tracing::{error, info};
 
+use super::CommandResult;
 use crate::{
     cache::MessageCache,
     commands::{
@@ -23,12 +19,12 @@ use crate::{
     },
     consts::THREAD_NAME_LENGTH,
     db::{self},
-    messaging::*,
     utils::*,
-    Database, TitiContext, TitiResponse, Data,
+    Data,
+    Database,
+    TitiContext,
+    TitiResponse,
 };
-
-use super::CommandResult;
 
 pub(crate) struct TrackedThread {
     pub channel_id: ChannelId,
@@ -80,8 +76,7 @@ pub(crate) async fn add(
     #[description = "The thread or channel to track"]
     #[channel_types("NewsThread", "PrivateThread", "PublicThread", "Text")]
     threads: Vec<GuildChannel>,
-    #[description = "The category to track the thread under"]
-    category: Option<String>,
+    #[description = "The category to track the thread under"] category: Option<String>,
 ) -> CommandResult<()> {
     const ERROR_TITLE: &str = "Error adding tracked thread";
 
@@ -101,12 +96,8 @@ pub(crate) async fn add(
     for thread in threads {
         match thread.id.to_channel(ctx).await {
             Ok(channel) => {
-                info!(
-                    "Adding tracked thread {} for user `{}` ({})",
-                    thread.id, user.name, user.id
-                );
-                cache_last_channel_message(channel.guild().as_ref(), ctx, message_cache)
-                    .await;
+                info!("Adding tracked thread {} for user `{}` ({})", thread.id, user.name, user.id);
+                cache_last_channel_message(channel.guild().as_ref(), ctx, message_cache).await;
 
                 let result = db::add_thread(
                     database,
@@ -156,14 +147,18 @@ pub(crate) async fn add(
 }
 
 /// Change the category of an already tracked thread.
-#[poise::command(slash_command, guild_only, rename = "tt_category", aliases("tt_setcategory", "tt_cat"))]
+#[poise::command(
+    slash_command,
+    guild_only,
+    rename = "tt_category",
+    aliases("tt_setcategory", "tt_cat")
+)]
 pub(crate) async fn set_category(
     ctx: TitiContext<'_>,
     #[description = "The thread or channel to update category for"]
     #[channel_types("NewsThread", "PrivateThread", "PublicThread", "Text")]
     thread: GuildChannel,
-    #[description = "The category to assign to the thread, if any"]
-    category: Option<String>,
+    #[description = "The category to assign to the thread, if any"] category: Option<String>,
 ) -> CommandResult<()> {
     const ERROR_TITLE: &str = "Error updating tracked thread category";
     let guild_id = match ctx.guild_id() {
@@ -193,10 +188,9 @@ pub(crate) async fn set_category(
         .await
         {
             Ok(true) => threads_updated.push("- ").mention(&thread.id).push_line(""),
-            Ok(false) => errors
-                .push("- ")
-                .mention(&thread.id)
-                .push_line(" is not currently being tracked"),
+            Ok(false) => {
+                errors.push("- ").mention(&thread.id).push_line(" is not currently being tracked")
+            },
             Err(e) => errors
                 .push("- Failed to update thread category for ")
                 .mention(&thread.id)
@@ -254,10 +248,7 @@ pub(crate) async fn remove(
     let mut errors = MessageBuilder::new();
 
     if let Some(thread) = thread {
-        info!(
-            "removing tracked thread `{}` for {} ({})",
-            thread.id, user.name, user.id
-        );
+        info!("removing tracked thread `{}` for {} ({})", thread.id, user.name, user.id);
         let result = db::remove_thread(database, guild_id.0, thread.id.0, user.id.0).await;
 
         match result {
@@ -283,16 +274,16 @@ pub(crate) async fn remove(
 
         info!("removing all tracked threads{} for {} ({})", category_message, user.name, user.id);
         match db::remove_all_threads(database, guild_id.0, user.id.0, category).await {
-            Ok(0) => {
-                threads_removed.push_line(format!("No threads are currently being tracked{}.", category_message))
-            },
-            Ok(count) => threads_removed
-                .push_line(format!("All {} threads{} removed from tracking.", count, category_message)),
+            Ok(0) => threads_removed
+                .push_line(format!("No threads are currently being tracked{}.", category_message)),
+            Ok(count) => threads_removed.push_line(format!(
+                "All {} threads{} removed from tracking.",
+                count, category_message
+            )),
             Err(e) => {
                 error!(
                     "Error untracking all threads{} for user {} ({}): {}",
-                    category_message,
-                    user.name, user.id, e
+                    category_message, user.name, user.id, e
                 );
                 errors.push_line(format!("Error untracking all threads{}: {}", category_message, e))
             },
@@ -319,11 +310,8 @@ pub(crate) async fn remove(
 #[poise::command(slash_command, guild_only, rename = "tt_threads", aliases("tt_replies"))]
 pub(crate) async fn send_list(
     ctx: TitiContext<'_>,
-    #[description = "Only show threads from this category"]
-    category: Option<String>,
+    #[description = "Only show threads from this category"] category: Option<String>,
 ) -> CommandResult<()> {
-    const ERROR_TITLE: &str = "Error fetching tracked threads";
-
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => return Err(anyhow!("Unable to manage tracked threads outside of a server").into()),
@@ -331,14 +319,8 @@ pub(crate) async fn send_list(
 
     let title = "Currently tracked threads";
 
-    let threads_list = get_list_with_title(
-        ctx.author(),
-        guild_id,
-        category.as_deref(),
-        ctx.data(),
-        &ctx,
-    )
-    .await?;
+    let threads_list =
+        get_list_with_title(ctx.author(), guild_id, category.as_deref(), ctx.data(), &ctx).await?;
 
     ctx.reply_success(title, &threads_list).await;
 
@@ -362,7 +344,6 @@ pub(crate) async fn get_list_with_title(
     data: &Data,
     context: &impl CacheHttp,
 ) -> CommandResult<String> {
-    const ERROR_TITLE: &str = "Error collating tracked threads";
     info!("Getting tracked threads and todo list for {} ({})", user.name, user.id);
 
     let guild_user = GuildUser { user_id: user.id, guild_id };
@@ -386,7 +367,8 @@ pub(crate) async fn get_list_with_title(
         },
     }
 
-    let muses = match muses::get_list(&data.database, guild_user.user_id, guild_user.guild_id).await {
+    let muses = match muses::get_list(&data.database, guild_user.user_id, guild_user.guild_id).await
+    {
         Ok(m) => m,
         Err(e) => {
             error!("Error finding muse list for {}: {}", user.name, e);
@@ -401,7 +383,9 @@ pub(crate) async fn get_list_with_title(
             Ok(m) => m,
             Err(e) => {
                 error!("Error collating tracked threads for {}: {}", user.name, e);
-                return Err(anyhow!("Error collating tracked threads for {}: {}", user.name, e).into());
+                return Err(
+                    anyhow!("Error collating tracked threads for {}: {}", user.name, e).into()
+                );
             },
         };
 
@@ -415,30 +399,26 @@ pub(crate) async fn get_list_with_title(
 /// - `command` - the slash command interaction data
 /// - `bot` - the bot instance
 /// - `context` - the interaction context
+#[poise::command(slash_command, guild_only, rename = "tt_random")]
 pub(crate) async fn send_random_thread(
-    command: &ApplicationCommandInteraction,
-    bot: &ThreadTrackerBot,
-    context: &Context,
-) -> Vec<InteractionResponse> {
+    ctx: TitiContext<'_>,
+    #[description = "Only pick from threads in this category"] category: Option<String>,
+) -> CommandResult<()> {
     const ERROR_TITLE: &str = "Error fetching tracked threads";
 
-    let guild_id = match command.guild_id {
+    let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => {
-            return InteractionResponse::error(
-                ERROR_TITLE,
-                "Unable to manage tracked threads outside of a server",
-            )
-        },
+        None => return Err(anyhow!("Unable to manage tracked threads outside of a server").into()),
     };
+
+    let user = ctx.author();
 
     let mut message = MessageBuilder::new();
     let mut errors = MessageBuilder::new();
-    let category = find_string_option(&command.data.options, "category");
 
-    info!("sending a random thread for {} ({})", command.user.name, command.user.id);
+    info!("sending a random thread for {} ({})", user.name, user.id);
 
-    match get_random_thread(category, &command.user, guild_id, context, bot).await {
+    match get_random_thread(category.as_deref(), user, guild_id, &ctx).await {
         Ok(None) => {
             message.push("Congrats! You don't seem to have any threads that are waiting on your reply! :tada:");
         },
@@ -457,7 +437,7 @@ pub(crate) async fn send_random_thread(
 
             message.push_line("");
             message
-                .push_quote(get_thread_link(&thread, None, context).await)
+                .push_quote(get_thread_link(&thread, None, &ctx).await)
                 .push(" — ")
                 .push_line(Bold + last_author);
         },
@@ -466,18 +446,16 @@ pub(crate) async fn send_random_thread(
         },
     };
 
-    let mut result = Vec::new();
-
     if !errors.0.is_empty() {
-        error!("Errors encountered getting a random thread for {}: {}", command.user.name, errors);
-        result.extend(InteractionResponse::error(ERROR_TITLE, errors.build()).into_iter());
+        error!("Errors encountered getting a random thread for {}: {}", user.name, errors);
+        ctx.reply_error(ERROR_TITLE, &errors.build()).await;
     }
 
     if !message.0.is_empty() {
-        result.extend(InteractionResponse::reply("Random thread", message.build()).into_iter());
+        ctx.reply_success("Random thread", &message.build()).await;
     }
 
-    result
+    Ok(())
 }
 
 /// Get a random thread for the current user that is awaiting a reply.
@@ -493,15 +471,15 @@ pub(crate) async fn get_random_thread(
     category: Option<&str>,
     user: &User,
     guild_id: GuildId,
-    context: &Context,
-    bot: &ThreadTrackerBot,
-) -> anyhow::Result<Option<(String, TrackedThread)>> {
+    context: &TitiContext<'_>,
+) -> CommandResult<Option<(String, TrackedThread)>> {
     let guild_user = GuildUser { user_id: user.id, guild_id };
-    let muses = muses::get_list(&bot.database, guild_user.user_id, guild_user.guild_id).await?;
+    let data = context.data();
+    let muses = muses::get_list(&data.database, guild_user.user_id, guild_user.guild_id).await?;
     let mut pending_threads = Vec::new();
 
-    for thread in enumerate(&bot.database, &guild_user, category).await? {
-        let last_message_author = get_last_responder(&thread, context, &bot.message_cache).await;
+    for thread in enumerate(&data.database, &guild_user, category).await? {
+        let last_message_author = get_last_responder(&thread, context, &data.message_cache).await;
         match last_message_author {
             Some(author) => {
                 let last_author_name = get_nick_or_name(&author, guild_id, context).await;
@@ -646,8 +624,15 @@ async fn get_last_responder(
     }
 }
 
-async fn get_last_channel_message(channel: GuildChannel, context: impl CacheHttp) -> Option<Message> {
-    channel.messages(context.http(), |messages| messages.limit(1)).await.ok().and_then(|mut m| m.pop())
+async fn get_last_channel_message(
+    channel: GuildChannel,
+    context: impl CacheHttp,
+) -> Option<Message> {
+    channel
+        .messages(context.http(), |messages| messages.limit(1))
+        .await
+        .ok()
+        .and_then(|mut m| m.pop())
 }
 
 /// Get the user's nickname in the given guild, or their username.
