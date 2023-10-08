@@ -1,21 +1,16 @@
 use std::collections::BTreeMap;
 
-use serenity::{
-    builder::CreateApplicationCommands,
-    model::prelude::{
-        command::{CommandOptionType, CommandType},
-        interaction::application_command::ApplicationCommandInteraction,
-    },
-    utils::{ContentModifier::*, MessageBuilder},
-};
+use anyhow::anyhow;
+use serenity::utils::{ContentModifier::*, MessageBuilder};
 use tracing::{error, info};
 
+use super::CommandResult;
 use crate::{
     db::{self},
-    messaging::InteractionResponse,
     utils::*,
     Database,
-    ThreadTrackerBot,
+    TitiContext,
+    TitiResponse,
 };
 
 /// To do list entry from the database.
@@ -30,220 +25,136 @@ impl From<db::TodoRow> for Todo {
     }
 }
 
-pub fn register_commands(
-    commands: &mut CreateApplicationCommands,
-) -> &mut CreateApplicationCommands {
-    commands
-        .create_application_command(|command| {
-            command
-                .name("tt_todo")
-                .description("Add a new to do list item")
-                .kind(CommandType::ChatInput)
-                .create_option(|option| {
-                    option
-                        .name("entry")
-                        .description("The text for the to do list item")
-                        .kind(CommandOptionType::String)
-                        .required(true)
-                })
-                .create_option(|option|
-                    option
-                        .name("category")
-                        .description("The category to place the to do list item in")
-                        .kind(CommandOptionType::String))
-        })
-        .create_application_command(|command| {
-            command
-                .name("tt_done")
-                .description("Cross off a to do list item, or remove an entire category of todo list items")
-                .kind(CommandType::ChatInput)
-                .create_option(|option| option
-                    .name("entry")
-                    .description("Untrack a specific to do list entry")
-                    .kind(CommandOptionType::String))
-                .create_option(|option| option
-                    .name("category")
-                    .description("The category to remove to do list items from; use 'all' to remove all todo list items")
-                    .kind(CommandOptionType::String))
-        })
-        .create_application_command(|command| {
-            command
-                .name("tt_todolist")
-                .description("Show your current to do list")
-                .kind(CommandType::ChatInput)
-                .create_option(|option| option
-                    .name("category")
-                    .description("The category to show to do list items from, omit this to show all to do list items")
-                    .kind(CommandOptionType::String))
-        })
-}
-
 /// Add a new to do list entry.
-///
-/// ### Arguments
-///
-/// - `command` - the slash command interaction data
-/// - `bot` - the bot instance
+#[poise::command(slash_command, guild_only, rename = "tt_todo")]
 pub(crate) async fn add(
-    command: &ApplicationCommandInteraction,
-    bot: &ThreadTrackerBot,
-) -> Vec<InteractionResponse> {
-    const ERROR_TITLE: &str = "Error adding todo list entry";
-    let guild_id = match command.guild_id {
+    ctx: TitiContext<'_>,
+    #[description = "The content of the todo list item"] entry: String,
+    #[description = "The category to track the todo list item under"] category: Option<String>,
+) -> CommandResult<()> {
+    let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => {
-            return InteractionResponse::error(
-                ERROR_TITLE,
-                "Unable to manage todo list items outside of a server",
-            )
-        },
+        None => return Err(anyhow!("Unable to manage todo list items outside of a server").into()),
     };
-    let database = &bot.database;
 
-    let todo_text = find_string_option(&command.data.options, "entry");
-    let category = find_string_option(&command.data.options, "category");
+    let data = ctx.data();
+    let database = &data.database;
+    let user = ctx.author();
 
-    if let Some(text) = todo_text {
-        info!("adding todo list entry `{}` for {} ({})", text, command.user.name, command.user.id);
+    info!("adding todo list entry `{}` for {} ({})", entry, user.name, user.id);
 
-        let mut result = MessageBuilder::new();
-        let mut errors = MessageBuilder::new();
-        result.push("Todo list entry ").push(Italic + text);
-        match db::add_todo(database, guild_id.0, command.user.id.0, text, category)
-            .await
-        {
-            Ok(true) => {
-                result.push_line(" added successfully.");
-                InteractionResponse::reply("To do list entry added", result.build())
-            },
-            Ok(false) => {
-                result.push(" was not added as it is already on your todo list.");
-                InteractionResponse::error(ERROR_TITLE, result.build())
-            },
-            Err(e) => {
-                error!("Error adding todo list item for {}: {}", command.user.name, e);
-                errors.push_line(e);
-                InteractionResponse::error(ERROR_TITLE, errors.build())
-            },
-        }
-    }
-    else {
-        Vec::new()
+    let mut result = MessageBuilder::new();
+    let mut errors = MessageBuilder::new();
+    result.push("Todo list entry ").push(Italic + &entry);
+    match db::add_todo(database, guild_id.0, user.id.0, &entry, category.as_deref()).await {
+        Ok(true) => {
+            result.push_line(" added successfully.");
+            ctx.reply_success("To do list entry added", &result.build()).await;
+            Ok(())
+        },
+        Ok(false) => {
+            result.push(" was not added as it is already on your todo list.");
+            Err(anyhow!(result.build()).into())
+        },
+        Err(e) => {
+            error!("Error adding todo list item for {}: {}", user.name, e);
+            errors.push_line(e);
+            Err(anyhow!(errors.build()).into())
+        },
     }
 }
 
 /// Remove an existing to do list entry.
-///
-/// ### Arguments
-///
-/// - `command` - the slash command interaction data
-/// - `bot` - the bot instance
+#[poise::command(slash_command, guild_only, rename = "tt_done")]
 pub(crate) async fn remove(
-    command: &ApplicationCommandInteraction,
-    bot: &ThreadTrackerBot,
-) -> Vec<InteractionResponse> {
-    const ERROR_TITLE: &str = "Error removing todo list entry";
-    let guild_id = match command.guild_id {
+    ctx: TitiContext<'_>,
+    #[description = "The content of the todo list item to remove"] entry: Option<String>,
+    #[description = "The category to remove all todo list items from"] category: Option<String>,
+) -> CommandResult<()> {
+    let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => {
-            return InteractionResponse::error(
-                ERROR_TITLE,
-                "Unable to manage todo list items outside of a server",
-            )
-        },
+        None => return Err(anyhow!("Unable to manage todo list items outside of a server").into()),
     };
 
-    let database = &bot.database;
+    let user = ctx.author();
+
+    let data = ctx.data();
+    let database = &data.database;
     let mut message = MessageBuilder::new();
 
-    let result = if let Some(entry) = find_string_option(&command.data.options, "entry") {
-        info!("removing todo `{}` for {} ({})", entry, command.user.name, command.user.id);
-        message.push("To do list entry ").push(Italic + entry).push(" was ");
+    let result = if let Some(entry) = entry {
+        info!("removing todo `{}` for {} ({})", entry, user.name, user.id);
+        message.push("To do list entry ").push(Italic + &entry).push(" was ");
 
-        db::remove_todo(database, guild_id.0, command.user.id.0, entry).await
+        db::remove_todo(database, guild_id.0, user.id.0, &entry).await
     }
-    else if let Some(category) = find_string_option(&command.data.options, "category") {
-        info!(
-            "removing all todos in category `{}` for {} ({})",
-            category, command.user.name, command.user.id
-        );
-        match category {
+    else if let Some(category) = category {
+        info!("removing all todos in category `{}` for {} ({})", category, user.name, user.id);
+        match category.as_str() {
             "all" => {
                 message.push("To do list entries were ");
-                db::remove_all_todos(database, guild_id.0, command.user.id.0, None).await
+                db::remove_all_todos(database, guild_id.0, user.id.0, None).await
             },
             cat => {
                 message.push(format!("To do list entries in category `{}` were ", cat));
-                db::remove_all_todos(database, guild_id.0, command.user.id.0, Some(cat)).await
+                db::remove_all_todos(database, guild_id.0, user.id.0, Some(cat)).await
             },
         }
     }
     else {
-        return InteractionResponse::error(
-            ERROR_TITLE,
-            "No to do list entry or category specified to remove.",
-        );
+        return Err(anyhow!("No to do list entry or category specified to remove.").into());
     };
 
     match result {
         Ok(0) => {
             message.push_line(" not found.");
-            InteractionResponse::error(ERROR_TITLE, message.build())
+            Err(anyhow!(message.build()).into())
         },
         Ok(num) => {
             message.push_line(format!(" successfully removed. {} entries deleted.", num));
-            InteractionResponse::reply("To do list updated", message.build())
+            ctx.reply_success("To do list updated", &message.build()).await;
+            Ok(())
         },
-        Err(e) => {
-            InteractionResponse::error(ERROR_TITLE, format!("Error updating to do list: {}", e))
-        },
+        Err(e) => Err(anyhow!("Error updating to do list: {}", e).into()),
     }
 }
 
 /// Send the full to do list.
-///
-/// ### Arguments
-///
-/// - `command` - the slash command interaction data
-/// - `bot` - the bot instance
+#[poise::command(slash_command, guild_only, rename = "tt_todolist", aliases("tt_todos"))]
 pub(crate) async fn list(
-    command: &ApplicationCommandInteraction,
-    bot: &ThreadTrackerBot,
-) -> Vec<InteractionResponse> {
-    const ERROR_TITLE: &str = "Error getting todo list";
-    let user = match command.guild_id {
-        Some(id) => GuildUser { user_id: command.user.id, guild_id: id },
-        None => {
-            return InteractionResponse::error(
-                ERROR_TITLE,
-                "Unable to manage todo list items outside of a server",
-            )
-        },
+    ctx: TitiContext<'_>,
+    #[description = "The category or categories"] category: Vec<String>,
+) -> CommandResult<()> {
+    let user = ctx.author();
+    let guild_user = match ctx.guild_id() {
+        Some(id) => GuildUser { user_id: user.id, guild_id: id },
+        None => return Err(anyhow!("Unable to manage todo list items outside of a server").into()),
     };
 
-    let database = &bot.database;
+    let data = ctx.data();
+    let database = &data.database;
     let mut message = MessageBuilder::new();
 
-    let result = if let Some(category) = find_string_option(&command.data.options, "category") {
-        let categories: Vec<&str> = category.split_whitespace().collect();
+    let result = if !category.is_empty() {
+        let categories: Vec<&str> = category.iter().map(|s| s.as_str()).collect();
         info!(
             "sending todos in categories `{}` for {} ({})",
             categories.join(", "),
-            command.user.name,
-            command.user.id
+            user.name,
+            user.id
         );
-        get_todos(database, &user, Some(categories)).await
+        get_todos(database, &guild_user, Some(categories)).await
     }
     else {
-        info!("sending all todos for {} ({})", command.user.name, command.user.id);
-        get_todos(database, &user, None).await
+        info!("sending all todos for {} ({})", user.name, user.id);
+        get_todos(database, &guild_user, None).await
     };
 
     match result {
         Ok(todos) => {
             if !todos.is_empty() {
                 let categories = categorise(todos);
-                message.mention(&command.user.id).push_line("'s to do list:");
+                message.mention(&user.id).push_line("'s to do list:");
 
                 for (name, todos) in categories {
                     if let Some(n) = name {
@@ -261,11 +172,12 @@ pub(crate) async fn list(
                 message.push_line("There is nothing on your to do list.");
             }
 
-            InteractionResponse::reply("To do list", message.build())
+            ctx.reply_success("To do list", &message.build()).await;
+            Ok(())
         },
         Err(e) => {
-            message.push("Error retrieving ").mention(&command.user.id).push(": ").push_line(e);
-            InteractionResponse::error(ERROR_TITLE, message.build())
+            message.push("Error retrieving ").mention(&user.id).push(": ").push_line(e);
+            Err(anyhow!(message.build()).into())
         },
     }
 }
