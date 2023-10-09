@@ -53,32 +53,38 @@ type TitiContext<'a> = poise::Context<'a, Data, TitiError>;
 
 #[async_trait]
 trait TitiResponse {
-    async fn send_chunked_reply(&self, title: &str, description: &str, colour: Colour) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
+    async fn send_chunked_reply(&self, title: &str, description: &str, colour: Colour, ephemeral: bool) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
 
     async fn reply_success(&self, title: &str, description: &str) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
+
+    async fn reply_ephemeral(&self, title: &str, description: &str) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
 
     async fn reply_error(&self, title: &str, description: &str) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
 }
 
 #[async_trait]
 impl TitiResponse for TitiContext<'_> {
-    async fn send_chunked_reply(&self, title: &str, description: &str, colour: Colour) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
+    async fn send_chunked_reply(&self, title: &str, description: &str, colour: Colour, ephemeral: bool) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
         let messages = utils::split_into_chunks(description, consts::MAX_EMBED_CHARS);
         let mut results = Vec::new();
 
         for msg in messages {
-            results.push(self.send(|reply| reply.embed(|embed| embed.title(title).description(msg).colour(colour))).await);
+            results.push(self.send(|reply| reply.embed(|embed| embed.title(title).description(msg).colour(colour)).ephemeral(ephemeral)).await);
         }
 
         results
     }
 
+    async fn reply_ephemeral(&self, title: &str, description: &str) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
+        self.send_chunked_reply(title, description, Colour::BLURPLE, true).await
+    }
+
     async fn reply_success(&self, title: &str, description: &str) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
-        self.send_chunked_reply(title, description, Colour::PURPLE).await
+        self.send_chunked_reply(title, description, Colour::PURPLE, false).await
     }
 
     async fn reply_error(&self, title: &str, description: &str) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
-        self.send_chunked_reply(title, description, Colour::RED).await
+        self.send_chunked_reply(title, description, Colour::RED, false).await
     }
 }
 

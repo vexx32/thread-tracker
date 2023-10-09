@@ -320,7 +320,7 @@ pub(crate) async fn send_list(
     let title = "Currently tracked threads";
 
     let threads_list =
-        get_list_with_title(ctx.author(), guild_id, category.as_deref(), ctx.data(), &ctx).await?;
+        get_list(ctx.author(), guild_id, category.as_deref(), ctx.data(), &ctx).await?;
 
     ctx.reply_success(title, &threads_list).await;
 
@@ -337,7 +337,7 @@ pub(crate) async fn send_list(
 /// - `category` - the category to filter the threads/todos by
 /// - `bot` - the bot instance
 /// - `context` - the Serenity context
-pub(crate) async fn get_list_with_title(
+pub(crate) async fn get_list(
     user: &User,
     guild_id: GuildId,
     category: Option<&str>,

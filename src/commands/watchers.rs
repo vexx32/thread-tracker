@@ -1,6 +1,8 @@
+use anyhow::anyhow;
 use chrono::Utc;
 use serenity::{
     builder::CreateApplicationCommands,
+    http::CacheHttp,
     model::prelude::{
         command::{CommandOptionType, CommandType},
         interaction::application_command::ApplicationCommandInteraction,
@@ -14,6 +16,7 @@ use tokio::time::Instant;
 use tracing::{error, info, warn};
 use WatcherError::*;
 
+use super::CommandResult;
 use crate::{
     cache::MessageCache,
     commands::{
@@ -25,7 +28,8 @@ use crate::{
     messaging::{InteractionResponse, ReplyContext},
     utils::{find_string_option, get_channel_name, ChannelMessage, GuildUser},
     Database,
-    ThreadTrackerBot,
+    TitiContext,
+    TitiResponse,
 };
 
 type Result<T> = std::result::Result<T, WatcherError>;
@@ -75,77 +79,23 @@ enum WatcherError {
     // NotAllowed(String),
 }
 
-pub fn register_commands(
-    commands: &mut CreateApplicationCommands,
-) -> &mut CreateApplicationCommands {
-    commands
-        .create_application_command(|command| {
-            command
-                .name("tt_watch")
-                .description(
-                    "Get the list of tracked threads and have Titi periodically update the list",
-                )
-                .kind(CommandType::ChatInput)
-                .create_option(|option| {
-                    option
-                        .name("category")
-                        .description("The specific category or categories to list threads from")
-                        .kind(CommandOptionType::String)
-                })
-        })
-        .create_application_command(|command| {
-            command
-                .name("tt_unwatch")
-                .description("Stop updating a watched thread list and delete the message")
-                .kind(CommandType::ChatInput)
-                .create_option(|option| {
-                    option
-                        .name("message_link")
-                        .description("A link to the watched message")
-                        .kind(CommandOptionType::String)
-                        .required(true)
-                })
-        })
-        .create_application_command(|command| {
-            command
-                .name("tt_watching")
-                .description("Show all watched messages Titi is tracking for you")
-                .kind(CommandType::ChatInput)
-        })
-}
-
 /// List current watchers.
-///
-/// ### Arguments
-///
-/// - `command` - the slash command interaction data
-/// - `bot` - the bot instance
-pub(crate) async fn list(
-    command: &ApplicationCommandInteraction,
-    bot: &ThreadTrackerBot,
-) -> Vec<InteractionResponse> {
-    info!("listing watchers for {} ({})", command.user.name, command.user.id);
-    const ERROR_TITLE: &str = "Error listing watchers";
+#[poise::command(slash_command, guild_only, rename = "tt_watchers", aliases("tt_watching"))]
+pub(crate) async fn list(ctx: TitiContext<'_>) -> CommandResult<()> {
+    let user = ctx.author();
+    info!("listing watchers for {} ({})", user.name, user.id);
 
-    let guild_id = match command.guild_id {
+    let data = ctx.data();
+
+    let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => {
-            return InteractionResponse::error(
-                ERROR_TITLE,
-                "Unable to manage watchers outside of a server",
-            )
-        },
+        None => return Err(anyhow!("Unable to manage watchers outside of a server").into()),
     };
 
     let watchers: Vec<ThreadWatcher> =
-        match db::list_current_watchers(&bot.database, command.user.id.0, guild_id.0).await {
+        match db::list_current_watchers(&data.database, user.id.0, guild_id.0).await {
             Ok(results) => results.into_iter().map(|tw| tw.into()).collect(),
-            Err(e) => {
-                return InteractionResponse::error(
-                    ERROR_TITLE,
-                    format!("Unable to list watchers: {}", e),
-                )
-            },
+            Err(e) => return Err(anyhow!("Unable to list watchers: {}", e).into()),
         };
 
     let mut message = MessageBuilder::new();
@@ -163,227 +113,178 @@ pub(crate) async fn list(
             .push_line("");
     }
 
-    InteractionResponse::reply("Currently active watchers", message.build())
+    ctx.reply_success("Currently active watchers", &message.build()).await;
+
+    Ok(())
 }
 
 /// Add a new thread watcher and send the initial watcher message.
-///
-/// ### Arguments
-///
-/// - `command` - the slash command interaction data
-/// - `bot` - the bot instance
-/// - `context` - the interaction context
+#[poise::command(slash_command, guild_only, rename = "tt_watch")]
 pub(crate) async fn add(
-    command: &ApplicationCommandInteraction,
-    bot: &ThreadTrackerBot,
-    context: &Context,
-) -> Vec<InteractionResponse> {
-    const ERROR_TITLE: &str = "Error creating watcher";
+    ctx: TitiContext<'_>,
+    #[description = "The category to filter the watched threads by"] category: Option<String>,
+) -> CommandResult<()> {
+    let user = ctx.author();
 
-    let guild_id = match command.guild_id {
+    let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => {
-            return InteractionResponse::error(
-                ERROR_TITLE,
-                "Unable to manage watchers outside of a server",
-            )
-        },
+        None => return Err(anyhow!("Unable to manage watchers outside of a server").into()),
     };
 
-    let category = find_string_option(&command.data.options, "category");
-    info!(
-        "adding watcher for {} ({}), categories {:?}",
-        command.user.name, command.user.id, category
-    );
-    let messages = threads::get_list_with_title(
-        "Watching threads".into(),
-        &command.user,
-        guild_id,
-        category,
-        bot,
-        context,
-    )
-    .await;
+    let data = ctx.data();
 
-    if messages.len() > 1 {
-        return InteractionResponse::error(ERROR_TITLE, "Watched messages cannot span multiple messages. Please use categories to reduce the threads the new watcher must track.");
+    info!("adding watcher for {} ({}), categories {:?}", user.name, user.id, category);
+    let list =
+        threads::get_list(&user, guild_id, category.as_deref(), data, ctx.serenity_context())
+            .await?;
+
+    if list.len() > crate::consts::MAX_EMBED_CHARS {
+        return Err(anyhow!("Watched messages cannot span multiple messages. Please use categories to reduce the threads the new watcher must track.").into());
     }
-    else if messages.is_empty() {
-        return InteractionResponse::error(ERROR_TITLE, "Could not create the watcher message.");
+    else if list.is_empty() {
+        return Err(anyhow!("Could not create the watcher message.").into());
     }
 
-    let message = messages.first().unwrap();
-    let reply_context = ReplyContext::new(command.channel_id, context.clone());
-    let watcher_message =
-        match reply_context.send_message_embed(message.title(), message.content()).await {
-            Ok(m) => m,
-            Err(e) => {
-                return InteractionResponse::error(
-                    ERROR_TITLE,
-                    format!("Error creating watched message: {}", e),
-                )
-            },
-        };
+    let channel_id = ctx.channel_id();
+
+    let reply_context = ReplyContext::new(channel_id, ctx.serenity_context().clone());
+    let watcher_message = match reply_context.send_message_embed("Watching threads", list).await {
+        Ok(m) => m,
+        Err(e) => return Err(anyhow!("Error creating watched message: {}", e).into()),
+    };
 
     let result = db::add_watcher(
-        &bot.database,
-        command.user.id.0,
+        &data.database,
+        user.id.0,
         watcher_message.id.0,
-        command.channel_id.0,
+        channel_id.0,
         guild_id.0,
-        category,
+        category.as_deref(),
     )
     .await;
 
     match result {
-        Ok(true) => InteractionResponse::ephemeral_reply(
-            "Watcher created",
-            "The requested watcher has been created.",
-        ),
-        Ok(false) => InteractionResponse::error(
-            ERROR_TITLE,
-            "Something went wrong storing the watcher information, the data was not recorded.",
-        ),
-        Err(e) => InteractionResponse::error(
-            ERROR_TITLE,
-            format!("Error recording the watcher information: {}", e),
-        ),
+        Ok(true) => {
+            ctx.reply_ephemeral("Watcher created", "The requested watcher has been created.");
+
+            Ok(())
+        },
+        Ok(false) => Err(anyhow!(
+            "Something went wrong storing the watcher information, the data was not recorded."
+        )
+        .into()),
+        Err(e) => Err(anyhow!("Error recording the watcher information: {}", e).into()),
     }
 }
 
 /// Removes a currently active watcher and deletes the watched message.
-///
-/// ### Arguments
-///
-/// - `command` - the slash command interaction data
-/// - `bot` - the bot instance
-/// - `context` - the interaction context
+#[poise::command(slash_command, guild_only, rename = "tt_unwatch")]
 pub(crate) async fn remove(
-    command: &ApplicationCommandInteraction,
-    bot: &ThreadTrackerBot,
-    context: &Context,
-) -> Vec<InteractionResponse> {
-    const ERROR_TITLE: &str = "Error removing watcher";
-    let message_link_option = find_string_option(&command.data.options, "message_link");
-    let (database, message_cache) = (&bot.database, &bot.message_cache);
+    ctx: TitiContext<'_>,
+    #[description = "The watched message (enter a link or message ID)"] watched_message: Message,
+) -> CommandResult<()> {
+    let data = ctx.data();
+    let (database, message_cache) = (&data.database, &data.message_cache);
 
-    if let Some(message_url) = message_link_option {
-        let (watcher_message_id, watcher_channel_id) = match parse_message_link(message_url) {
-            Ok(data) => data,
-            Err(_) => return InteractionResponse::error(
-                ERROR_TITLE,
-                format!(
-                    "Error parsing message link, please verify that `{}` is a valid message URL",
+    let user = ctx.author();
+    let message_url = watched_message.link();
+
+    let watcher: ThreadWatcher =
+        match db::get_watcher(database, watched_message.channel_id.0, watched_message.id.0).await {
+            Ok(Some(w)) => w.into(),
+            Ok(None) => {
+                return Err(anyhow!(
+                    "Could not find a watcher for the target message: `{}`",
                     message_url
-                ),
-            ),
-        };
-
-        let watcher: ThreadWatcher =
-            match db::get_watcher(database, watcher_channel_id, watcher_message_id).await {
-                Ok(Some(w)) => w.into(),
-                Ok(None) => {
-                    return InteractionResponse::error(
-                        ERROR_TITLE,
-                        format!(
-                            "Could not find a watcher for the target message: `{}`",
-                            message_url
-                        ),
-                    )
-                },
-                Err(e) => {
-                    return InteractionResponse::error(
-                        ERROR_TITLE,
-                        format!(
-                            "Error looking up watcher for (channel: {}, message: {}): {}",
-                            watcher_channel_id, watcher_message_id, e
-                        ),
-                    )
-                },
-            };
-
-        if watcher.user_id != command.user.id {
-            return InteractionResponse::ephemeral_error(
-                ERROR_TITLE,
-                "You can only remove watchers that you created.",
-            );
-        }
-
-        info!(
-            "removing watcher for {} ({}), (channel: {}, message: {})",
-            command.user.name, command.user.id, watcher_channel_id, watcher_message_id
-        );
-
-        let mut responses = Vec::new();
-        match db::remove_watcher(database, watcher.id).await {
-            Ok(0) => error!("Watcher should have been present in the database, but was missing when removal was attempted: {:?}", watcher),
-            Ok(_) => {
-                responses.extend(InteractionResponse::ephemeral_reply("Watcher removed", format!("Watcher with id {} removed successfully.", watcher.id)));
-                let channel_message = watcher.message();
-                let message = message_cache.get_or_else(
-                    &channel_message,
-                    || channel_message.fetch(context)
-                ).await;
-
-                match message {
-                    Ok(message) => if let Err(e) = message.delete(context).await {
-                        responses.extend(InteractionResponse::error(ERROR_TITLE, format!("Unable to delete watched message ({}): {}", message_url, e)));
-                    }
-                    Err(e) => responses.extend(InteractionResponse::ephemeral_error(
-                        ERROR_TITLE,
-                        format!("Unable to locate message {}. Perhaps it was already deleted?", e))),
-                }
+                )
+                .into())
             },
             Err(e) => {
-                responses.extend(InteractionResponse::error(ERROR_TITLE, format!("Error removing watcher: {}", e)));
-            }
-        }
+                return Err(anyhow!(
+                    "Error looking up watcher for (channel: {}, message: {}): {}",
+                    watched_message.channel_id,
+                    watched_message.id,
+                    e
+                )
+                .into())
+            },
+        };
 
-        responses
+    if watcher.user_id != user.id {
+        return Err(anyhow!("You can only remove watchers that you created.").into());
     }
-    else {
-        error!("Missing required option `message_link` for tt_unwatch");
-        Vec::new()
+
+    info!(
+        "removing watcher for {} ({}), (channel: {}, message: {})",
+        user.name, user.id, watched_message.channel_id, watched_message.id
+    );
+
+    match db::remove_watcher(database, watcher.id).await {
+        Ok(0) => error!("Watcher should have been present in the database, but was missing when removal was attempted: {:?}", watcher),
+        Ok(_) => {
+            let channel_message = watcher.message();
+            let message = message_cache.get_or_else(
+                &channel_message,
+                || channel_message.fetch(&ctx)
+            ).await;
+
+            match message {
+                Ok(message) => if let Err(e) = message.delete(ctx).await {
+                    return Err(anyhow!("Unable to delete watched message ({}): {}", message_url, e).into());
+                }
+                Err(e) => return Err(anyhow!("Unable to locate message {}. Perhaps it was already deleted?", e).into()),
+            }
+
+            ctx.reply_ephemeral("Watcher removed", &format!("Watcher with id {} removed successfully.", watcher.id)).await;
+        },
+        Err(e) => {
+            return Err(anyhow!("Error removing watcher: {}", e).into());
+        }
     }
+
+    Ok(())
 }
 
 pub(crate) async fn update_watched_message(
     watcher: ThreadWatcher,
-    context: &Context,
+    cache_http: &impl CacheHttp,
     database: &Database,
     message_cache: &MessageCache,
 ) -> anyhow::Result<()> {
     info!("updating watched message for {:?}", &watcher);
     let start_time = Instant::now();
 
-    let mut message =
-        match context.http.get_message(watcher.channel_id.0, watcher.message_id.0).await {
-            Ok(m) => m,
-            Err(e) => {
-                let channel_name = get_channel_name(watcher.channel_id, context)
+    let mut message = match cache_http
+        .http()
+        .get_message(watcher.channel_id.0, watcher.message_id.0)
+        .await
+    {
+        Ok(m) => m,
+        Err(e) => {
+            let channel_name = get_channel_name(watcher.channel_id, cache_http)
+                .await
+                .unwrap_or_else(|| "<unavailable channel>".to_owned());
+
+            if cfg!(debug_assertions) {
+                warn!(
+                    "could not find message {} in channel {} for watcher {}: {}.",
+                    watcher.message_id, channel_name, watcher.id, e
+                );
+            }
+            else {
+                warn!(
+                    "could not find message {} in channel {} for watcher {}: {}. Removing watcher.",
+                    watcher.message_id, channel_name, watcher.id, e
+                );
+                db::remove_watcher(database, watcher.id)
                     .await
-                    .unwrap_or_else(|| "<unavailable channel>".to_owned());
+                    .map_err(|e| error!("Failed to remove watcher: {}", e))
+                    .ok();
+            }
 
-                if cfg!(debug_assertions) {
-                    warn!(
-                        "could not find message {} in channel {} for watcher {}: {}.",
-                        watcher.message_id, channel_name, watcher.id, e
-                    );
-                }
-                else {
-                    warn!(
-                        "could not find message {} in channel {} for watcher {}: {}. Removing watcher.",
-                        watcher.message_id, channel_name, watcher.id, e
-                    );
-                    db::remove_watcher(database, watcher.id)
-                        .await
-                        .map_err(|e| error!("Failed to remove watcher: {}", e))
-                        .ok();
-                }
-
-                return Ok(());
-            },
-        };
+            return Ok(());
+        },
+    };
 
     let user = watcher.user();
 
@@ -404,12 +305,18 @@ pub(crate) async fn update_watched_message(
     }
 
     let muses = muses::get_list(database, user.user_id, user.guild_id).await?;
-    let threads_content =
-        threads::get_formatted_list(threads, todos, muses, &watcher.user(), context, message_cache)
-            .await?;
+    let threads_content = threads::get_formatted_list(
+        threads,
+        todos,
+        muses,
+        &watcher.user(),
+        cache_http,
+        message_cache,
+    )
+    .await?;
 
     let edit_result = message
-        .edit(&context.http, |msg| {
+        .edit(&cache_http, |msg| {
             msg.embed(|embed| {
                 embed
                     .colour(Colour::PURPLE)
