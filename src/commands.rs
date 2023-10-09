@@ -19,5 +19,11 @@ pub(crate) fn list() -> Vec<poise::Command<crate::Data, crate::TitiError>> {
         threads::set_category(),
         threads::send_list(),
         threads::send_random_thread(),
+        todos::add(),
+        todos::remove(),
+        todos::list(),
+        watchers::add(),
+        watchers::remove(),
+        watchers::list(),
     ]
 }

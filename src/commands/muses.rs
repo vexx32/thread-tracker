@@ -99,7 +99,6 @@ pub(crate) async fn remove(
 /// Show your list of muses.
 #[poise::command(slash_command, guild_only, rename = "tt_muses", category = "muses")]
 pub(crate) async fn list(ctx: TitiContext<'_>) -> CommandResult<()> {
-    const ERROR_TITLE: &str = "Error listing muses";
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => return Err(anyhow!("Unable to list muses outside of a server").into()),

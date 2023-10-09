@@ -1,7 +1,7 @@
 use crate::{TitiContext, TitiError};
 
 #[poise::command(slash_command, rename = "tt_help")]
-pub async fn help(
+pub(crate) async fn help(
     ctx: TitiContext<'_>,
     #[description = "Specific command to show help about"]
     #[autocomplete = "poise::builtins::autocomplete_command"]

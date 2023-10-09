@@ -1,22 +1,22 @@
 use std::{
     collections::HashSet,
+    result,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
-    time::Duration, result,
+    time::Duration,
 };
 
-use anyhow::anyhow;
 use cache::MessageCache;
 use commands::threads;
 use messaging::ReplyContext;
+use serenity::utils::Colour;
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
     ConnectOptions,
     Executor,
 };
-use serenity::utils::Colour;
 use tokio::time::sleep;
 use toml::Table;
 use tracing::{debug, error, info, log::LevelFilter, warn};
@@ -30,60 +30,101 @@ mod messaging;
 mod stats;
 mod utils;
 
+use std::sync::Mutex;
+
 use db::Database;
-use utils::message_is_command;
-
-use std::{collections::HashMap, env::var, sync::Mutex};
-use poise::{FrameworkError, serenity_prelude::ShardManager};
-
+use poise::{serenity_prelude::ShardManager, FrameworkError};
 use serenity::{
     async_trait,
     model::{
         channel::Message,
-        prelude::{command::Command, interaction::Interaction, *},
+        prelude::{interaction::Interaction, *},
     },
-    prelude::{Context as SerenityContext, *},
-    utils::MessageBuilder,
+    prelude::*,
 };
+use utils::message_is_command;
 
-use crate::{consts::DELETE_EMOJI, background_tasks::run_periodic_tasks};
+use crate::{background_tasks::run_periodic_tasks, consts::DELETE_EMOJI};
 
 type TitiError = Box<dyn std::error::Error + Send + Sync>;
 type TitiContext<'a> = poise::Context<'a, Data, TitiError>;
 
 #[async_trait]
 trait TitiResponse {
-    async fn send_chunked_reply(&self, title: &str, description: &str, colour: Colour, ephemeral: bool) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
+    async fn send_chunked_reply(
+        &self,
+        title: &str,
+        description: &str,
+        colour: Colour,
+        ephemeral: bool,
+    ) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
 
-    async fn reply_success(&self, title: &str, description: &str) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
+    async fn reply_success(
+        &self,
+        title: &str,
+        description: &str,
+    ) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
 
-    async fn reply_ephemeral(&self, title: &str, description: &str) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
+    async fn reply_ephemeral(
+        &self,
+        title: &str,
+        description: &str,
+    ) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
 
-    async fn reply_error(&self, title: &str, description: &str) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
+    async fn reply_error(
+        &self,
+        title: &str,
+        description: &str,
+    ) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
 }
 
 #[async_trait]
 impl TitiResponse for TitiContext<'_> {
-    async fn send_chunked_reply(&self, title: &str, description: &str, colour: Colour, ephemeral: bool) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
+    async fn send_chunked_reply(
+        &self,
+        title: &str,
+        description: &str,
+        colour: Colour,
+        ephemeral: bool,
+    ) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
         let messages = utils::split_into_chunks(description, consts::MAX_EMBED_CHARS);
         let mut results = Vec::new();
 
         for msg in messages {
-            results.push(self.send(|reply| reply.embed(|embed| embed.title(title).description(msg).colour(colour)).ephemeral(ephemeral)).await);
+            results.push(
+                self.send(|reply| {
+                    reply
+                        .embed(|embed| embed.title(title).description(msg).colour(colour))
+                        .ephemeral(ephemeral)
+                })
+                .await,
+            );
         }
 
         results
     }
 
-    async fn reply_ephemeral(&self, title: &str, description: &str) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
+    async fn reply_ephemeral(
+        &self,
+        title: &str,
+        description: &str,
+    ) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
         self.send_chunked_reply(title, description, Colour::BLURPLE, true).await
     }
 
-    async fn reply_success(&self, title: &str, description: &str) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
+    async fn reply_success(
+        &self,
+        title: &str,
+        description: &str,
+    ) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
         self.send_chunked_reply(title, description, Colour::PURPLE, false).await
     }
 
-    async fn reply_error(&self, title: &str, description: &str) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
+    async fn reply_error(
+        &self,
+        title: &str,
+        description: &str,
+    ) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
         self.send_chunked_reply(title, description, Colour::RED, false).await
     }
 }
@@ -109,7 +150,6 @@ impl Data {
         }
     }
 
-
     /// Retrieve the full list of tracked threads from the database to populate the in-memory
     /// list of tracked threads.
     async fn update_tracked_threads(&self) -> sqlx::Result<()> {
@@ -132,7 +172,6 @@ impl Data {
     /// list of tracked threads. The thread will only be removed from the list if it is no longer
     /// being tracked by any users.
     async fn remove_tracked_thread(&self, channel_id: ChannelId) -> sqlx::Result<()> {
-
         let still_tracked = threads::enumerate_tracked_channel_ids(&self.database)
             .await?
             .any(|id| id == channel_id);
@@ -159,7 +198,7 @@ struct Handler {
     /// The Serenity shard manager
     shard_manager: Mutex<Option<std::sync::Arc<tokio::sync::Mutex<ShardManager>>>>,
     /// The bot's user id
-    user_id: Option<UserId>,
+    user_id: AtomicU64,
 }
 
 impl Handler {
@@ -173,13 +212,8 @@ impl Handler {
             data: Arc::new(RwLock::new(Data::new(database))),
             options,
             shard_manager: Mutex::new(None),
-            user_id: None,
+            user_id: AtomicU64::new(0),
         }
-    }
-
-    /// Get a tracked reference to the shared data
-    fn data(&self) -> Arc<RwLock<Data>> {
-        Arc::clone(&self.data)
     }
 
     /// Sets the current user ID for the bot
@@ -187,25 +221,34 @@ impl Handler {
     /// ### Arguments
     ///
     /// - `id` - the UserId
-    async fn set_user(&mut self, id: UserId) {
-        self.user_id = Some(id);
+    fn set_user(&self, id: UserId) {
+        self.user_id.store(id.0, Ordering::SeqCst);
     }
 
     /// Gets the current user ID for the bot, if it's been set
-    async fn user(&self) -> Option<UserId> {
-        self.user_id
+    fn user(&self) -> Option<UserId> {
+        let value = self.user_id.load(Ordering::SeqCst);
+
+        if value == 0u64 {
+            None
+        }
+        else {
+            Some(value.into())
+        }
     }
 
     async fn process_direct_message(&self, _reply_context: ReplyContext, message: Message) {
-        warn!("Received direct message from user {} ({}), ignoring.", message.author.name, message.author.id);
+        warn!(
+            "Received direct message from user {} ({}), ignoring.",
+            message.author.name, message.author.id
+        );
     }
 }
 
-
 #[serenity::async_trait]
 impl EventHandler for Handler {
-    async fn reaction_add(&self, context: SerenityContext, reaction: Reaction) {
-        let bot_user = self.user().await;
+    async fn reaction_add(&self, context: Context, reaction: Reaction) {
+        let bot_user = self.user();
         if reaction.user_id == bot_user {
             // Ignore reactions made by the bot user
             return;
@@ -215,7 +258,7 @@ impl EventHandler for Handler {
 
         if DELETE_EMOJI.iter().any(|&emoji| reaction.emoji.unicode_eq(emoji)) {
             let channel_message = (reaction.channel_id, reaction.message_id).into();
-            let mut data = self.data.write().await;
+            let data = self.data.read().await;
             if let Ok(message) = data
                 .message_cache
                 .get_or_else(&channel_message, || channel_message.fetch(&context))
@@ -245,19 +288,18 @@ impl EventHandler for Handler {
         }
     }
 
-    async fn message(&self, context: SerenityContext, message: Message) {
+    async fn message(&self, context: Context, message: Message) {
         let user_id = message.author.id;
-        if Some(user_id) == self.user().await {
+        if Some(user_id) == self.user() {
             return;
         }
 
         if !message_is_command(&message.content) {
-            let is_tracking_thread = {
-                self.data.read().await.tracking_thread(message.channel_id).await
-            };
+            let is_tracking_thread =
+                { self.data.read().await.tracking_thread(message.channel_id).await };
 
             if is_tracking_thread {
-                let mut data = self.data.write().await;
+                let data = self.data.read().await;
                 debug!("Caching new message from tracked channel {}", message.channel_id);
                 data.message_cache.store((message.channel_id, message.id).into(), message).await;
             }
@@ -276,7 +318,7 @@ impl EventHandler for Handler {
         }
     }
 
-    async fn guild_create(&self, _ctx: SerenityContext, guild: Guild, is_new: bool) {
+    async fn guild_create(&self, _ctx: Context, guild: Guild, is_new: bool) {
         if is_new {
             info!("notified that Titi was added to a new guild: `{}` ({})!", guild.name, guild.id);
             self.data.read().await.guild_count.fetch_add(1, Ordering::SeqCst);
@@ -285,7 +327,7 @@ impl EventHandler for Handler {
 
     async fn guild_delete(
         &self,
-        _ctx: SerenityContext,
+        _ctx: Context,
         guild_partial: UnavailableGuild,
         guild_full: Option<Guild>,
     ) {
@@ -301,29 +343,35 @@ impl EventHandler for Handler {
         }
     }
 
-    async fn ready(&self, ctx: SerenityContext, ready: Ready) {
+    async fn ready(&self, ctx: Context, ready: Ready) {
         let guild_count = ready.guilds.len();
 
         info!("connected to Discord successfully as `{}`", ready.user.name);
         info!("currently active in {} guilds", guild_count);
 
-        self.set_user(ready.user.id).await;
-        self.data.read().await.guild_count.store(guild_count, Ordering::Relaxed);
+        self.set_user(ready.user.id);
+        let data = self.data.read().await;
+        data.guild_count.store(guild_count, Ordering::Relaxed);
 
-        run_periodic_tasks(ctx.into(), self).await;
+        run_periodic_tasks(ctx.into(), &data).await;
     }
 
-    async fn interaction_create(&self, ctx: SerenityContext, interaction: Interaction) {
+    async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         // FrameworkContext contains all data that poise::Framework usually manages
         let shard_manager = (*self.shard_manager.lock().unwrap()).clone().unwrap();
         let framework_data = poise::FrameworkContext {
-            bot_id: self.user_id.unwrap_or_default(),
+            bot_id: self.user().unwrap_or_default(),
             options: &self.options,
             user_data: &*self.data.read().await,
             shard_manager: &shard_manager,
         };
 
-        poise::dispatch_event(framework_data, &ctx, &poise::Event::InteractionCreate { interaction }).await;
+        poise::dispatch_event(
+            framework_data,
+            &ctx,
+            &poise::Event::InteractionCreate { interaction },
+        )
+        .await;
     }
 }
 
@@ -335,19 +383,18 @@ async fn on_error(error: poise::FrameworkError<'_, Data, TitiError>) {
         FrameworkError::Setup { error, .. } => panic!("Failed to start bot: {:?}", error),
         FrameworkError::Command { error, ctx } => {
             error!("Error in command `{}`: {:?}", ctx.command().name, error,);
-        }
+        },
         error => {
             if let Err(e) = poise::builtins::on_error(error).await {
                 error!("Error while handling error: {}", e)
             }
-        }
+        },
     }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     use anyhow::Context;
-    use commands::*;
 
     tracing_subscriber::fmt::init();
 
@@ -358,10 +405,15 @@ async fn main() -> anyhow::Result<()> {
 
     let discord_token = configuration[token_entry].as_str().unwrap();
 
-    let options =
-        configuration["CONNECTION_STRING"].as_str().unwrap().parse::<PgConnectOptions>()?
+    let options = configuration["CONNECTION_STRING"]
+        .as_str()
+        .unwrap()
+        .parse::<PgConnectOptions>()?
         .log_statements(LevelFilter::Trace);
-    let database = PgPoolOptions::new().max_connections(10).connect_with(options).await
+    let database = PgPoolOptions::new()
+        .max_connections(10)
+        .connect_with(options)
+        .await
         .context("Could not connect to Postgres database")?;
 
     // Run the schema migration
@@ -422,9 +474,8 @@ async fn main() -> anyhow::Result<()> {
     //     return Err(anyhow!(e));
     // }
     let handler = std::sync::Arc::new(handler);
-    let mut client = Client::builder(discord_token, intents)
-        .event_handler_arc(Arc::clone(&handler))
-        .await?;
+    let mut client =
+        Client::builder(discord_token, intents).event_handler_arc(Arc::clone(&handler)).await?;
 
     client.cache_and_http.cache.set_max_messages(1);
 
@@ -444,29 +495,7 @@ async fn main() -> anyhow::Result<()> {
 
     *handler.shard_manager.lock().unwrap() = Some(client.shard_manager.clone());
 
-    client.start_autosharded().await
-        .context("Error starting client")?;
+    client.start_autosharded().await.context("Error starting client")?;
 
     Ok(())
-}
-
-fn log_slash_commands(result: serenity::Result<Vec<Command>>, guild_id: Option<GuildId>) {
-    match result {
-        Ok(c) => {
-            let commands_registered = c.iter().fold(String::new(), |mut s, cmd| {
-                if !s.is_empty() {
-                    s.push_str(", ");
-                }
-
-                s.push_str(&cmd.name);
-                s
-            });
-
-            info!("Commands registered: {}", commands_registered);
-        },
-        Err(e) => match guild_id {
-            Some(g) => error!("Error setting slash commands for guild {}: {}", g, e),
-            None => error!("Error setting global slash commands: {}", e),
-        },
-    };
 }

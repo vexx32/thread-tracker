@@ -13,8 +13,7 @@ use crate::{
     cache::MessageCache,
     commands::watchers::{self, ThreadWatcher},
     consts::*,
-    db::{self, Database},
-    ThreadTrackerBot,
+    db::{self, Database}, Data,
 };
 
 /// Core task spawning function. Creates a set of periodically recurring tasks on their own threads.
@@ -23,18 +22,18 @@ use crate::{
 ///
 /// - `context` - the Serenity context to delegate to tasks
 /// - `bot` - the bot instance to delegate to tasks
-pub(crate) async fn run_periodic_tasks(context: Arc<Context>, bot: &ThreadTrackerBot) {
+pub(crate) async fn run_periodic_tasks(context: Arc<Context>, data: &Data) {
     let c = Arc::clone(&context);
     spawn_task_loop(HEARTBEAT_INTERVAL, move || heartbeat(Arc::clone(&c)));
 
     let c = Arc::clone(&context);
-    let d = Arc::new(bot.database.clone());
-    let m = Arc::new(bot.message_cache.clone());
+    let d = Arc::new(data.database.clone());
+    let m = Arc::new(data.message_cache.clone());
     spawn_result_task_loop(WATCHER_UPDATE_INTERVAL, move || {
         update_watchers(Arc::clone(&c), Arc::clone(&d), Arc::clone(&m))
     });
 
-    let c = Arc::new(bot.message_cache.clone());
+    let c = Arc::new(data.message_cache.clone());
     spawn_task_loop(CACHE_TRIM_INTERVAL, move || purge_expired_cache_entries(Arc::clone(&c)));
 }
 

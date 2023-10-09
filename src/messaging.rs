@@ -1,64 +1,11 @@
-use std::{future::Future, borrow::Cow};
-
 use serenity::{
     builder::CreateEmbed,
     model::prelude::*,
     prelude::*,
     utils::Colour,
 };
-use tracing::error;
 
-use crate::{
-    cache::MessageCache,
-    consts::*, utils::subdivide_string,
-};
-
-pub struct InteractionResponse {
-    title: Cow<'static, str>,
-    content: Cow<'static, str>,
-    error: bool,
-    ephemeral: bool,
-}
-
-impl InteractionResponse {
-    fn new(title: impl Into<Cow<'static, str>>, content: impl Into<Cow<'static, str>>, error: bool, ephemeral: bool) -> Vec<Self> {
-        let content = content.into();
-        let title = title.into();
-
-        subdivide_string(&content, MAX_EMBED_CHARS)
-            .iter()
-            .map(|&s| Self { title: title.clone(), content: s.to_owned().into(), error, ephemeral })
-            .collect()
-    }
-
-    pub(crate) fn reply(title: impl Into<Cow<'static, str>>, content: impl Into<Cow<'static, str>>) -> Vec<Self> {
-        Self::new(title, content, false, false)
-    }
-
-    pub(crate) fn ephemeral_reply(title: impl Into<Cow<'static, str>>, content: impl Into<Cow<'static, str>>) -> Vec<Self> {
-        Self::new(title, content, false, true)
-    }
-
-    pub(crate) fn help(message: HelpMessage) -> Vec<Self> {
-        Self::reply(message.title(), message.text())
-    }
-
-    pub fn error(title: impl Into<Cow<'static, str>>, content: impl Into<Cow<'static, str>>) -> Vec<Self> {
-        Self::new(title, content, true, false)
-    }
-
-    pub fn ephemeral_error(title: impl Into<Cow<'static, str>>, content: impl Into<Cow<'static, str>>) -> Vec<Self> {
-        Self::new(title, content, true, true)
-    }
-
-    pub fn is_error(&self) -> bool { self.error }
-
-    pub fn is_ephemeral(&self) -> bool { self.ephemeral }
-
-    pub fn title(&self) -> &str { &self.title }
-
-    pub fn content(&self) -> &str { &self.content }
-}
+use crate::consts::*;
 
 /// Wrapper struct to keep track of which channel and message is being replied to.
 pub(crate) struct ReplyContext {
@@ -122,23 +69,23 @@ impl ReplyContext {
     //         .await;
     // }
 
-    /// Sends an error embed.
-    ///
-    /// ### Argumentds
-    ///
-    /// - `title` - the title of the embed
-    /// - `body` - the content of the embed
-    /// - `message_cache` - the cache to store sent messages in
-    pub(crate) async fn send_error_embed(
-        &self,
-        title: impl ToString,
-        body: impl ToString,
-        message_cache: &MessageCache,
-    ) {
-        error!("{}", body.to_string());
-        handle_send_result(self.send_embed(title, body, Some(Colour::DARK_ORANGE)), message_cache)
-            .await;
-    }
+    // /// Sends an error embed.
+    // ///
+    // /// ### Argumentds
+    // ///
+    // /// - `title` - the title of the embed
+    // /// - `body` - the content of the embed
+    // /// - `message_cache` - the cache to store sent messages in
+    // pub(crate) async fn send_error_embed(
+    //     &self,
+    //     title: impl ToString,
+    //     body: impl ToString,
+    //     message_cache: &MessageCache,
+    // ) {
+    //     error!("{}", body.to_string());
+    //     handle_send_result(self.send_embed(title, body, Some(Colour::DARK_ORANGE)), message_cache)
+    //         .await;
+    // }
 
     /// Sends a normal message embed with the default colour.
     ///
@@ -225,23 +172,23 @@ impl HelpMessage {
     }
 }
 
-/// Log errors encountered when sending messages, and cache successful sent messages.
-///
-/// ### Arguments
-///
-/// - `task` - the async task that attempts to send a message.
-/// - `message_cache` - the cache to store sent messages in.
-pub(crate) async fn handle_send_result(
-    task: impl Future<Output = Result<Message, SerenityError>>,
-    message_cache: &MessageCache,
-) {
-    match task.await {
-        Ok(msg) => {
-            message_cache.store((msg.id, msg.channel_id).into(), msg).await;
-        },
-        Err(err) => error!("Error sending message: {:?}", err),
-    };
-}
+// /// Log errors encountered when sending messages, and cache successful sent messages.
+// ///
+// /// ### Arguments
+// ///
+// /// - `task` - the async task that attempts to send a message.
+// /// - `message_cache` - the cache to store sent messages in.
+// pub(crate) async fn handle_send_result(
+//     task: impl Future<Output = Result<Message, SerenityError>>,
+//     message_cache: &MessageCache,
+// ) {
+//     match task.await {
+//         Ok(msg) => {
+//             message_cache.store((msg.id, msg.channel_id).into(), msg).await;
+//         },
+//         Err(err) => error!("Error sending message: {:?}", err),
+//     };
+// }
 
 // pub(crate) async fn submit_bug_report(
 //     message: &str,

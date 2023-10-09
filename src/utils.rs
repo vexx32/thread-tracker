@@ -2,10 +2,7 @@ use std::collections::BTreeMap;
 
 use serenity::{
     http::{CacheHttp, Http},
-    model::prelude::{
-        interaction::application_command::{CommandDataOption, CommandDataOptionValue},
-        *,
-    },
+    model::prelude::*,
     prelude::*,
 };
 
@@ -147,25 +144,25 @@ pub(crate) fn split_into_chunks(s: &str, max_chunk_length: usize) -> Vec<String>
     chunks
 }
 
-pub(crate) fn find_string_option<'a>(
-    args: &'a [CommandDataOption],
-    name: &str,
-) -> Option<&'a str> {
-    match find_named_option(args, name) {
-        Some(CommandDataOptionValue::String(s)) => Some(s),
-        _ => None,
-    }
-}
+// pub(crate) fn find_string_option<'a>(
+//     args: &'a [CommandDataOption],
+//     name: &str,
+// ) -> Option<&'a str> {
+//     match find_named_option(args, name) {
+//         Some(CommandDataOptionValue::String(s)) => Some(s),
+//         _ => None,
+//     }
+// }
 
-pub(crate) fn find_channel_option<'a>(
-    args: &'a [CommandDataOption],
-    name: &str,
-) -> Option<&'a PartialChannel> {
-    match find_named_option(args, name) {
-        Some(CommandDataOptionValue::Channel(s)) => Some(s),
-        _ => None,
-    }
-}
+// pub(crate) fn find_channel_option<'a>(
+//     args: &'a [CommandDataOption],
+//     name: &str,
+// ) -> Option<&'a PartialChannel> {
+//     match find_named_option(args, name) {
+//         Some(CommandDataOptionValue::Channel(s)) => Some(s),
+//         _ => None,
+//     }
+// }
 
 // pub(crate) fn find_integer_option(args: &[CommandDataOption], name: &str) -> Option<i64> {
 //     match find_named_option(args, name) {
@@ -174,9 +171,9 @@ pub(crate) fn find_channel_option<'a>(
 //     }
 // }
 
-fn find_named_option<'a>(
-    args: &'a [CommandDataOption],
-    name: &str,
-) -> Option<&'a CommandDataOptionValue> {
-    args.iter().find(|opt| opt.name == name).and_then(|opt| opt.resolved.as_ref())
-}
+// fn find_named_option<'a>(
+//     args: &'a [CommandDataOption],
+//     name: &str,
+// ) -> Option<&'a CommandDataOptionValue> {
+//     args.iter().find(|opt| opt.name == name).and_then(|opt| opt.resolved.as_ref())
+// }
