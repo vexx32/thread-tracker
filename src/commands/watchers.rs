@@ -1,20 +1,14 @@
 use anyhow::anyhow;
 use chrono::Utc;
 use serenity::{
-    builder::CreateApplicationCommands,
     http::CacheHttp,
     model::prelude::{
-        command::{CommandOptionType, CommandType},
-        interaction::application_command::ApplicationCommandInteraction,
         *,
     },
-    prelude::*,
     utils::{Colour, EmbedMessageBuilding, MessageBuilder},
 };
-use thiserror::*;
 use tokio::time::Instant;
 use tracing::{error, info, warn};
-use WatcherError::*;
 
 use super::CommandResult;
 use crate::{
@@ -25,14 +19,12 @@ use crate::{
         todos::{self, Todo},
     },
     db,
-    messaging::{InteractionResponse, ReplyContext},
-    utils::{find_string_option, get_channel_name, ChannelMessage, GuildUser},
+    messaging::ReplyContext,
+    utils::{get_channel_name, ChannelMessage, GuildUser},
     Database,
     TitiContext,
     TitiResponse,
 };
-
-type Result<T> = std::result::Result<T, WatcherError>;
 
 /// Stores all necessary information for updating watched thread lists.
 #[derive(Debug)]
@@ -68,15 +60,6 @@ impl From<db::ThreadWatcherRow> for ThreadWatcher {
             categories: watcher.categories,
         }
     }
-}
-
-/// Errors encountered while handling watchers.
-#[derive(Error, Debug)]
-enum WatcherError {
-    #[error("Error fetching watcher: {0}")]
-    NotFound(String),
-    // #[error("Not allowed: {0}")]
-    // NotAllowed(String),
 }
 
 /// List current watchers.
@@ -134,9 +117,8 @@ pub(crate) async fn add(
     let data = ctx.data();
 
     info!("adding watcher for {} ({}), categories {:?}", user.name, user.id, category);
-    let list =
-        threads::get_list(&user, guild_id, category.as_deref(), data, ctx.serenity_context())
-            .await?;
+    let list = threads::get_list(user, guild_id, category.as_deref(), data, ctx.serenity_context())
+        .await?;
 
     if list.len() > crate::consts::MAX_EMBED_CHARS {
         return Err(anyhow!("Watched messages cannot span multiple messages. Please use categories to reduce the threads the new watcher must track.").into());
@@ -165,7 +147,7 @@ pub(crate) async fn add(
 
     match result {
         Ok(true) => {
-            ctx.reply_ephemeral("Watcher created", "The requested watcher has been created.");
+            ctx.reply_ephemeral("Watcher created", "The requested watcher has been created.").await;
 
             Ok(())
         },
@@ -254,37 +236,34 @@ pub(crate) async fn update_watched_message(
     info!("updating watched message for {:?}", &watcher);
     let start_time = Instant::now();
 
-    let mut message = match cache_http
-        .http()
-        .get_message(watcher.channel_id.0, watcher.message_id.0)
-        .await
-    {
-        Ok(m) => m,
-        Err(e) => {
-            let channel_name = get_channel_name(watcher.channel_id, cache_http)
-                .await
-                .unwrap_or_else(|| "<unavailable channel>".to_owned());
+    let mut message =
+        match cache_http.http().get_message(watcher.channel_id.0, watcher.message_id.0).await {
+            Ok(m) => m,
+            Err(e) => {
+                let channel_name = get_channel_name(watcher.channel_id, cache_http)
+                    .await
+                    .unwrap_or_else(|| "<unavailable channel>".to_owned());
 
-            if cfg!(debug_assertions) {
-                warn!(
-                    "could not find message {} in channel {} for watcher {}: {}.",
-                    watcher.message_id, channel_name, watcher.id, e
-                );
-            }
-            else {
-                warn!(
+                if cfg!(debug_assertions) {
+                    warn!(
+                        "could not find message {} in channel {} for watcher {}: {}.",
+                        watcher.message_id, channel_name, watcher.id, e
+                    );
+                }
+                else {
+                    warn!(
                     "could not find message {} in channel {} for watcher {}: {}. Removing watcher.",
                     watcher.message_id, channel_name, watcher.id, e
                 );
-                db::remove_watcher(database, watcher.id)
-                    .await
-                    .map_err(|e| error!("Failed to remove watcher: {}", e))
-                    .ok();
-            }
+                    db::remove_watcher(database, watcher.id)
+                        .await
+                        .map_err(|e| error!("Failed to remove watcher: {}", e))
+                        .ok();
+                }
 
-            return Ok(());
-        },
-    };
+                return Ok(());
+            },
+        };
 
     let user = watcher.user();
 
@@ -337,19 +316,4 @@ pub(crate) async fn update_watched_message(
     }
 
     Ok(())
-}
-
-/// Parse a message link to retrieve the message and channel IDs.
-fn parse_message_link(link: &str) -> Result<(u64, u64)> {
-    let mut result: Vec<u64> = Vec::with_capacity(2);
-    let message_url_fragments = link.split('/').rev().take(2).map(|s| s.parse().ok());
-
-    for parsed in message_url_fragments {
-        match parsed {
-            Some(n) => result.push(n),
-            None => return Err(NotFound(format!("Could not parse message ID from `{}`", link))),
-        }
-    }
-
-    Ok((result[0], result[1]))
 }
