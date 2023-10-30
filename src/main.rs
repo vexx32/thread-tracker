@@ -407,12 +407,13 @@ async fn on_error(error: poise::FrameworkError<'_, Data, TitiError>) {
     // This is our custom error handler
     // They are many errors that can occur, so we only handle the ones we want to customize
     // and forward the rest to the default handler
-    match error {
-        FrameworkError::Setup { error, .. } => panic!("Failed to start bot: {:?}", error),
-        FrameworkError::Command { error, ctx } => {
-            error!("Error in command `{}`: {}", ctx.command().name, error);
+    match &error {
+        FrameworkError::Setup { error: e, .. } => panic!("Failed to start bot: {:?}", e),
+        FrameworkError::Command { error: e, ctx } => {
+            error!("Error in command `{}`: {}", ctx.command().name, e);
+            ctx.reply_error("Error running command", &e.to_string()).await;
         },
-        error => {
+        _ => {
             if let Err(e) = poise::builtins::on_error(error).await {
                 error!("Error while handling error: {}", e)
             }
