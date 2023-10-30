@@ -3,6 +3,8 @@ mod models;
 pub(crate) use models::*;
 pub(crate) use sqlx::PgPool as Database;
 
+
+
 type Result<T> = std::result::Result<T, sqlx::Error>;
 
 /// Get all entries from the watchers table

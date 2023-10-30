@@ -4,14 +4,25 @@ use std::{
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
+        Mutex,
     },
     time::Duration,
 };
 
 use cache::MessageCache;
 use commands::threads;
+use db::Database;
 use messaging::ReplyContext;
-use serenity::utils::Colour;
+use poise::{serenity_prelude::{Command, ShardManager}, FrameworkError};
+use serenity::{
+    async_trait,
+    model::{
+        channel::Message,
+        prelude::{interaction::Interaction, *},
+    },
+    prelude::*,
+    utils::Colour, collector::ReactionFilter,
+};
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
     ConnectOptions,
@@ -20,6 +31,9 @@ use sqlx::{
 use tokio::time::sleep;
 use toml::Table;
 use tracing::{debug, error, info, log::LevelFilter, warn};
+use utils::message_is_command;
+
+use crate::{background_tasks::run_periodic_tasks, consts::DELETE_EMOJI};
 
 mod background_tasks;
 mod cache;
@@ -29,22 +43,6 @@ mod db;
 mod messaging;
 mod stats;
 mod utils;
-
-use std::sync::Mutex;
-
-use db::Database;
-use poise::{serenity_prelude::ShardManager, FrameworkError};
-use serenity::{
-    async_trait,
-    model::{
-        channel::Message,
-        prelude::{interaction::Interaction, *},
-    },
-    prelude::*,
-};
-use utils::message_is_command;
-
-use crate::{background_tasks::run_periodic_tasks, consts::DELETE_EMOJI};
 
 type TitiError = Box<dyn std::error::Error + Send + Sync>;
 type TitiContext<'a> = poise::Context<'a, Data, TitiError>;
@@ -129,6 +127,7 @@ impl TitiResponse for TitiContext<'_> {
     }
 }
 
+#[derive(Debug)]
 struct Data {
     /// Postgres database pool
     database: Database,
@@ -269,16 +268,27 @@ impl EventHandler for Handler {
                     return;
                 }
 
-                if let Some(referenced_message) = &message.referenced_message {
+                // Follow chained messages up to the initial bot-message
+                let mut root_message: &Message = &message;
+                while let Some(message) = &root_message.referenced_message {
+                    if Some(message.author.id) != self.user() {
+                        // Parent referenced message is not from the bot, this is a reply to a user message.
+                        break;
+                    }
+
+                    root_message = message;
+                }
+
+                if let Some(referenced_message) = &root_message.referenced_message {
                     info!("Processing deletion request for message {}", message.id);
                     if Some(referenced_message.author.id) == reaction.user_id {
-                        if let Err(e) = message.delete(&context).await {
-                            error!("Unable to delete message {:?}: {}", message, e);
-                        }
-                        else {
-                            info!("Message deleted successfully!");
-                            data.message_cache.remove(&channel_message).await;
-                        }
+                        utils::delete_message(&message, &context, &data).await;
+                    }
+                }
+                else if let Some(interaction) = &root_message.interaction {
+                    info!("Processing deletion request for message {}", message.id);
+                    if Some(interaction.user.id) == reaction.user_id {
+                        utils::delete_message(&message, &context, &data).await;
                     }
                 }
                 else {
@@ -309,19 +319,20 @@ impl EventHandler for Handler {
 
         let channel_id = message.channel_id;
 
-        if let Ok(Channel::Guild(_)) = channel_id.to_channel(&context.http).await {
-            info!("Ignored guild message: '{}'", message.content);
-        }
-        else {
+        if let Ok(Channel::Private(_)) = channel_id.to_channel(&context.http).await {
             let reply_context = ReplyContext::new(channel_id, context);
             self.process_direct_message(reply_context, message).await;
         }
     }
 
-    async fn guild_create(&self, _ctx: Context, guild: Guild, is_new: bool) {
+    async fn guild_create(&self, ctx: Context, guild: Guild, is_new: bool) {
         if is_new {
             info!("notified that Titi was added to a new guild: `{}` ({})!", guild.name, guild.id);
             self.data.read().await.guild_count.fetch_add(1, Ordering::SeqCst);
+
+            if cfg!(debug_assertions) {
+                utils::register_guild_commands(&self.options.commands, guild.id, &ctx).await;
+            }
         }
     }
 
@@ -353,7 +364,24 @@ impl EventHandler for Handler {
         let data = self.data.read().await;
         data.guild_count.store(guild_count, Ordering::Relaxed);
 
-        run_periodic_tasks(ctx.into(), &data).await;
+        if cfg!(debug_assertions) {
+            for guild in ready.guilds {
+                utils::register_guild_commands(&self.options.commands, guild.id, &ctx).await;
+            }
+        }
+        else {
+            let commands = poise::builtins::create_application_commands(&self.options.commands);
+            let result = Command::set_global_application_commands(&ctx, |cmds| {
+                *cmds = commands;
+                cmds
+            }).await;
+
+            if let Err(e) = result {
+                error!("Unable to register commands globally: {}", e);
+            }
+        }
+
+        run_periodic_tasks(&ctx, &data);
     }
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
@@ -382,7 +410,7 @@ async fn on_error(error: poise::FrameworkError<'_, Data, TitiError>) {
     match error {
         FrameworkError::Setup { error, .. } => panic!("Failed to start bot: {:?}", error),
         FrameworkError::Command { error, ctx } => {
-            error!("Error in command `{}`: {:?}", ctx.command().name, error,);
+            error!("Error in command `{}`: {}", ctx.command().name, error);
         },
         error => {
             if let Err(e) = poise::builtins::on_error(error).await {
@@ -431,13 +459,13 @@ async fn main() -> anyhow::Result<()> {
         /// This code is run before every command
         pre_command: |ctx| {
             Box::pin(async move {
-                info!("Executing command {}...", ctx.command().qualified_name);
+                info!("Executing command {}...", ctx.invoked_command_name());
             })
         },
         /// This code is run after a command if it was successful (returned Ok)
         post_command: |ctx| {
             Box::pin(async move {
-                info!("Executed command {}!", ctx.command().qualified_name);
+                info!("Execution of {} completed", ctx.invoked_command_name());
             })
         },
         /// Every command invocation must pass this check to continue execution
@@ -452,16 +480,12 @@ async fn main() -> anyhow::Result<()> {
         /// Enforce command checks even for owners (enforced by default)
         /// Set to true to bypass checks, which is useful for testing
         skip_checks_for_owners: false,
-        event_handler: |_ctx, event, _framework, _data| {
-            Box::pin(async move {
-                println!("Got an event in event handler: {:?}", event.name());
-                Ok(())
-            })
-        },
         ..Default::default()
     };
 
-    let handler = Handler::new(options, database);
+    let mut handler = Handler::new(options, database);
+
+    poise::set_qualified_names(&mut handler.options.commands);
 
     // Set gateway intents, which decides what events the bot will be notified about
     let intents = GatewayIntents::GUILD_MESSAGES

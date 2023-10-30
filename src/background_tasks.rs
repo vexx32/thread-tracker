@@ -16,22 +16,23 @@ use crate::{
     db::{self, Database}, Data,
 };
 
+
 /// Core task spawning function. Creates a set of periodically recurring tasks on their own threads.
 ///
 /// ### Arguments
 ///
 /// - `context` - the Serenity context to delegate to tasks
 /// - `bot` - the bot instance to delegate to tasks
-pub(crate) async fn run_periodic_tasks(context: Arc<Context>, data: &Data) {
-    let c = Arc::clone(&context);
-    spawn_task_loop(HEARTBEAT_INTERVAL, move || heartbeat(Arc::clone(&c)));
+pub(crate) fn run_periodic_tasks(context: &Context, data: &Data) {
+    let ctx = Arc::new(context.clone());
+    spawn_task_loop(HEARTBEAT_INTERVAL, move || heartbeat(Arc::clone(&ctx)));
 
-    let c = Arc::clone(&context);
-    let d = Arc::new(data.database.clone());
-    let m = Arc::new(data.message_cache.clone());
-    spawn_result_task_loop(WATCHER_UPDATE_INTERVAL, move || {
-        update_watchers(Arc::clone(&c), Arc::clone(&d), Arc::clone(&m))
-    });
+    // let c = Arc::new(context.clone());
+    // let d = Arc::new(data.database.clone());
+    // let m = Arc::new(data.message_cache.clone());
+    // spawn_result_task_loop(WATCHER_UPDATE_INTERVAL, move || {
+    //     update_watchers(Arc::clone(&c), Arc::clone(&d), Arc::clone(&m))
+    // });
 
     let c = Arc::new(data.message_cache.clone());
     spawn_task_loop(CACHE_TRIM_INTERVAL, move || purge_expired_cache_entries(Arc::clone(&c)));
@@ -98,6 +99,8 @@ pub(crate) async fn update_watchers(
     message_cache: Arc<MessageCache>,
 ) -> anyhow::Result<()> {
     let task_start = Instant::now();
+    info!("Watcher update loop started");
+
     let watchers: Vec<Vec<ThreadWatcher>> = {
         let mut vec = Vec::new();
         let list: Vec<ThreadWatcher> =
@@ -117,9 +120,9 @@ pub(crate) async fn update_watchers(
     let mut tasks = JoinSet::new();
     for watcher_batch in watchers {
         stagger_interval.tick().await;
-        let context = Arc::clone(&context);
-        let database = Arc::clone(&database);
-        let message_cache = Arc::clone(&message_cache);
+        let context = context.clone();
+        let database = database.clone();
+        let message_cache = message_cache.clone();
         tasks.spawn(async move {
             for watcher in watcher_batch {
                 let id = watcher.id;

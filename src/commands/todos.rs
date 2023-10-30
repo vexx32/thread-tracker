@@ -26,7 +26,7 @@ impl From<db::TodoRow> for Todo {
 }
 
 /// Add a new to do list entry.
-#[poise::command(slash_command, guild_only, rename = "tt_todo")]
+#[poise::command(slash_command, guild_only, rename = "tt_todo", category = "Todo list")]
 pub(crate) async fn add(
     ctx: TitiContext<'_>,
     #[description = "The content of the todo list item"] entry: String,
@@ -65,7 +65,7 @@ pub(crate) async fn add(
 }
 
 /// Remove an existing to do list entry.
-#[poise::command(slash_command, guild_only, rename = "tt_done")]
+#[poise::command(slash_command, guild_only, rename = "tt_done", category = "Todo list")]
 pub(crate) async fn remove(
     ctx: TitiContext<'_>,
     #[description = "The content of the todo list item to remove"] entry: Option<String>,
@@ -120,7 +120,7 @@ pub(crate) async fn remove(
 }
 
 /// Send the full to do list.
-#[poise::command(slash_command, guild_only, rename = "tt_todolist", aliases("tt_todos"))]
+#[poise::command(slash_command, guild_only, rename = "tt_todolist", category = "Todo list", aliases("tt_todos"))]
 pub(crate) async fn list(
     ctx: TitiContext<'_>,
     #[description = "The category or categories"] category: Vec<String>,

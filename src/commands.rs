@@ -6,6 +6,7 @@ pub(crate) mod watchers;
 
 use crate::TitiError;
 
+
 type CommandResult<T> = std::result::Result<T, TitiError>;
 
 pub(crate) fn list() -> Vec<poise::Command<crate::Data, crate::TitiError>> {
@@ -22,8 +23,8 @@ pub(crate) fn list() -> Vec<poise::Command<crate::Data, crate::TitiError>> {
         todos::add(),
         todos::remove(),
         todos::list(),
-        watchers::add(),
-        watchers::remove(),
-        watchers::list(),
+        // watchers::add(),
+        // watchers::remove(),
+        // watchers::list(),
     ]
 }

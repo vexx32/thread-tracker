@@ -6,6 +6,8 @@ use serenity::{
     prelude::*,
 };
 
+use tracing::{info, error};
+
 use crate::commands::watchers::ThreadWatcher;
 
 /// Wrapper struct to simplify passing around user/guild ID pair.
@@ -142,6 +144,28 @@ pub(crate) fn split_into_chunks(s: &str, max_chunk_length: usize) -> Vec<String>
     }
 
     chunks
+}
+
+pub(crate) async fn delete_message(message: &Message, context: &impl CacheHttp, data: &crate::Data) {
+    if let Err(e) = message.delete(context).await {
+        error!("Unable to delete message with ID {:?}: {}", message.id, e);
+    }
+    else {
+        info!("Message deleted successfully!");
+        data.message_cache.remove(&ChannelMessage { message_id: message.id, channel_id: message.channel_id }).await;
+    }
+}
+
+pub(crate) async fn register_guild_commands<U, E>(commands: &[poise::Command<U, E>], guild_id: GuildId, ctx: &impl AsRef<Http>) {
+    let commands = poise::builtins::create_application_commands(commands);
+    let result = guild_id.set_application_commands(ctx, |cmds| {
+        *cmds = commands;
+        cmds
+    }).await;
+
+    if let Err(e) = result {
+        error!("Unable to register commands in guild {}: {}", guild_id, e);
+    }
 }
 
 // pub(crate) fn find_string_option<'a>(

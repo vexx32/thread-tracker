@@ -32,6 +32,7 @@ impl<T> Cached<T> {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct MemoryCache<TKey, TData>
 where
     TKey: PartialEq + Eq + Hash + Clone,

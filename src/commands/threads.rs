@@ -10,6 +10,7 @@ use serenity::{
 };
 use tracing::{error, info};
 
+
 use super::CommandResult;
 use crate::{
     cache::MessageCache,
@@ -70,7 +71,7 @@ pub(crate) async fn enumerate_tracked_channel_ids(
 }
 
 /// Add thread(s) to tracking.
-#[poise::command(slash_command, guild_only, rename = "tt_track", aliases("tt_add"))]
+#[poise::command(slash_command, guild_only, rename = "tt_track", category = "Thread tracking", aliases("tt_add"))]
 pub(crate) async fn add(
     ctx: TitiContext<'_>,
     #[description = "The thread or channel to track"]
@@ -151,6 +152,7 @@ pub(crate) async fn add(
     slash_command,
     guild_only,
     rename = "tt_category",
+    category = "Thread tracking",
     aliases("tt_setcategory", "tt_cat")
 )]
 pub(crate) async fn set_category(
@@ -220,7 +222,7 @@ pub(crate) async fn set_category(
 }
 
 /// Remove thread(s) from tracking.
-#[poise::command(slash_command, guild_only, rename = "tt_untrack", aliases("tt_remove"))]
+#[poise::command(slash_command, guild_only, rename = "tt_untrack", category = "Thread tracking", aliases("tt_remove"))]
 pub(crate) async fn remove(
     ctx: TitiContext<'_>,
     #[description = "The thread or channel to remove from tracking"]
@@ -300,14 +302,14 @@ pub(crate) async fn remove(
     }
 
     if !threads_removed.0.is_empty() {
-        ctx.reply_error("Tracked threads removed", &threads_removed.build()).await;
+        ctx.reply_success("Tracked threads removed", &threads_removed.build()).await;
     }
 
     Ok(())
 }
 
 /// Show the list of all tracked threads.
-#[poise::command(slash_command, guild_only, rename = "tt_threads", aliases("tt_replies"))]
+#[poise::command(slash_command, guild_only, rename = "tt_threads", category = "Thread tracking", aliases("tt_replies"))]
 pub(crate) async fn send_list(
     ctx: TitiContext<'_>,
     #[description = "Only show threads from this category"] category: Option<String>,
@@ -399,7 +401,7 @@ pub(crate) async fn get_list(
 /// - `command` - the slash command interaction data
 /// - `bot` - the bot instance
 /// - `context` - the interaction context
-#[poise::command(slash_command, guild_only, rename = "tt_random")]
+#[poise::command(slash_command, guild_only, category = "Thread tracking", rename = "tt_random")]
 pub(crate) async fn send_random_thread(
     ctx: TitiContext<'_>,
     #[description = "Only pick from threads in this category"] category: Option<String>,

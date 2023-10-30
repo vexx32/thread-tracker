@@ -12,8 +12,9 @@ use crate::{
     TitiResponse,
 };
 
+
 /// Add a new muse to your list.
-#[poise::command(slash_command, guild_only, rename = "tt_addmuse", category = "muses")]
+#[poise::command(slash_command, guild_only, rename = "tt_addmuse", category = "Muses")]
 pub(crate) async fn add(
     ctx: TitiContext<'_>,
     #[description = "The name of the muse to add"]
@@ -56,7 +57,7 @@ pub(crate) async fn add(
 }
 
 /// Removes a muse from your list.
-#[poise::command(slash_command, guild_only, rename = "tt_removemuse", category = "muses")]
+#[poise::command(slash_command, guild_only, rename = "tt_removemuse", category = "Muses")]
 pub(crate) async fn remove(
     ctx: TitiContext<'_>,
     #[description = "The name of the muse to remove"]
@@ -97,7 +98,7 @@ pub(crate) async fn remove(
 }
 
 /// Show your list of muses.
-#[poise::command(slash_command, guild_only, rename = "tt_muses", category = "muses")]
+#[poise::command(slash_command, guild_only, rename = "tt_muses", category = "Muses")]
 pub(crate) async fn list(ctx: TitiContext<'_>) -> CommandResult<()> {
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
@@ -116,7 +117,7 @@ pub(crate) async fn list(ctx: TitiContext<'_>) -> CommandResult<()> {
         result.push("Muses registered for ").mention(&user.id).push_line(":");
 
         for muse in muses {
-            result.push_line(format!("• {}", muse));
+            result.push_line(format!("- {}", muse));
         }
     }
     else {

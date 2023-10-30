@@ -10,6 +10,7 @@ use serenity::{
 use tokio::time::Instant;
 use tracing::{error, info, warn};
 
+
 use super::CommandResult;
 use crate::{
     cache::MessageCache,
@@ -63,7 +64,7 @@ impl From<db::ThreadWatcherRow> for ThreadWatcher {
 }
 
 /// List current watchers.
-#[poise::command(slash_command, guild_only, rename = "tt_watchers", aliases("tt_watching"))]
+#[poise::command(slash_command, guild_only, rename = "tt_watchers", category = "Watchers", aliases("tt_watching"))]
 pub(crate) async fn list(ctx: TitiContext<'_>) -> CommandResult<()> {
     let user = ctx.author();
     info!("listing watchers for {} ({})", user.name, user.id);
@@ -102,7 +103,7 @@ pub(crate) async fn list(ctx: TitiContext<'_>) -> CommandResult<()> {
 }
 
 /// Add a new thread watcher and send the initial watcher message.
-#[poise::command(slash_command, guild_only, rename = "tt_watch")]
+#[poise::command(slash_command, guild_only, rename = "tt_watch", category = "Watchers")]
 pub(crate) async fn add(
     ctx: TitiContext<'_>,
     #[description = "The category to filter the watched threads by"] category: Option<String>,
@@ -160,7 +161,7 @@ pub(crate) async fn add(
 }
 
 /// Removes a currently active watcher and deletes the watched message.
-#[poise::command(slash_command, guild_only, rename = "tt_unwatch")]
+#[poise::command(slash_command, guild_only, rename = "tt_unwatch", category = "Watchers")]
 pub(crate) async fn remove(
     ctx: TitiContext<'_>,
     #[description = "The watched message (enter a link or message ID)"] watched_message: Message,

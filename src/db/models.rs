@@ -14,7 +14,7 @@ pub(crate) struct TrackedThreadId {
     pub channel_id: i64,
 }
 
-#[derive(FromRow)]
+#[derive(FromRow, Debug)]
 pub(crate) struct ThreadWatcherRow {
     pub id: i32,
     pub user_id: i64,
