@@ -143,6 +143,10 @@ pub(crate) fn split_into_chunks(s: &str, max_chunk_length: usize) -> Vec<String>
         }
     }
 
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+
     chunks
 }
 
