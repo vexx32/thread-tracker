@@ -149,6 +149,10 @@ impl Data {
         }
     }
 
+    fn guilds(&self) -> usize {
+        self.guild_count.load(Ordering::SeqCst)
+    }
+
     /// Retrieve the full list of tracked threads from the database to populate the in-memory
     /// list of tracked threads.
     async fn update_tracked_threads(&self) -> sqlx::Result<()> {

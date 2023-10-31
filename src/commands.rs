@@ -1,11 +1,11 @@
 pub(crate) mod help;
 pub(crate) mod muses;
+pub(crate) mod stats;
 pub(crate) mod threads;
 pub(crate) mod todos;
 pub(crate) mod watchers;
 
 use crate::TitiError;
-
 
 type CommandResult<T> = std::result::Result<T, TitiError>;
 
@@ -15,6 +15,7 @@ pub(crate) fn list() -> Vec<poise::Command<crate::Data, crate::TitiError>> {
         muses::add(),
         muses::remove(),
         muses::list(),
+        stats::send_statistics(),
         threads::add(),
         threads::remove(),
         threads::set_category(),
