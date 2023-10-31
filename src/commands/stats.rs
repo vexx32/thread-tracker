@@ -1,33 +1,35 @@
-use serenity::utils::MessageBuilder;
+use serenity::utils::{MessageBuilder, Content};
 use tracing::info;
 
-use crate::{db, TitiContext, TitiResponse, commands::CommandResult};
+use crate::{db, TitiReplyContext, commands::CommandResult, PrefixContext};
 
 /// Send the bot's statistics as a reply to the input context
-#[poise::command(slash_command, dm_only, rename = "tt_stats")]
+#[poise::command(prefix_command, dm_only, rename = "stats")]
 pub(crate) async fn send_statistics(
-    ctx: TitiContext<'_>,
+    ctx: PrefixContext<'_>,
 ) -> CommandResult<()> {
-    ctx.defer_ephemeral().await?;
-
     let data = ctx.data();
     let stats = db::statistics(&data.database).await?;
 
     let mut message = MessageBuilder::new();
 
-    message.push("- **Unique Users** — ").push_line(stats.users);
-    message.push("- **Servers (Active)** — ").push_line(stats.servers);
-    message.push("- **Servers (Total)** — ").push_line(data.guilds());
-    message.push("- **Threads (Unique)** — ").push_line(stats.threads_distinct);
-    message.push("- **Threads (Total)** — ").push_line(stats.threads_total);
-    // message.push("- **Watchers** — ").push_line(stats.watchers);
-    message.push("- **Muses** — ").push_line(stats.muses);
-    message.push("- **To Dos** — ").push_line(stats.todos);
+    write_stats_line(&mut message, "Unique Users", stats.users);
+    write_stats_line(&mut message, "Servers (Active)", stats.servers);
+    write_stats_line(&mut message, "Servers (Total)", data.guilds());
+    write_stats_line(&mut message, "Threads (Unique)", stats.threads_distinct);
+    write_stats_line(&mut message, "Threads (Total)", stats.threads_total);
+    write_stats_line(&mut message, "Muses", stats.muses);
+    write_stats_line(&mut message, "To Dos", stats.todos);
+    // write_stats_line(&mut message, "Watchers", stats.watchers);
 
     let user = ctx.author();
     info!("sending bot statistics to {} ({})", &user.name, user.id);
 
-    ctx.reply_success("Titi Statistics", &message.build()).await;
+    ctx.reply_success("Statistics", &message.build()).await?;
 
     Ok(())
+}
+
+fn write_stats_line(msg: &mut MessageBuilder, name: impl Into<Content>, value: impl Into<Content>) {
+    msg.push("- **").push(name).push("** — ").push_line(value);
 }

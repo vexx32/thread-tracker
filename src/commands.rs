@@ -5,11 +5,11 @@ pub(crate) mod threads;
 pub(crate) mod todos;
 pub(crate) mod watchers;
 
-use crate::TitiError;
+use crate::CommandError;
 
-type CommandResult<T> = std::result::Result<T, TitiError>;
+type CommandResult<T> = std::result::Result<T, CommandError>;
 
-pub(crate) fn list() -> Vec<poise::Command<crate::Data, crate::TitiError>> {
+pub(crate) fn list() -> Vec<poise::Command<crate::Data, crate::CommandError>> {
     vec![
         help::help(),
         muses::add(),

@@ -23,8 +23,8 @@ use crate::{
     utils::*,
     Data,
     Database,
-    TitiContext,
-    TitiResponse,
+    SlashCommandContext,
+    TitiReplyContext,
 };
 
 pub(crate) struct TrackedThread {
@@ -73,7 +73,7 @@ pub(crate) async fn enumerate_tracked_channel_ids(
 /// Add thread(s) to tracking.
 #[poise::command(slash_command, guild_only, rename = "tt_track", category = "Thread tracking", aliases("tt_add"))]
 pub(crate) async fn add(
-    ctx: TitiContext<'_>,
+    ctx: SlashCommandContext<'_>,
     #[description = "The thread or channel to track"]
     #[channel_types("NewsThread", "PrivateThread", "PublicThread", "Text")]
     threads: Vec<GuildChannel>,
@@ -132,7 +132,7 @@ pub(crate) async fn add(
 
     if !errors.0.is_empty() {
         error!("Errors handling thread registration:\n{}", errors);
-        ctx.reply_error(ERROR_TITLE, &errors.build()).await;
+        ctx.reply_error(ERROR_TITLE, &errors.build()).await?;
     }
 
     if !threads_added.0.is_empty() {
@@ -141,7 +141,7 @@ pub(crate) async fn add(
             None => "Tracked threads added".to_owned(),
         };
 
-        ctx.reply_success(&title, &threads_added.build()).await;
+        ctx.reply_success(&title, &threads_added.build()).await?;
     }
 
     Ok(())
@@ -156,7 +156,7 @@ pub(crate) async fn add(
     aliases("tt_setcategory", "tt_cat")
 )]
 pub(crate) async fn set_category(
-    ctx: TitiContext<'_>,
+    ctx: SlashCommandContext<'_>,
     #[description = "The thread or channel to update category for"]
     #[channel_types("NewsThread", "PrivateThread", "PublicThread", "Text")]
     thread: GuildChannel,
@@ -206,7 +206,7 @@ pub(crate) async fn set_category(
 
     if !errors.0.is_empty() {
         error!("Errors updating thread categories:\n{}", errors);
-        ctx.reply_error(ERROR_TITLE, &errors.build()).await;
+        ctx.reply_error(ERROR_TITLE, &errors.build()).await?;
     }
 
     if !threads_updated.0.is_empty() {
@@ -215,7 +215,7 @@ pub(crate) async fn set_category(
             None => String::from("Tracked threads' categories removed"),
         };
 
-        ctx.reply_success(&title, &threads_updated.build()).await;
+        ctx.reply_success(&title, &threads_updated.build()).await?;
     }
 
     Ok(())
@@ -224,7 +224,7 @@ pub(crate) async fn set_category(
 /// Remove thread(s) from tracking.
 #[poise::command(slash_command, guild_only, rename = "tt_untrack", category = "Thread tracking", aliases("tt_remove"))]
 pub(crate) async fn remove(
-    ctx: TitiContext<'_>,
+    ctx: SlashCommandContext<'_>,
     #[description = "The thread or channel to remove from tracking"]
     #[channel_types("NewsThread", "PrivateThread", "PublicThread", "Text")]
     thread: Option<GuildChannel>,
@@ -298,11 +298,11 @@ pub(crate) async fn remove(
 
     if !errors.0.is_empty() {
         error!("Errors handling thread removal:\n{}", errors);
-        ctx.reply_error(ERROR_TITLE, &errors.build()).await;
+        ctx.reply_error(ERROR_TITLE, &errors.build()).await?;
     }
 
     if !threads_removed.0.is_empty() {
-        ctx.reply_success("Tracked threads removed", &threads_removed.build()).await;
+        ctx.reply_success("Tracked threads removed", &threads_removed.build()).await?;
     }
 
     Ok(())
@@ -311,7 +311,7 @@ pub(crate) async fn remove(
 /// Show the list of all tracked threads.
 #[poise::command(slash_command, guild_only, rename = "tt_threads", category = "Thread tracking", aliases("tt_replies"))]
 pub(crate) async fn send_list(
-    ctx: TitiContext<'_>,
+    ctx: SlashCommandContext<'_>,
     #[description = "Only show threads from this category"] category: Option<String>,
 ) -> CommandResult<()> {
     let guild_id = match ctx.guild_id() {
@@ -326,7 +326,7 @@ pub(crate) async fn send_list(
     let threads_list =
         get_list(ctx.author(), guild_id, category.as_deref(), ctx.data(), &ctx).await?;
 
-    ctx.reply_success(title, &threads_list).await;
+    ctx.reply_success(title, &threads_list).await?;
 
     Ok(())
 }
@@ -405,7 +405,7 @@ pub(crate) async fn get_list(
 /// - `context` - the interaction context
 #[poise::command(slash_command, guild_only, category = "Thread tracking", rename = "tt_random")]
 pub(crate) async fn send_random_thread(
-    ctx: TitiContext<'_>,
+    ctx: SlashCommandContext<'_>,
     #[description = "Only pick from threads in this category"] category: Option<String>,
 ) -> CommandResult<()> {
     const ERROR_TITLE: &str = "Error fetching tracked threads";
@@ -452,11 +452,11 @@ pub(crate) async fn send_random_thread(
 
     if !errors.0.is_empty() {
         error!("Errors encountered getting a random thread for {}: {}", user.name, errors);
-        ctx.reply_error(ERROR_TITLE, &errors.build()).await;
+        ctx.reply_error(ERROR_TITLE, &errors.build()).await?;
     }
 
     if !message.0.is_empty() {
-        ctx.reply_success("Random thread", &message.build()).await;
+        ctx.reply_success("Random thread", &message.build()).await?;
     }
 
     Ok(())
@@ -475,7 +475,7 @@ pub(crate) async fn get_random_thread(
     category: Option<&str>,
     user: &User,
     guild_id: GuildId,
-    context: &TitiContext<'_>,
+    context: &SlashCommandContext<'_>,
 ) -> CommandResult<Option<(String, TrackedThread)>> {
     let guild_user = GuildUser { user_id: user.id, guild_id };
     let data = context.data();

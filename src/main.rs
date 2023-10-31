@@ -2,7 +2,7 @@ use std::{
     collections::HashSet,
     result,
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering, AtomicBool},
         Arc,
         Mutex,
     },
@@ -21,7 +21,7 @@ use serenity::{
         prelude::{interaction::Interaction, *},
     },
     prelude::*,
-    utils::Colour, collector::ReactionFilter,
+    utils::Colour,
 };
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
@@ -41,50 +41,57 @@ mod commands;
 mod consts;
 mod db;
 mod messaging;
-mod stats;
 mod utils;
 
-type TitiError = Box<dyn std::error::Error + Send + Sync>;
-type TitiContext<'a> = poise::Context<'a, Data, TitiError>;
+type CommandError = Box<dyn std::error::Error + Send + Sync>;
+type SlashCommandContext<'a> = poise::Context<'a, Data, CommandError>;
+type PrefixContext<'a> = poise::PrefixContext<'a, Data, CommandError>;
 
 #[async_trait]
-trait TitiResponse {
+trait TitiReplyContext {
     async fn send_chunked_reply(
         &self,
         title: &str,
         description: &str,
         colour: Colour,
         ephemeral: bool,
-    ) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
+    ) -> result::Result<Vec<poise::ReplyHandle<'_>>, serenity::Error>;
 
-    async fn reply_success(
-        &self,
-        title: &str,
-        description: &str,
-    ) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
 
     async fn reply_ephemeral(
         &self,
         title: &str,
         description: &str,
-    ) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
+    ) -> result::Result<Vec<poise::ReplyHandle<'_>>, serenity::Error> {
+        self.send_chunked_reply(title, description, Colour::BLURPLE, true).await
+    }
+
+    async fn reply_success(
+        &self,
+        title: &str,
+        description: &str,
+    ) -> result::Result<Vec<poise::ReplyHandle<'_>>, serenity::Error> {
+        self.send_chunked_reply(title, description, Colour::PURPLE, false).await
+    }
 
     async fn reply_error(
         &self,
         title: &str,
         description: &str,
-    ) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>>;
+    ) -> result::Result<Vec<poise::ReplyHandle<'_>>, serenity::Error> {
+        self.send_chunked_reply(title, description, Colour::RED, false).await
+    }
 }
 
 #[async_trait]
-impl TitiResponse for TitiContext<'_> {
+impl TitiReplyContext for PrefixContext<'_> {
     async fn send_chunked_reply(
         &self,
         title: &str,
         description: &str,
         colour: Colour,
         ephemeral: bool,
-    ) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
+    ) -> result::Result<Vec<poise::ReplyHandle<'_>>, serenity::Error> {
         let messages = utils::split_into_chunks(description, consts::MAX_EMBED_CHARS);
         let mut results = Vec::new();
 
@@ -95,35 +102,38 @@ impl TitiResponse for TitiContext<'_> {
                         .embed(|embed| embed.title(title).description(msg).colour(colour))
                         .ephemeral(ephemeral)
                 })
-                .await,
+                .await?,
             );
         }
 
-        results
+        Ok(results)
     }
+}
 
-    async fn reply_ephemeral(
+#[async_trait]
+impl TitiReplyContext for SlashCommandContext<'_> {
+    async fn send_chunked_reply(
         &self,
         title: &str,
         description: &str,
-    ) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
-        self.send_chunked_reply(title, description, Colour::BLURPLE, true).await
-    }
+        colour: Colour,
+        ephemeral: bool,
+    ) -> result::Result<Vec<poise::ReplyHandle<'_>>, serenity::Error> {
+        let messages = utils::split_into_chunks(description, consts::MAX_EMBED_CHARS);
+        let mut results = Vec::new();
 
-    async fn reply_success(
-        &self,
-        title: &str,
-        description: &str,
-    ) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
-        self.send_chunked_reply(title, description, Colour::PURPLE, false).await
-    }
+        for msg in messages {
+            results.push(
+                self.send(|reply| {
+                    reply
+                        .embed(|embed| embed.title(title).description(msg).colour(colour))
+                        .ephemeral(ephemeral)
+                })
+                .await?,
+            );
+        }
 
-    async fn reply_error(
-        &self,
-        title: &str,
-        description: &str,
-    ) -> Vec<result::Result<poise::ReplyHandle<'_>, serenity::Error>> {
-        self.send_chunked_reply(title, description, Colour::RED, false).await
+        Ok(results)
     }
 }
 
@@ -133,6 +143,8 @@ struct Data {
     database: Database,
     /// The total number of guilds the bot is in
     guild_count: AtomicUsize,
+    /// Set once, when the tasks are started, to prevent multiple shards from starting the same tasks.
+    recurring_tasks_started: AtomicBool,
     /// Threadsafe memory cache for messages the bot has sent or looked up
     message_cache: MessageCache,
     /// The current list of tracked threads
@@ -146,11 +158,16 @@ impl Data {
             message_cache: MessageCache::new(),
             tracked_threads: Arc::new(RwLock::new(HashSet::new())),
             guild_count: AtomicUsize::new(0),
+            recurring_tasks_started: AtomicBool::new(false),
         }
     }
 
     fn guilds(&self) -> usize {
         self.guild_count.load(Ordering::SeqCst)
+    }
+
+    fn get_tasks_started_flag(&self) -> bool {
+        self.recurring_tasks_started.swap(true, Ordering::SeqCst)
     }
 
     /// Retrieve the full list of tracked threads from the database to populate the in-memory
@@ -197,7 +214,7 @@ struct Handler {
     /// The shared command data
     data: Arc<RwLock<Data>>,
     /// The Poise framework options
-    options: poise::FrameworkOptions<Data, TitiError>,
+    options: poise::FrameworkOptions<Data, CommandError>,
     /// The Serenity shard manager
     shard_manager: Mutex<Option<std::sync::Arc<tokio::sync::Mutex<ShardManager>>>>,
     /// The bot's user id
@@ -210,7 +227,7 @@ impl Handler {
     /// ### Arguments
     ///
     /// - `database` - database pool connection
-    fn new(options: poise::FrameworkOptions<Data, TitiError>, database: Database) -> Self {
+    fn new(options: poise::FrameworkOptions<Data, CommandError>, database: Database) -> Self {
         Self {
             data: Arc::new(RwLock::new(Data::new(database))),
             options,
@@ -240,11 +257,22 @@ impl Handler {
         }
     }
 
-    async fn process_direct_message(&self, _reply_context: ReplyContext, message: Message) {
-        warn!(
-            "Received direct message from user {} ({}), ignoring.",
-            message.author.name, message.author.id
-        );
+    async fn forward_to_poise(&self, ctx: &Context, event: &poise::Event<'_>) {
+        // FrameworkContext contains all data that poise::Framework usually manages
+        let shard_manager = (*self.shard_manager.lock().unwrap()).clone().unwrap();
+        let framework_data = poise::FrameworkContext {
+            bot_id: self.user().unwrap_or_default(),
+            options: &self.options,
+            user_data: &*self.data.read().await,
+            shard_manager: &shard_manager,
+        };
+
+        poise::dispatch_event(
+            framework_data,
+            ctx,
+            event,
+        )
+        .await;
     }
 }
 
@@ -315,18 +343,21 @@ impl EventHandler for Handler {
             if is_tracking_thread {
                 let data = self.data.read().await;
                 debug!("Caching new message from tracked channel {}", message.channel_id);
-                data.message_cache.store((message.channel_id, message.id).into(), message).await;
+                data.message_cache.store((message.channel_id, message.id).into(), message.clone()).await;
             }
-
-            return;
         }
 
-        let channel_id = message.channel_id;
+        self.forward_to_poise(&context, &poise::Event::Message { new_message: message }).await;
+    }
 
-        if let Ok(Channel::Private(_)) = channel_id.to_channel(&context.http).await {
-            let reply_context = ReplyContext::new(channel_id, context);
-            self.process_direct_message(reply_context, message).await;
-        }
+    async fn message_update(
+        &self,
+        ctx: Context,
+        old_if_available: Option<Message>,
+        new: Option<Message>,
+        event: MessageUpdateEvent,
+    ) {
+        self.forward_to_poise(&ctx, &poise::Event::MessageUpdate { old_if_available, new, event }).await;
     }
 
     async fn guild_create(&self, ctx: Context, guild: Guild, is_new: bool) {
@@ -368,46 +399,25 @@ impl EventHandler for Handler {
         let data = self.data.read().await;
         data.guild_count.store(guild_count, Ordering::Relaxed);
 
-        if cfg!(debug_assertions) {
-            for guild in ready.guilds {
-                utils::register_guild_commands(&self.options.commands, guild.id, &ctx).await;
-            }
-        }
-        else {
-            let commands = poise::builtins::create_application_commands(&self.options.commands);
-            let result = Command::set_global_application_commands(&ctx, |cmds| {
-                *cmds = commands;
-                cmds
-            }).await;
+        let commands = poise::builtins::create_application_commands(&self.options.commands);
+        let result = Command::set_global_application_commands(&ctx, |cmds| {
+            *cmds = commands;
+            cmds
+        }).await;
 
-            if let Err(e) = result {
-                error!("Unable to register commands globally: {}", e);
-            }
+        if let Err(e) = result {
+            error!("Unable to register commands globally: {}", e);
         }
 
         run_periodic_tasks(&ctx, &data);
     }
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
-        // FrameworkContext contains all data that poise::Framework usually manages
-        let shard_manager = (*self.shard_manager.lock().unwrap()).clone().unwrap();
-        let framework_data = poise::FrameworkContext {
-            bot_id: self.user().unwrap_or_default(),
-            options: &self.options,
-            user_data: &*self.data.read().await,
-            shard_manager: &shard_manager,
-        };
-
-        poise::dispatch_event(
-            framework_data,
-            &ctx,
-            &poise::Event::InteractionCreate { interaction },
-        )
-        .await;
+        self.forward_to_poise(&ctx, &poise::Event::InteractionCreate { interaction }).await;
     }
 }
 
-async fn on_error(error: poise::FrameworkError<'_, Data, TitiError>) {
+async fn on_error(error: poise::FrameworkError<'_, Data, CommandError>) {
     // This is our custom error handler
     // They are many errors that can occur, so we only handle the ones we want to customize
     // and forward the rest to the default handler
@@ -415,7 +425,9 @@ async fn on_error(error: poise::FrameworkError<'_, Data, TitiError>) {
         FrameworkError::Setup { error: e, .. } => panic!("Failed to start bot: {:?}", e),
         FrameworkError::Command { error: e, ctx } => {
             error!("Error in command `{}`: {}", ctx.command().name, e);
-            ctx.reply_error("Error running command", &e.to_string()).await;
+            if let Err(e) = ctx.reply_error("Error running command", &e.to_string()).await {
+                error!("Could not send error response to user: {}", e);
+            }
         },
         _ => {
             if let Err(e) = poise::builtins::on_error(error).await {
@@ -459,6 +471,12 @@ async fn main() -> anyhow::Result<()> {
     // Every option can be omitted to use its default value
     let options = poise::FrameworkOptions {
         commands: commands::list(),
+        prefix_options: poise::PrefixFrameworkOptions {
+            prefix: Some("tt!".into()),
+            edit_tracker: Some(poise::EditTracker::for_timespan(Duration::from_secs(3600))),
+            mention_as_prefix: true,
+            ..Default::default()
+        },
         /// The global error handler for all error cases that may occur
         on_error: |error| Box::pin(on_error(error)),
         /// This code is run before every command

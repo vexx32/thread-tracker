@@ -23,8 +23,8 @@ use crate::{
     messaging::ReplyContext,
     utils::{get_channel_name, ChannelMessage, GuildUser},
     Database,
-    TitiContext,
-    TitiResponse,
+    SlashCommandContext,
+    TitiReplyContext,
 };
 
 /// Stores all necessary information for updating watched thread lists.
@@ -65,7 +65,7 @@ impl From<db::ThreadWatcherRow> for ThreadWatcher {
 
 /// List current watchers.
 #[poise::command(slash_command, guild_only, rename = "tt_watchers", category = "Watchers", aliases("tt_watching"))]
-pub(crate) async fn list(ctx: TitiContext<'_>) -> CommandResult<()> {
+pub(crate) async fn list(ctx: SlashCommandContext<'_>) -> CommandResult<()> {
     let user = ctx.author();
     info!("listing watchers for {} ({})", user.name, user.id);
 
@@ -97,7 +97,7 @@ pub(crate) async fn list(ctx: TitiContext<'_>) -> CommandResult<()> {
             .push_line("");
     }
 
-    ctx.reply_success("Currently active watchers", &message.build()).await;
+    ctx.reply_success("Currently active watchers", &message.build()).await?;
 
     Ok(())
 }
@@ -105,7 +105,7 @@ pub(crate) async fn list(ctx: TitiContext<'_>) -> CommandResult<()> {
 /// Add a new thread watcher and send the initial watcher message.
 #[poise::command(slash_command, guild_only, rename = "tt_watch", category = "Watchers")]
 pub(crate) async fn add(
-    ctx: TitiContext<'_>,
+    ctx: SlashCommandContext<'_>,
     #[description = "The category to filter the watched threads by"] category: Option<String>,
 ) -> CommandResult<()> {
     let user = ctx.author();
@@ -148,7 +148,7 @@ pub(crate) async fn add(
 
     match result {
         Ok(true) => {
-            ctx.reply_ephemeral("Watcher created", "The requested watcher has been created.").await;
+            ctx.reply_ephemeral("Watcher created", "The requested watcher has been created.").await?;
 
             Ok(())
         },
@@ -163,7 +163,7 @@ pub(crate) async fn add(
 /// Removes a currently active watcher and deletes the watched message.
 #[poise::command(slash_command, guild_only, rename = "tt_unwatch", category = "Watchers")]
 pub(crate) async fn remove(
-    ctx: TitiContext<'_>,
+    ctx: SlashCommandContext<'_>,
     #[description = "The watched message (enter a link or message ID)"] watched_message: Message,
 ) -> CommandResult<()> {
     let data = ctx.data();
@@ -218,7 +218,7 @@ pub(crate) async fn remove(
                 Err(e) => return Err(anyhow!("Unable to locate message {}. Perhaps it was already deleted?", e).into()),
             }
 
-            ctx.reply_ephemeral("Watcher removed", &format!("Watcher with id {} removed successfully.", watcher.id)).await;
+            ctx.reply_ephemeral("Watcher removed", &format!("Watcher with id {} removed successfully.", watcher.id)).await?;
         },
         Err(e) => {
             return Err(anyhow!("Error removing watcher: {}", e).into());

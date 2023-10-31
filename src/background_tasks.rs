@@ -27,15 +27,19 @@ pub(crate) fn run_periodic_tasks(context: &Context, data: &Data) {
     let ctx = Arc::new(context.clone());
     spawn_task_loop(HEARTBEAT_INTERVAL, move || heartbeat(Arc::clone(&ctx)));
 
-    // let c = Arc::new(context.clone());
-    // let d = Arc::new(data.database.clone());
-    // let m = Arc::new(data.message_cache.clone());
-    // spawn_result_task_loop(WATCHER_UPDATE_INTERVAL, move || {
-    //     update_watchers(Arc::clone(&c), Arc::clone(&d), Arc::clone(&m))
-    // });
+    if !data.get_tasks_started_flag() {
+        // Only start these tasks once.
 
-    let c = Arc::new(data.message_cache.clone());
-    spawn_task_loop(CACHE_TRIM_INTERVAL, move || purge_expired_cache_entries(Arc::clone(&c)));
+        // let c = Arc::new(context.clone());
+        // let d = Arc::new(data.database.clone());
+        // let m = Arc::new(data.message_cache.clone());
+        // spawn_result_task_loop(WATCHER_UPDATE_INTERVAL, move || {
+        //     update_watchers(Arc::clone(&c), Arc::clone(&d), Arc::clone(&m))
+        // });
+
+        let c = Arc::new(data.message_cache.clone());
+        spawn_task_loop(CACHE_TRIM_INTERVAL, move || purge_expired_cache_entries(Arc::clone(&c)));
+    }
 }
 
 /// Spawns a task which loops indefinitely, with a wait period between each iteration.

@@ -8,15 +8,15 @@ use tracing::{error, info};
 use crate::{
     commands::CommandResult,
     db::{self, Database},
-    TitiContext,
-    TitiResponse,
+    SlashCommandContext,
+    TitiReplyContext,
 };
 
 
 /// Add a new muse to your list.
 #[poise::command(slash_command, guild_only, rename = "tt_addmuse", category = "Muses")]
 pub(crate) async fn add(
-    ctx: TitiContext<'_>,
+    ctx: SlashCommandContext<'_>,
     #[description = "The name of the muse to add"]
     muse_name: String,
 ) -> CommandResult<()> {
@@ -37,20 +37,20 @@ pub(crate) async fn add(
     match db::add_muse(database, guild_id.0, user.id.0, &muse_name).await {
         Ok(true) => {
             result.push_line(" added successfully.");
-            ctx.reply_success("Add muse", &result.build()).await;
+            ctx.reply_success("Add muse", &result.build()).await?;
             Ok(())
         },
         Ok(false) => {
             result.push(" is already known for ").mention(&user.id).push_line(".");
             let error = result.build();
-            ctx.reply_error(ERROR_TITLE, &error).await;
+            ctx.reply_error(ERROR_TITLE, &error).await?;
             Err(anyhow!(error).into())
         },
         Err(e) => {
             error!("Error adding muse for {}: {}", user.name, e);
             errors.push_line(e);
             let error = errors.build();
-            ctx.reply_error(ERROR_TITLE, &error).await;
+            ctx.reply_error(ERROR_TITLE, &error).await?;
             Err(anyhow!(error).into())
         },
     }
@@ -59,7 +59,7 @@ pub(crate) async fn add(
 /// Removes a muse from your list.
 #[poise::command(slash_command, guild_only, rename = "tt_removemuse", category = "Muses")]
 pub(crate) async fn remove(
-    ctx: TitiContext<'_>,
+    ctx: SlashCommandContext<'_>,
     #[description = "The name of the muse to remove"]
     muse_name: String,
 ) -> CommandResult<()> {
@@ -80,18 +80,18 @@ pub(crate) async fn remove(
         Ok(0) => {
             result.push_line(" was not found.");
             let error = result.build();
-            ctx.reply_error(ERROR_TITLE, &error).await;
+            ctx.reply_error(ERROR_TITLE, &error).await?;
             Err(anyhow!(error).into())
         },
         Ok(_) => {
             result.push_line(" was successfully removed.");
-            ctx.reply_success("Muse removed", &result.build()).await;
+            ctx.reply_success("Muse removed", &result.build()).await?;
             Ok(())
         },
         Err(e) => {
             result.push_line(" could not be removed due to an error: ").push_line(e);
             let error = result.build();
-            ctx.reply_error(ERROR_TITLE, &error).await;
+            ctx.reply_error(ERROR_TITLE, &error).await?;
             Err(anyhow!(error).into())
         },
     }
@@ -99,7 +99,7 @@ pub(crate) async fn remove(
 
 /// Show your list of muses.
 #[poise::command(slash_command, guild_only, rename = "tt_muses", category = "Muses")]
-pub(crate) async fn list(ctx: TitiContext<'_>) -> CommandResult<()> {
+pub(crate) async fn list(ctx: SlashCommandContext<'_>) -> CommandResult<()> {
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => return Err(anyhow!("Unable to list muses outside of a server").into()),
@@ -125,7 +125,8 @@ pub(crate) async fn list(ctx: TitiContext<'_>) -> CommandResult<()> {
     }
 
     info!("sending muse list for {} ({})", user.name, user.id);
-    ctx.reply_success("Registered muses", &result.build()).await;
+    ctx.reply_success("Registered muses", &result.build()).await?;
+
     Ok(())
 }
 
