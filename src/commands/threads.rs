@@ -319,7 +319,7 @@ pub(crate) async fn send_list(
         None => return Err(anyhow!("Unable to manage tracked threads outside of a server").into()),
     };
 
-    ctx.defer().await?;
+    ctx.defer_ephemeral().await?;
 
     let title = "Currently tracked threads";
 
