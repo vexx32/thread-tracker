@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use serenity::{model::prelude::*, prelude::*};
+use serenity::{model::prelude::*, prelude::*, CacheAndHttp};
 use tokio::task::JoinSet;
 use tracing::{error, info};
 
@@ -16,6 +16,10 @@ use crate::{
     db::{self, Database}, Data,
 };
 
+pub(crate) fn run_periodic_shard_tasks(context: Context) {
+    let ctx = Arc::new(context);
+    spawn_task_loop(HEARTBEAT_INTERVAL, move || heartbeat(Arc::clone(&ctx)));
+}
 
 /// Core task spawning function. Creates a set of periodically recurring tasks on their own threads.
 ///
@@ -23,10 +27,7 @@ use crate::{
 ///
 /// - `context` - the Serenity context to delegate to tasks
 /// - `bot` - the bot instance to delegate to tasks
-pub(crate) fn run_periodic_tasks(context: &Context, data: &Data) {
-    let ctx = Arc::new(context.clone());
-    spawn_task_loop(HEARTBEAT_INTERVAL, move || heartbeat(Arc::clone(&ctx)));
-
+pub(crate) fn run_periodic_tasks(context: Arc<CacheAndHttp>, data: &Data) {
     if !data.get_tasks_started_flag() {
         // Only start these tasks once.
 
@@ -91,14 +92,14 @@ where
 
 /// Performs a set_presence request to ensure the Activity is set correctly.
 pub(crate) async fn heartbeat(ctx: Arc<Context>) {
-    ctx.set_presence(Some(Activity::watching("over your threads (tt_help)")), OnlineStatus::Online)
+    ctx.set_presence(Some(Activity::listening("to /tt_help")), OnlineStatus::Online)
         .await;
-    info!("heartbeat set_presence request completed");
+    info!("heartbeat set_presence request completed for shard ID {}", ctx.shard_id);
 }
 
 /// Updates all recorded watchers and edits their referenced messages with the new content.
 pub(crate) async fn update_watchers(
-    context: Arc<Context>,
+    context: Arc<CacheAndHttp>,
     database: Arc<Database>,
     message_cache: Arc<MessageCache>,
 ) -> anyhow::Result<()> {

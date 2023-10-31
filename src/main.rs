@@ -33,7 +33,7 @@ use toml::Table;
 use tracing::{debug, error, info, log::LevelFilter, warn};
 use utils::message_is_command;
 
-use crate::{background_tasks::run_periodic_tasks, consts::DELETE_EMOJI};
+use crate::{background_tasks::{run_periodic_tasks, run_periodic_shard_tasks}, consts::DELETE_EMOJI};
 
 mod background_tasks;
 mod cache;
@@ -409,7 +409,7 @@ impl EventHandler for Handler {
             error!("Unable to register commands globally: {}", e);
         }
 
-        run_periodic_tasks(&ctx, &data);
+        run_periodic_shard_tasks(ctx);
     }
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
@@ -542,6 +542,7 @@ async fn main() -> anyhow::Result<()> {
 
     *handler.shard_manager.lock().unwrap() = Some(client.shard_manager.clone());
 
+    run_periodic_tasks(Arc::clone(&client.cache_and_http), &*handler.data.read().await);
     client.start_autosharded().await.context("Error starting client")?;
 
     Ok(())
