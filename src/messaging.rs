@@ -1,129 +1,6 @@
-use serenity::{
-    builder::CreateEmbed,
-    model::prelude::*,
-    prelude::*,
-    utils::Colour,
-};
+use serenity::{utils::Colour, Result};
 
-use crate::consts::*;
-
-/// Wrapper struct to keep track of which channel and message is being replied to.
-pub(crate) struct ReplyContext {
-    channel_id: ChannelId,
-    context: Context,
-}
-
-impl ReplyContext {
-    /// Create a new ReplyContext.
-    pub(crate) fn new(channel_id: ChannelId, ctx: Context) -> Self {
-        Self { channel_id, context: ctx }
-    }
-
-    /// Sends a custom embed.
-    ///
-    /// ### Arguments
-    ///
-    /// - `title` - the title of the embed
-    /// - `body` - the content of the embed
-    /// - `colour` - the colour of the embed border
-    pub(crate) async fn send_embed(
-        &self,
-        title: impl ToString,
-        body: impl ToString,
-        colour: Option<Colour>,
-    ) -> Result<Message, SerenityError> {
-        self.send_custom_embed(title, body, |embed| embed.colour(colour.unwrap_or(Colour::PURPLE)))
-            .await
-    }
-
-    async fn send_custom_embed<F>(
-        &self,
-        title: impl ToString,
-        body: impl ToString,
-        f: F,
-    ) -> Result<Message, SerenityError>
-    where
-        F: FnOnce(&mut CreateEmbed) -> &mut CreateEmbed,
-    {
-        self.channel_id
-            .send_message(&self.context, |msg| {
-                msg.embed(|embed| f(embed.title(title).description(body)))
-            })
-            .await
-    }
-
-    // /// Sends a 'success' confirmation embed.
-    // ///
-    // /// ### Arguments
-    // ///
-    // /// - `title` - the title of the embed
-    // /// - `body` - the content of the embed
-    // /// - `message_cache` - the cache to store sent messages in
-    // pub(crate) async fn send_success_embed(
-    //     &self,
-    //     title: impl ToString,
-    //     body: impl ToString,
-    //     message_cache: &MessageCache,
-    // ) {
-    //     handle_send_result(self.send_embed(title, body, Some(Colour::FABLED_PINK)), message_cache)
-    //         .await;
-    // }
-
-    // /// Sends an error embed.
-    // ///
-    // /// ### Argumentds
-    // ///
-    // /// - `title` - the title of the embed
-    // /// - `body` - the content of the embed
-    // /// - `message_cache` - the cache to store sent messages in
-    // pub(crate) async fn send_error_embed(
-    //     &self,
-    //     title: impl ToString,
-    //     body: impl ToString,
-    //     message_cache: &MessageCache,
-    // ) {
-    //     error!("{}", body.to_string());
-    //     handle_send_result(self.send_embed(title, body, Some(Colour::DARK_ORANGE)), message_cache)
-    //         .await;
-    // }
-
-    /// Sends a normal message embed with the default colour.
-    ///
-    /// ### Arguments
-    ///
-    /// - `title` - the title of the embed
-    /// - `body` - the contents of the embed
-    pub(crate) async fn send_message_embed(
-        &self,
-        title: impl ToString,
-        body: impl ToString,
-    ) -> Result<Message, SerenityError> {
-        self.send_embed(title, body, None).await
-    }
-
-    // /// Sends an embed where the primary content is arranged in fields for representing structured data.
-    // ///
-    // /// ### Arguments
-    // ///
-    // /// - `title` - the embed title
-    // /// - `body` - the contents of the embed
-    // /// - `fields` - the data to display in the embed's fields
-    // pub(crate) async fn send_data_embed<T, U>(
-    //     &self,
-    //     title: impl ToString,
-    //     body: impl ToString,
-    //     fields: impl Iterator<Item = (T, U)>,
-    // ) -> Result<Message, SerenityError>
-    // where
-    //     T: ToString,
-    //     U: ToString,
-    // {
-    //     self.send_custom_embed(title, body, |embed| {
-    //         embed.colour(Colour::TEAL).fields(fields.map(|(name, value)| (name, value, true)))
-    //     })
-    //     .await
-    // }
-}
+use crate::{consts::*, utils, CommandContext};
 
 /// Mapping enum to select appropriate help messages for various commands and retrieve the associated text.
 pub(crate) enum HelpMessage {
@@ -137,8 +14,8 @@ pub(crate) enum HelpMessage {
 impl HelpMessage {
     pub fn from_category(category: Option<&str>) -> Self {
         match category.map(|s| s.to_ascii_lowercase()).as_deref() {
-            //Some("bugs") => Self::Bugs,
-            Some("muses" ) => Self::Muses,
+            Some("bugs") => Self::Bugs,
+            Some("muses") => Self::Muses,
             Some("threads" | "thread tracking") => Self::Threads,
             Some("todos" | "todo list") => Self::Todos,
             _ => Self::Main,
@@ -170,6 +47,54 @@ impl HelpMessage {
             Self::Todos => TODOS_TITLE,
         }
     }
+}
+
+pub(crate) async fn reply_ephemeral<'a>(
+    ctx: &CommandContext<'a>,
+    title: &str,
+    description: &str,
+) -> Result<Vec<poise::ReplyHandle<'a>>> {
+    send_chunked_reply(ctx, title, description, Colour::BLURPLE, true).await
+}
+
+pub(crate) async fn reply<'a>(
+    ctx: &CommandContext<'a>,
+    title: &str,
+    description: &str,
+) -> Result<Vec<poise::ReplyHandle<'a>>> {
+    send_chunked_reply(ctx, title, description, Colour::PURPLE, false).await
+}
+
+pub(crate) async fn reply_error<'a>(
+    ctx: &CommandContext<'a>,
+    title: &str,
+    description: &str,
+) -> Result<Vec<poise::ReplyHandle<'a>>> {
+    send_chunked_reply(ctx, title, description, Colour::RED, false).await
+}
+
+pub(crate) async fn send_chunked_reply<'a>(
+    ctx: &CommandContext<'a>,
+    title: &str,
+    description: &str,
+    colour: Colour,
+    ephemeral: bool,
+) -> Result<Vec<poise::ReplyHandle<'a>>> {
+    let messages = utils::split_into_chunks(description, MAX_EMBED_CHARS);
+    let mut results = Vec::new();
+
+    for msg in messages {
+        results.push(
+            ctx.send(|reply| {
+                reply
+                    .embed(|embed| embed.title(title).description(msg).colour(colour))
+                    .ephemeral(ephemeral)
+            })
+            .await?,
+        );
+    }
+
+    Ok(results)
 }
 
 // /// Log errors encountered when sending messages, and cache successful sent messages.

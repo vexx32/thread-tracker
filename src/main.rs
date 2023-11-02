@@ -1,6 +1,5 @@
 use std::{
     collections::HashSet,
-    result,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -14,13 +13,11 @@ use commands::threads;
 use db::Database;
 use poise::{serenity_prelude::{Command, ShardManager}, FrameworkError};
 use serenity::{
-    async_trait,
     model::{
         channel::Message,
         prelude::{interaction::Interaction, *},
     },
     prelude::*,
-    utils::Colour,
 };
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
@@ -32,7 +29,7 @@ use toml::Table;
 use tracing::{debug, error, info, log::LevelFilter};
 use utils::message_is_command;
 
-use crate::{background_tasks::{run_periodic_tasks, run_periodic_shard_tasks}, consts::DELETE_EMOJI};
+use crate::{background_tasks::{run_periodic_tasks, run_periodic_shard_tasks}, consts::DELETE_EMOJI, messaging::reply_error};
 
 mod background_tasks;
 mod cache;
@@ -43,98 +40,7 @@ mod messaging;
 mod utils;
 
 type CommandError = Box<dyn std::error::Error + Send + Sync>;
-type SlashCommandContext<'a> = poise::Context<'a, Data, CommandError>;
-type PrefixContext<'a> = poise::PrefixContext<'a, Data, CommandError>;
-
-#[async_trait]
-trait TitiReplyContext {
-    async fn send_chunked_reply(
-        &self,
-        title: &str,
-        description: &str,
-        colour: Colour,
-        ephemeral: bool,
-    ) -> result::Result<Vec<poise::ReplyHandle<'_>>, serenity::Error>;
-
-
-    async fn reply_ephemeral(
-        &self,
-        title: &str,
-        description: &str,
-    ) -> result::Result<Vec<poise::ReplyHandle<'_>>, serenity::Error> {
-        self.send_chunked_reply(title, description, Colour::BLURPLE, true).await
-    }
-
-    async fn reply_success(
-        &self,
-        title: &str,
-        description: &str,
-    ) -> result::Result<Vec<poise::ReplyHandle<'_>>, serenity::Error> {
-        self.send_chunked_reply(title, description, Colour::PURPLE, false).await
-    }
-
-    async fn reply_error(
-        &self,
-        title: &str,
-        description: &str,
-    ) -> result::Result<Vec<poise::ReplyHandle<'_>>, serenity::Error> {
-        self.send_chunked_reply(title, description, Colour::RED, false).await
-    }
-}
-
-#[async_trait]
-impl TitiReplyContext for PrefixContext<'_> {
-    async fn send_chunked_reply(
-        &self,
-        title: &str,
-        description: &str,
-        colour: Colour,
-        ephemeral: bool,
-    ) -> result::Result<Vec<poise::ReplyHandle<'_>>, serenity::Error> {
-        let messages = utils::split_into_chunks(description, consts::MAX_EMBED_CHARS);
-        let mut results = Vec::new();
-
-        for msg in messages {
-            results.push(
-                self.send(|reply| {
-                    reply
-                        .embed(|embed| embed.title(title).description(msg).colour(colour))
-                        .ephemeral(ephemeral)
-                })
-                .await?,
-            );
-        }
-
-        Ok(results)
-    }
-}
-
-#[async_trait]
-impl TitiReplyContext for SlashCommandContext<'_> {
-    async fn send_chunked_reply(
-        &self,
-        title: &str,
-        description: &str,
-        colour: Colour,
-        ephemeral: bool,
-    ) -> result::Result<Vec<poise::ReplyHandle<'_>>, serenity::Error> {
-        let messages = utils::split_into_chunks(description, consts::MAX_EMBED_CHARS);
-        let mut results = Vec::new();
-
-        for msg in messages {
-            results.push(
-                self.send(|reply| {
-                    reply
-                        .embed(|embed| embed.title(title).description(msg).colour(colour))
-                        .ephemeral(ephemeral)
-                })
-                .await?,
-            );
-        }
-
-        Ok(results)
-    }
-}
+type CommandContext<'a> = poise::Context<'a, Data, CommandError>;
 
 #[derive(Debug)]
 struct Data {
@@ -417,7 +323,7 @@ async fn on_error(error: poise::FrameworkError<'_, Data, CommandError>) {
         FrameworkError::Setup { error: e, .. } => panic!("Failed to start bot: {:?}", e),
         FrameworkError::Command { error: e, ctx } => {
             error!("Error in command `{}`: {}", ctx.command().name, e);
-            if let Err(e) = ctx.reply_error("Error running command", &e.to_string()).await {
+            if let Err(e) = reply_error(ctx, "Error running command", &e.to_string()).await {
                 error!("Could not send error response to user: {}", e);
             }
         },

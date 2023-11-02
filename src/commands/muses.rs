@@ -8,15 +8,14 @@ use tracing::{error, info};
 use crate::{
     commands::CommandResult,
     db::{self, Database},
-    SlashCommandContext,
-    TitiReplyContext,
+    CommandContext, messaging::reply,
 };
 
 
 /// Add a new muse to your list.
 #[poise::command(slash_command, guild_only, rename = "tt_addmuse", category = "Muses")]
 pub(crate) async fn add(
-    ctx: SlashCommandContext<'_>,
+    ctx: CommandContext<'_>,
     #[description = "The name of the muse to add"]
     muse_name: String,
 ) -> CommandResult<()> {
@@ -36,7 +35,7 @@ pub(crate) async fn add(
     match db::add_muse(database, guild_id.0, user.id.0, &muse_name).await {
         Ok(true) => {
             result.push_line(" added successfully.");
-            ctx.reply_success("Add muse", &result.build()).await?;
+            reply(&ctx, "Add muse", &result.build()).await?;
             Ok(())
         },
         Ok(false) => {
@@ -56,7 +55,7 @@ pub(crate) async fn add(
 /// Removes a muse from your list.
 #[poise::command(slash_command, guild_only, rename = "tt_removemuse", category = "Muses")]
 pub(crate) async fn remove(
-    ctx: SlashCommandContext<'_>,
+    ctx: CommandContext<'_>,
     #[description = "The name of the muse to remove"]
     muse_name: String,
 ) -> CommandResult<()> {
@@ -80,7 +79,7 @@ pub(crate) async fn remove(
         },
         _ => {
             result.push_line(" was successfully removed.");
-            ctx.reply_success("Muse removed", &result.build()).await?;
+            reply(&ctx, "Muse removed", &result.build()).await?;
             Ok(())
         }
     }
@@ -88,7 +87,7 @@ pub(crate) async fn remove(
 
 /// Show your list of muses.
 #[poise::command(slash_command, guild_only, rename = "tt_muses", category = "Muses")]
-pub(crate) async fn list(ctx: SlashCommandContext<'_>) -> CommandResult<()> {
+pub(crate) async fn list(ctx: CommandContext<'_>) -> CommandResult<()> {
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => return Err(anyhow!("Unable to list muses outside of a server").into()),
@@ -114,7 +113,7 @@ pub(crate) async fn list(ctx: SlashCommandContext<'_>) -> CommandResult<()> {
     }
 
     info!("sending muse list for {} ({})", user.name, user.id);
-    ctx.reply_success("Registered muses", &result.build()).await?;
+    reply(&ctx, "Registered muses", &result.build()).await?;
 
     Ok(())
 }

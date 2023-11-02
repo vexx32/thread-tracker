@@ -9,8 +9,7 @@ use crate::{
     db::{self},
     utils::*,
     Database,
-    SlashCommandContext,
-    TitiReplyContext,
+    CommandContext, messaging::reply,
 };
 
 /// To do list entry from the database.
@@ -28,7 +27,7 @@ impl From<db::TodoRow> for Todo {
 /// Add a new to do list entry.
 #[poise::command(slash_command, guild_only, rename = "tt_todo", category = "Todo list")]
 pub(crate) async fn add(
-    ctx: SlashCommandContext<'_>,
+    ctx: CommandContext<'_>,
     #[description = "The content of the todo list item"] entry: String,
     #[description = "The category to track the todo list item under"] category: Option<String>,
 ) -> CommandResult<()> {
@@ -49,7 +48,7 @@ pub(crate) async fn add(
     match db::add_todo(database, guild_id.0, user.id.0, &entry, category.as_deref()).await {
         Ok(true) => {
             result.push_line(" added successfully.");
-            ctx.reply_success("To do list entry added", &result.build()).await?;
+            reply(&ctx, "To do list entry added", &result.build()).await?;
             Ok(())
         },
         Ok(false) => {
@@ -67,7 +66,7 @@ pub(crate) async fn add(
 /// Remove an existing to do list entry.
 #[poise::command(slash_command, guild_only, rename = "tt_done", category = "Todo list")]
 pub(crate) async fn remove(
-    ctx: SlashCommandContext<'_>,
+    ctx: CommandContext<'_>,
     #[description = "The content of the todo list item to remove"] entry: Option<String>,
     #[description = "The category to remove all todo list items from"] category: Option<String>,
 ) -> CommandResult<()> {
@@ -112,7 +111,7 @@ pub(crate) async fn remove(
         },
         Ok(num) => {
             message.push_line(format!(" successfully removed. {} entries deleted.", num));
-            ctx.reply_success("To do list updated", &message.build()).await?;
+            reply(&ctx, "To do list updated", &message.build()).await?;
             Ok(())
         },
         Err(e) => Err(anyhow!("Error updating to do list: {}", e).into()),
@@ -122,7 +121,7 @@ pub(crate) async fn remove(
 /// Send the full to do list.
 #[poise::command(slash_command, guild_only, rename = "tt_todolist", category = "Todo list")]
 pub(crate) async fn list(
-    ctx: SlashCommandContext<'_>,
+    ctx: CommandContext<'_>,
     #[description = "The category or categories"] category: Vec<String>,
 ) -> CommandResult<()> {
     let user = ctx.author();
@@ -172,7 +171,7 @@ pub(crate) async fn list(
                 message.push_line("There is nothing on your to do list.");
             }
 
-            ctx.reply_success("To do list", &message.build()).await?;
+            reply(&ctx, "To do list", &message.build()).await?;
             Ok(())
         },
         Err(e) => {

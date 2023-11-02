@@ -10,7 +10,6 @@ use serenity::{
 use tokio::time::Instant;
 use tracing::{error, info, warn};
 
-
 use super::CommandResult;
 use crate::{
     cache::MessageCache,
@@ -20,11 +19,10 @@ use crate::{
         todos::{self, Todo},
     },
     db,
-    messaging::ReplyContext,
+    messaging::{reply, reply_ephemeral},
     utils::{get_channel_name, ChannelMessage, GuildUser},
     Database,
-    SlashCommandContext,
-    TitiReplyContext,
+    CommandContext,
 };
 
 /// Stores all necessary information for updating watched thread lists.
@@ -65,7 +63,7 @@ impl From<db::ThreadWatcherRow> for ThreadWatcher {
 
 /// List current watchers.
 #[poise::command(slash_command, guild_only, rename = "tt_watchers", category = "Watchers")]
-pub(crate) async fn list(ctx: SlashCommandContext<'_>) -> CommandResult<()> {
+pub(crate) async fn list(ctx: CommandContext<'_>) -> CommandResult<()> {
     let user = ctx.author();
     info!("listing watchers for {} ({})", user.name, user.id);
 
@@ -97,7 +95,7 @@ pub(crate) async fn list(ctx: SlashCommandContext<'_>) -> CommandResult<()> {
             .push_line("");
     }
 
-    ctx.reply_success("Currently active watchers", &message.build()).await?;
+    reply(&ctx, "Currently active watchers", &message.build()).await?;
 
     Ok(())
 }
@@ -105,7 +103,7 @@ pub(crate) async fn list(ctx: SlashCommandContext<'_>) -> CommandResult<()> {
 /// Add a new thread watcher and send the initial watcher message.
 #[poise::command(slash_command, guild_only, rename = "tt_watch", category = "Watchers")]
 pub(crate) async fn add(
-    ctx: SlashCommandContext<'_>,
+    ctx: CommandContext<'_>,
     #[description = "The category to filter the watched threads by"] category: Option<String>,
 ) -> CommandResult<()> {
     let user = ctx.author();
@@ -130,16 +128,16 @@ pub(crate) async fn add(
 
     let channel_id = ctx.channel_id();
 
-    let reply_context = ReplyContext::new(channel_id, ctx.serenity_context().clone());
-    let watcher_message = match reply_context.send_message_embed("Watching threads", list).await {
-        Ok(m) => m,
-        Err(e) => return Err(anyhow!("Error creating watched message: {}", e).into()),
+    let reply_handle = reply(&ctx, "Watching threads", &list).await?.pop();
+    let watcher_message_id = match reply_handle {
+        Some(handle) => handle.message().await?.id,
+        None => return Err(anyhow!("Failed to create watcher message").into()),
     };
 
     let result = db::add_watcher(
         &data.database,
         user.id.0,
-        watcher_message.id.0,
+        watcher_message_id.0,
         channel_id.0,
         guild_id.0,
         category.as_deref(),
@@ -148,7 +146,7 @@ pub(crate) async fn add(
 
     match result {
         Ok(true) => {
-            ctx.reply_ephemeral("Watcher created", "The requested watcher has been created.").await?;
+            reply_ephemeral(&ctx, "Watcher created", "The requested watcher has been created.").await?;
 
             Ok(())
         },
@@ -163,7 +161,7 @@ pub(crate) async fn add(
 /// Removes a currently active watcher and deletes the watched message.
 #[poise::command(slash_command, guild_only, rename = "tt_unwatch", category = "Watchers")]
 pub(crate) async fn remove(
-    ctx: SlashCommandContext<'_>,
+    ctx: CommandContext<'_>,
     #[description = "The watched message (enter a link or message ID)"] watched_message: Message,
 ) -> CommandResult<()> {
     let data = ctx.data();
@@ -202,9 +200,9 @@ pub(crate) async fn remove(
         user.name, user.id, watched_message.channel_id, watched_message.id
     );
 
-    match db::remove_watcher(database, watcher.id).await {
-        Ok(0) => error!("Watcher should have been present in the database, but was missing when removal was attempted: {:?}", watcher),
-        Ok(_) => {
+    match db::remove_watcher(database, watcher.id).await? {
+        0 => error!("Watcher should have been present in the database, but was missing when removal was attempted: {:?}", watcher),
+        _ => {
             let channel_message = watcher.message();
             let message = message_cache.get_or_else(
                 &channel_message,
@@ -218,10 +216,7 @@ pub(crate) async fn remove(
                 Err(e) => return Err(anyhow!("Unable to locate message {}. Perhaps it was already deleted?", e).into()),
             }
 
-            ctx.reply_ephemeral("Watcher removed", &format!("Watcher with id {} removed successfully.", watcher.id)).await?;
-        },
-        Err(e) => {
-            return Err(anyhow!("Error removing watcher: {}", e).into());
+            reply_ephemeral(&ctx, "Watcher removed", &format!("Watcher with id {} removed successfully.", watcher.id)).await?;
         }
     }
 
