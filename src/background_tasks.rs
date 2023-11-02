@@ -27,20 +27,15 @@ pub(crate) fn run_periodic_shard_tasks(context: Context) {
 ///
 /// - `context` - the Serenity context to delegate to tasks
 /// - `bot` - the bot instance to delegate to tasks
-pub(crate) fn run_periodic_tasks(context: Arc<CacheAndHttp>, data: &Data) {
-    if !data.get_tasks_started_flag() {
-        // Only start these tasks once.
+pub(crate) fn run_periodic_tasks(cache_http: Arc<CacheAndHttp>, data: &Data) {
+    // let database = data.database.clone();
+    // let cache = data.message_cache.clone();
+    // spawn_result_task_loop(WATCHER_UPDATE_INTERVAL, move || {
+    //     update_watchers(Arc::clone(&cache_http), database.clone(), cache.clone())
+    // });
 
-        // let c = Arc::new(context.clone());
-        // let d = Arc::new(data.database.clone());
-        // let m = Arc::new(data.message_cache.clone());
-        // spawn_result_task_loop(WATCHER_UPDATE_INTERVAL, move || {
-        //     update_watchers(Arc::clone(&c), Arc::clone(&d), Arc::clone(&m))
-        // });
-
-        let c = Arc::new(data.message_cache.clone());
-        spawn_task_loop(CACHE_TRIM_INTERVAL, move || purge_expired_cache_entries(Arc::clone(&c)));
-    }
+    let c = Arc::new(data.message_cache.clone());
+    spawn_task_loop(CACHE_TRIM_INTERVAL, move || purge_expired_cache_entries(Arc::clone(&c)));
 }
 
 /// Spawns a task which loops indefinitely, with a wait period between each iteration.
@@ -100,8 +95,8 @@ pub(crate) async fn heartbeat(ctx: Arc<Context>) {
 /// Updates all recorded watchers and edits their referenced messages with the new content.
 pub(crate) async fn update_watchers(
     context: Arc<CacheAndHttp>,
-    database: Arc<Database>,
-    message_cache: Arc<MessageCache>,
+    database: Database,
+    message_cache: MessageCache,
 ) -> anyhow::Result<()> {
     let task_start = Instant::now();
     info!("Watcher update loop started");

@@ -32,7 +32,7 @@ impl<T> Cached<T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct MemoryCache<TKey, TData>
 where
     TKey: PartialEq + Eq + Hash + Clone,
@@ -94,15 +94,5 @@ where
 
         cache.retain(|_, v| !v.expired(CACHE_LIFETIME));
         cache.shrink_to_fit();
-    }
-}
-
-impl<TKey, TValue> Clone for MemoryCache<TKey, TValue>
-where
-    TKey: PartialEq + Eq + Hash + Clone,
-{
-    fn clone(&self) -> Self {
-        let storage = Arc::clone(&self.storage);
-        Self { storage }
     }
 }
