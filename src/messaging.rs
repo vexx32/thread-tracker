@@ -138,7 +138,7 @@ impl HelpMessage {
     pub fn from_category(category: Option<&str>) -> Self {
         match category.map(|s| s.to_ascii_lowercase()).as_deref() {
             //Some("bugs") => Self::Bugs,
-            Some("muses" | "muses") => Self::Muses,
+            Some("muses" ) => Self::Muses,
             Some("threads" | "thread tracking") => Self::Threads,
             Some("todos" | "todo list") => Self::Todos,
             _ => Self::Main,

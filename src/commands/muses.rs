@@ -20,7 +20,6 @@ pub(crate) async fn add(
     #[description = "The name of the muse to add"]
     muse_name: String,
 ) -> CommandResult<()> {
-    const ERROR_TITLE: &str = "Error adding muse";
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => return Err(anyhow!("Unable to manage muses outside of a server").into()),
@@ -43,14 +42,12 @@ pub(crate) async fn add(
         Ok(false) => {
             result.push(" is already known for ").mention(&user.id).push_line(".");
             let error = result.build();
-            ctx.reply_error(ERROR_TITLE, &error).await?;
             Err(anyhow!(error).into())
         },
         Err(e) => {
             error!("Error adding muse for {}: {}", user.name, e);
             errors.push_line(e);
             let error = errors.build();
-            ctx.reply_error(ERROR_TITLE, &error).await?;
             Err(anyhow!(error).into())
         },
     }
@@ -63,7 +60,6 @@ pub(crate) async fn remove(
     #[description = "The name of the muse to remove"]
     muse_name: String,
 ) -> CommandResult<()> {
-    const ERROR_TITLE: &str = "Error removing muse";
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => return Err(anyhow!("Unable to manage muses outside of a server").into()),
@@ -76,24 +72,17 @@ pub(crate) async fn remove(
 
     let mut result = MessageBuilder::new();
     result.push("Muse ").push(Italic + &muse_name);
-    match db::remove_muse(database, guild_id.0, user.id.0, &muse_name).await {
-        Ok(0) => {
+    match db::remove_muse(database, guild_id.0, user.id.0, &muse_name).await? {
+        0 => {
             result.push_line(" was not found.");
             let error = result.build();
-            ctx.reply_error(ERROR_TITLE, &error).await?;
             Err(anyhow!(error).into())
         },
-        Ok(_) => {
+        _ => {
             result.push_line(" was successfully removed.");
             ctx.reply_success("Muse removed", &result.build()).await?;
             Ok(())
-        },
-        Err(e) => {
-            result.push_line(" could not be removed due to an error: ").push_line(e);
-            let error = result.build();
-            ctx.reply_error(ERROR_TITLE, &error).await?;
-            Err(anyhow!(error).into())
-        },
+        }
     }
 }
 
