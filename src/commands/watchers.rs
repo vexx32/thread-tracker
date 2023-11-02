@@ -64,7 +64,7 @@ impl From<db::ThreadWatcherRow> for ThreadWatcher {
 }
 
 /// List current watchers.
-#[poise::command(slash_command, guild_only, rename = "tt_watchers", category = "Watchers", aliases("tt_watching"))]
+#[poise::command(slash_command, guild_only, rename = "tt_watchers", category = "Watchers")]
 pub(crate) async fn list(ctx: SlashCommandContext<'_>) -> CommandResult<()> {
     let user = ctx.author();
     info!("listing watchers for {} ({})", user.name, user.id);

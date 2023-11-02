@@ -71,12 +71,12 @@ pub(crate) async fn enumerate_tracked_channel_ids(
 }
 
 /// Add thread(s) to tracking.
-#[poise::command(slash_command, guild_only, rename = "tt_track", category = "Thread tracking", aliases("tt_add"))]
+#[poise::command(slash_command, guild_only, rename = "tt_track", category = "Thread tracking")]
 pub(crate) async fn add(
     ctx: SlashCommandContext<'_>,
-    #[description = "The thread or channel to track"]
+    #[description = "The threads or channel to track"]
     #[channel_types("NewsThread", "PrivateThread", "PublicThread", "Text")]
-    threads: Vec<GuildChannel>,
+    thread: GuildChannel,
     #[description = "The category to track the thread under"] category: Option<String>,
 ) -> CommandResult<()> {
     const ERROR_TITLE: &str = "Error adding tracked thread";
@@ -94,41 +94,39 @@ pub(crate) async fn add(
     let mut threads_added = MessageBuilder::new();
     let mut errors = MessageBuilder::new();
 
-    for thread in threads {
-        match thread.id.to_channel(ctx).await {
-            Ok(channel) => {
-                info!("Adding tracked thread {} for user `{}` ({})", thread.id, user.name, user.id);
-                cache_last_channel_message(channel.guild().as_ref(), ctx, message_cache).await;
+    match thread.id.to_channel(ctx).await {
+        Ok(channel) => {
+            info!("Adding tracked thread {} for user `{}` ({})", thread.id, user.name, user.id);
+            cache_last_channel_message(channel.guild().as_ref(), ctx, message_cache).await;
 
-                let result = db::add_thread(
-                    database,
-                    guild_id.0,
-                    thread.id.0,
-                    user.id.0,
-                    category.as_deref(),
-                )
-                .await;
-                match result {
-                    Ok(true) => {
-                        data.add_tracked_thread(thread.id).await;
-                        threads_added.push("- ").mention(&thread.id).push_line("")
-                    },
-                    Ok(false) => threads_added
-                        .push("- Skipped ")
-                        .mention(&thread.id)
-                        .push_line(" as it is already being tracked"),
-                    Err(e) => errors
-                        .push("- Failed to register thread ")
-                        .mention(&thread.id)
-                        .push_line_safe(format!(": {}", e)),
-                }
-            },
-            Err(e) => errors
-                .push("- Cannot access channel ")
-                .mention(&thread.id)
-                .push_line_safe(format!(": {}", e)),
-        };
-    }
+            let result = db::add_thread(
+                database,
+                guild_id.0,
+                thread.id.0,
+                user.id.0,
+                category.as_deref(),
+            )
+            .await;
+            match result {
+                Ok(true) => {
+                    data.add_tracked_thread(thread.id).await;
+                    threads_added.push("- ").mention(&thread.id).push_line("")
+                },
+                Ok(false) => threads_added
+                    .push("- Skipped ")
+                    .mention(&thread.id)
+                    .push_line(" as it is already being tracked"),
+                Err(e) => errors
+                    .push("- Failed to register thread ")
+                    .mention(&thread.id)
+                    .push_line_safe(format!(": {}", e)),
+            }
+        },
+        Err(e) => errors
+            .push("- Cannot access channel ")
+            .mention(&thread.id)
+            .push_line_safe(format!(": {}", e)),
+    };
 
     if !errors.0.is_empty() {
         error!("Errors handling thread registration:\n{}", errors);
@@ -153,7 +151,6 @@ pub(crate) async fn add(
     guild_only,
     rename = "tt_category",
     category = "Thread tracking",
-    aliases("tt_setcategory", "tt_cat")
 )]
 pub(crate) async fn set_category(
     ctx: SlashCommandContext<'_>,
@@ -222,7 +219,7 @@ pub(crate) async fn set_category(
 }
 
 /// Remove thread(s) from tracking.
-#[poise::command(slash_command, guild_only, rename = "tt_untrack", category = "Thread tracking", aliases("tt_remove"))]
+#[poise::command(slash_command, guild_only, rename = "tt_untrack", category = "Thread tracking")]
 pub(crate) async fn remove(
     ctx: SlashCommandContext<'_>,
     #[description = "The thread or channel to remove from tracking"]
@@ -309,7 +306,7 @@ pub(crate) async fn remove(
 }
 
 /// Show the list of all tracked threads.
-#[poise::command(slash_command, guild_only, rename = "tt_threads", category = "Thread tracking", aliases("tt_replies"))]
+#[poise::command(slash_command, guild_only, rename = "tt_threads", category = "Thread tracking")]
 pub(crate) async fn send_list(
     ctx: SlashCommandContext<'_>,
     #[description = "Only show threads from this category"] category: Option<String>,
@@ -545,7 +542,7 @@ pub(crate) async fn get_formatted_list(
 
     for name in categories {
         if let Some(n) = name {
-            message.push_line(Bold + Underline + n).push_line("");
+            message.push("### ").push_line(n).push_line("");
         }
 
         if let Some(threads) = threads.get(name) {
@@ -577,7 +574,7 @@ pub(crate) async fn get_formatted_list(
     // Uncategorised todos at the end of the list
     if let Some(todos) = todos.get(&None) {
         if !todos.is_empty() {
-            message.push_line(Bold + Underline + "To Do").push_line("");
+            message.push("## ").push_line("To Do").push_line("");
 
             for todo in todos {
                 todos::push_todo_line(&mut message, todo);

@@ -2,7 +2,7 @@ use std::{
     collections::HashSet,
     result,
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering, AtomicBool},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
         Mutex,
     },
@@ -12,7 +12,6 @@ use std::{
 use cache::MessageCache;
 use commands::threads;
 use db::Database;
-use messaging::ReplyContext;
 use poise::{serenity_prelude::{Command, ShardManager}, FrameworkError};
 use serenity::{
     async_trait,
@@ -30,7 +29,7 @@ use sqlx::{
 };
 use tokio::time::sleep;
 use toml::Table;
-use tracing::{debug, error, info, log::LevelFilter, warn};
+use tracing::{debug, error, info, log::LevelFilter};
 use utils::message_is_command;
 
 use crate::{background_tasks::{run_periodic_tasks, run_periodic_shard_tasks}, consts::DELETE_EMOJI};
@@ -143,8 +142,6 @@ struct Data {
     database: Database,
     /// The total number of guilds the bot is in
     guild_count: AtomicUsize,
-    /// Set once, when the tasks are started, to prevent multiple shards from starting the same tasks.
-    recurring_tasks_started: AtomicBool,
     /// Threadsafe memory cache for messages the bot has sent or looked up
     message_cache: MessageCache,
     /// The current list of tracked threads
@@ -158,16 +155,11 @@ impl Data {
             message_cache: MessageCache::new(),
             tracked_threads: Arc::new(RwLock::new(HashSet::new())),
             guild_count: AtomicUsize::new(0),
-            recurring_tasks_started: AtomicBool::new(false),
         }
     }
 
     fn guilds(&self) -> usize {
         self.guild_count.load(Ordering::SeqCst)
-    }
-
-    fn get_tasks_started_flag(&self) -> bool {
-        self.recurring_tasks_started.swap(true, Ordering::SeqCst)
     }
 
     /// Retrieve the full list of tracked threads from the database to populate the in-memory

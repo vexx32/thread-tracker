@@ -120,7 +120,7 @@ pub(crate) async fn remove(
 }
 
 /// Send the full to do list.
-#[poise::command(slash_command, guild_only, rename = "tt_todolist", category = "Todo list", aliases("tt_todos"))]
+#[poise::command(slash_command, guild_only, rename = "tt_todolist", category = "Todo list")]
 pub(crate) async fn list(
     ctx: SlashCommandContext<'_>,
     #[description = "The category or categories"] category: Vec<String>,
@@ -158,7 +158,7 @@ pub(crate) async fn list(
 
                 for (name, todos) in categories {
                     if let Some(n) = name {
-                        message.push_line(Bold + Underline + n).push_line("");
+                        message.push("## ").push_line(n).push_line("");
                     }
 
                     for item in todos {
