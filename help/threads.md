@@ -13,10 +13,14 @@ __**Change Categories**__
 > **`/tt_category`** `category` `URLs` - Change the category of already-tracked threads. Use `unset` or `none` as the category to remove the category.
 
 __**List**__
-> **`/tt_replies`** _`categories`_ — List tracked threads and to do-list items. Optionally, provide categories to filter the list.
+> **`/tt_threads`** _`categories`_ — List tracked threads and to do-list items. Optionally, provide categories to filter the list.
+> **`/tt_replies`** _`categories`_ — List tracked threads which are awaiting your reply. Optionally, provide categories to filter the list.
 > **`/tt_random`** _`category`_ — Find a random tracked thread that you don't have the last reply in. Optionally, provide a category to filter the choices.
 
 __**Watch**__
-> **`/tt_watch`** _`categories`_ — Similar to `tt_replies`, but also periodically edits the message to update the generated list.
+
+_Note: These commands are currently unavailable as the functionality is bugged._
+
+> **`/tt_watch`** _`categories`_ — Similar to `tt_threads`, but also periodically edits the message to update the generated list.
 > **`/tt_unwatch`** `URL` — Link a watched message to delete it and stop watching.
 > **`/tt_watching`** - List currently active watchers.
