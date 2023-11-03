@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use anyhow::anyhow;
 use rand::Rng;
 use serenity::{
     http::{CacheHttp, Http},
@@ -10,20 +9,21 @@ use serenity::{
 };
 use tracing::{error, info};
 
-
-use super::CommandResult;
 use crate::{
     cache::MessageCache,
     commands::{
         muses,
         todos::{self, Todo},
+        CommandContext,
+        CommandError,
+        CommandResult,
     },
     consts::THREAD_NAME_LENGTH,
     db::{self},
+    messaging::{reply, reply_error},
     utils::*,
     Data,
     Database,
-    CommandContext, messaging::{reply_error, reply},
 };
 
 pub(crate) struct TrackedThread {
@@ -82,7 +82,7 @@ pub(crate) async fn add(
 
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => return Err(anyhow!("Unable to track threads outside of a server").into()),
+        None => return Err(CommandError::new("Unable to track threads outside of a server")),
     };
 
     let user = ctx.author();
@@ -98,14 +98,9 @@ pub(crate) async fn add(
             info!("Adding tracked thread {} for user `{}` ({})", thread.id, user.name, user.id);
             cache_last_channel_message(channel.guild().as_ref(), ctx, message_cache).await;
 
-            let result = db::add_thread(
-                database,
-                guild_id.0,
-                thread.id.0,
-                user.id.0,
-                category.as_deref(),
-            )
-            .await;
+            let result =
+                db::add_thread(database, guild_id.0, thread.id.0, user.id.0, category.as_deref())
+                    .await;
             match result {
                 Ok(true) => {
                     data.add_tracked_thread(thread.id).await;
@@ -145,12 +140,7 @@ pub(crate) async fn add(
 }
 
 /// Change the category of an already tracked thread.
-#[poise::command(
-    slash_command,
-    guild_only,
-    rename = "tt_category",
-    category = "Thread tracking",
-)]
+#[poise::command(slash_command, guild_only, rename = "tt_category", category = "Thread tracking")]
 pub(crate) async fn set_category(
     ctx: CommandContext<'_>,
     #[description = "The thread or channel to update category for"]
@@ -161,7 +151,9 @@ pub(crate) async fn set_category(
     const ERROR_TITLE: &str = "Error updating tracked thread category";
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => return Err(anyhow!("Unable to managed tracked threads outside of a server").into()),
+        None => {
+            return Err(CommandError::new("Unable to managed tracked threads outside of a server"))
+        },
     };
 
     let user = ctx.author();
@@ -231,11 +223,15 @@ pub(crate) async fn remove(
 
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => return Err(anyhow!("Unable to manage tracked threads outside of a server").into()),
+        None => {
+            return Err(CommandError::new("Unable to manage tracked threads outside of a server"))
+        },
     };
 
     if thread.is_none() && category.is_none() {
-        return Err(anyhow!("tt_untrack called with neither thread nor category to remove").into());
+        return Err(CommandError::new(
+            "tt_untrack called with neither thread nor category to remove",
+        ));
     }
 
     let data = ctx.data();
@@ -312,10 +308,12 @@ pub(crate) async fn send_list(
 ) -> CommandResult<()> {
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => return Err(anyhow!("Unable to manage tracked threads outside of a server").into()),
+        None => {
+            return Err(CommandError::new("Unable to manage tracked threads outside of a server"))
+        },
     };
 
-    ctx.defer_ephemeral().await?;
+    ctx.defer().await?;
 
     let title = "Currently tracked threads";
 
@@ -327,7 +325,31 @@ pub(crate) async fn send_list(
     Ok(())
 }
 
-/// Send the list of threads and todos with a custom title.
+/// Show the list of tracked threads currently pending replies.
+#[poise::command(slash_command, guild_only, rename = "tt_replies", category = "Thread tracking")]
+pub(crate) async fn send_pending_list(
+    ctx: CommandContext<'_>,
+    #[description = "Only show threads from this category"] category: Option<String>,
+) -> CommandResult<()> {
+    let guild_id = match ctx.guild_id() {
+        Some(id) => id,
+        None => {
+            return Err(CommandError::new("Unable to manage tracked threads outside of a server"))
+        },
+    };
+
+    ctx.defer().await?;
+
+    let threads_list =
+        get_pending_thread_list(ctx.author(), guild_id, category.as_deref(), ctx.data(), &ctx)
+            .await?;
+
+    reply(&ctx, "Threads awaiting replies", &threads_list).await?;
+
+    Ok(())
+}
+
+/// Get the list of threads and todos.
 ///
 /// ### Arguments
 ///
@@ -335,7 +357,7 @@ pub(crate) async fn send_list(
 /// - `user` - the user which requested the thread list
 /// - `guild_id` - the guild ID the threads are tracked in
 /// - `category` - the category to filter the threads/todos by
-/// - `bot` - the bot instance
+/// - `data` - the contextual data from the command
 /// - `context` - the Serenity context
 pub(crate) async fn get_list(
     user: &User,
@@ -355,7 +377,10 @@ pub(crate) async fn get_list(
         Ok(t) => threads.extend(t),
         Err(e) => {
             error!("Error listing tracked threads for {}: {}", user.name, e);
-            return Err(anyhow!("Error listing tracked threads for {}: {}", user.name, e).into());
+            return Err(CommandError::detailed(
+                format!("Error listing tracked threads for {}", user.name),
+                e,
+            ));
         },
     }
 
@@ -363,7 +388,10 @@ pub(crate) async fn get_list(
         Ok(t) => todos.extend(t),
         Err(e) => {
             error!("Error listing todos for {}: {}", user.name, e);
-            return Err(anyhow!("Error listing todos for {}: {}", user.name, e).into());
+            return Err(CommandError::detailed(
+                format!("Error listing todos for {}", user.name),
+                e,
+            ));
         },
     }
 
@@ -372,7 +400,10 @@ pub(crate) async fn get_list(
         Ok(m) => m,
         Err(e) => {
             error!("Error finding muse list for {}: {}", user.name, e);
-            return Err(anyhow!("Error finding muse list for {}: {}", user.name, e).into());
+            return Err(CommandError::detailed(
+                format!("Error finding muse list for {}", user.name),
+                e,
+            ));
         },
     };
 
@@ -383,13 +414,60 @@ pub(crate) async fn get_list(
             Ok(m) => m,
             Err(e) => {
                 error!("Error collating tracked threads for {}: {}", user.name, e);
-                return Err(
-                    anyhow!("Error collating tracked threads for {}: {}", user.name, e).into()
-                );
+                return Err(CommandError::detailed(
+                    format!("Error collating tracked threads for {}", user.name),
+                    e,
+                ));
             },
         };
 
     Ok(message)
+}
+
+/// Get the list of threads pending reply.
+///
+/// ### Arguments
+///
+/// - `title` - the title to use for the thread list
+/// - `user` - the user which requested the thread list
+/// - `guild_id` - the guild ID the threads are tracked in
+/// - `category` - the category to filter the threads/todos by
+/// - `data` - the contextual data from the command
+/// - `context` - the Serenity context
+pub(crate) async fn get_pending_thread_list(
+    user: &User,
+    guild_id: GuildId,
+    category: Option<&str>,
+    data: &Data,
+    context: &impl CacheHttp,
+) -> CommandResult<String> {
+    info!("Getting pending threads list for {} ({})", user.name, user.id);
+
+    let pending_threads = get_pending_threads(category, user, guild_id, context, data).await?;
+
+    let categorised_threads = partition_into_map(pending_threads, |item| item.1.category.clone());
+
+    let mut message = MessageBuilder::new();
+    for name in categorised_threads.keys() {
+        if let Some(n) = name {
+            message.push("### ").push_line(n).push_line("");
+        }
+
+        if let Some(threads) = categorised_threads.get(name) {
+            for (last_responder, thread) in threads {
+                let link = get_thread_link(thread, None, context).await;
+                message.push("- ").push(link).push(" — ").push_line(Bold + last_responder);
+            }
+        }
+
+        message.push_line("");
+    }
+
+    if message.0.is_empty() {
+        message.push_line("No tracked threads are currently awaiting replies.");
+    }
+
+    Ok(message.build())
 }
 
 /// Select and send a random thread to the user that is awaiting their reply.
@@ -400,9 +478,13 @@ pub(crate) async fn send_random_thread(
 ) -> CommandResult<()> {
     const ERROR_TITLE: &str = "Error fetching tracked threads";
 
+    ctx.defer().await?;
+
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => return Err(anyhow!("Unable to manage tracked threads outside of a server").into()),
+        None => {
+            return Err(CommandError::new("Unable to manage tracked threads outside of a server"))
+        },
     };
 
     let user = ctx.author();
@@ -466,8 +548,35 @@ pub(crate) async fn get_random_thread(
     guild_id: GuildId,
     context: &CommandContext<'_>,
 ) -> CommandResult<Option<(String, TrackedThread)>> {
+    let mut pending_threads =
+        get_pending_threads(category, user, guild_id, context, context.data()).await?;
+
+    if pending_threads.is_empty() {
+        Ok(None)
+    }
+    else {
+        let mut rng = rand::thread_rng();
+        let index = rng.gen_range(0..pending_threads.len());
+        Ok(Some(pending_threads.remove(index)))
+    }
+}
+
+/// Get the list of threads which are pending replies.
+///
+/// ### Arguments
+///
+/// - `category` - constrain the selection to the given category
+/// - `user` - the user to find a random thread for
+/// - `guild_id` - the guild to find a random tracked thread in
+/// - `context` - the Serenity context
+async fn get_pending_threads(
+    category: Option<&str>,
+    user: &User,
+    guild_id: GuildId,
+    context: &impl CacheHttp,
+    data: &Data,
+) -> CommandResult<Vec<(String, TrackedThread)>> {
     let guild_user = GuildUser { user_id: user.id, guild_id };
-    let data = context.data();
     let muses = muses::get_list(&data.database, guild_user.user_id, guild_user.guild_id).await?;
     let mut pending_threads = Vec::new();
 
@@ -484,14 +593,7 @@ pub(crate) async fn get_random_thread(
         }
     }
 
-    if pending_threads.is_empty() {
-        Ok(None)
-    }
-    else {
-        let mut rng = rand::thread_rng();
-        let index = rng.gen_range(0..pending_threads.len());
-        Ok(Some(pending_threads.remove(index)))
-    }
+    Ok(pending_threads)
 }
 
 /// Build a formatted thread and todo list message.
@@ -566,7 +668,7 @@ pub(crate) async fn get_formatted_list(
     // Uncategorised todos at the end of the list
     if let Some(todos) = todos.get(&None) {
         if !todos.is_empty() {
-            message.push("## ").push_line("To Do").push_line("");
+            message.push("### ").push_line("To Do").push_line("");
 
             for todo in todos {
                 todos::push_todo_line(&mut message, todo);

@@ -9,9 +9,12 @@ use std::{
 };
 
 use cache::MessageCache;
-use commands::threads;
+use commands::{threads, CommandError};
 use db::Database;
-use poise::{serenity_prelude::{Command, ShardManager}, FrameworkError};
+use poise::{
+    serenity_prelude::{Command, ShardManager},
+    FrameworkError,
+};
 use serenity::{
     model::{
         channel::Message,
@@ -29,7 +32,11 @@ use toml::Table;
 use tracing::{debug, error, info, log::LevelFilter};
 use utils::message_is_command;
 
-use crate::{background_tasks::{run_periodic_tasks, run_periodic_shard_tasks}, consts::DELETE_EMOJI, messaging::reply_error};
+use crate::{
+    background_tasks::{run_periodic_shard_tasks, run_periodic_tasks},
+    consts::DELETE_EMOJI,
+    messaging::reply_error,
+};
 
 mod background_tasks;
 mod cache;
@@ -39,8 +46,8 @@ mod db;
 mod messaging;
 mod utils;
 
-type CommandError = Box<dyn std::error::Error + Send + Sync>;
-type CommandContext<'a> = poise::Context<'a, Data, CommandError>;
+/// Utility error type to encapsulate any errors.
+type Error = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Debug)]
 struct Data {
@@ -165,12 +172,7 @@ impl Handler {
             shard_manager: &shard_manager,
         };
 
-        poise::dispatch_event(
-            framework_data,
-            ctx,
-            event,
-        )
-        .await;
+        poise::dispatch_event(framework_data, ctx, event).await;
     }
 }
 
@@ -241,7 +243,9 @@ impl EventHandler for Handler {
             if is_tracking_thread {
                 let data = self.data.read().await;
                 debug!("Caching new message from tracked channel {}", message.channel_id);
-                data.message_cache.store((message.channel_id, message.id).into(), message.clone()).await;
+                data.message_cache
+                    .store((message.channel_id, message.id).into(), message.clone())
+                    .await;
             }
         }
 
@@ -255,7 +259,8 @@ impl EventHandler for Handler {
         new: Option<Message>,
         event: MessageUpdateEvent,
     ) {
-        self.forward_to_poise(&ctx, &poise::Event::MessageUpdate { old_if_available, new, event }).await;
+        self.forward_to_poise(&ctx, &poise::Event::MessageUpdate { old_if_available, new, event })
+            .await;
     }
 
     async fn guild_create(&self, ctx: Context, guild: Guild, is_new: bool) {
@@ -301,7 +306,8 @@ impl EventHandler for Handler {
         let result = Command::set_global_application_commands(&ctx, |cmds| {
             *cmds = commands;
             cmds
-        }).await;
+        })
+        .await;
 
         if let Err(e) = result {
             error!("Unable to register commands globally: {}", e);

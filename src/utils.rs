@@ -167,6 +167,8 @@ pub(crate) async fn register_guild_commands<U, E>(commands: &[poise::Command<U, 
         cmds
     }).await;
 
+    let _= guild_id.set_application_commands(ctx, |cmds| cmds).await;
+
     if let Err(e) = result {
         error!("Unable to register commands in guild {}: {}", guild_id, e);
     }

@@ -1,7 +1,9 @@
-use crate::{CommandContext, CommandError, messaging::{HelpMessage, reply}};
-
 use tracing::info;
 
+use crate::{
+    commands::{CommandContext, CommandError},
+    messaging::{reply, HelpMessage},
+};
 
 #[poise::command(slash_command, rename = "tt_help", category = "Help")]
 /// Show the help information summary, or request detailed help for specific commands.
@@ -15,12 +17,21 @@ pub(crate) async fn help(
         reply(&ctx, "Command help", HelpMessage::Main.text()).await?;
     }
     else {
-        let category = ctx.framework().options.commands.iter().filter(|cmd| Some(&cmd.name) == command.as_ref())
+        let category = ctx
+            .framework()
+            .options
+            .commands
+            .iter()
+            .filter(|cmd| Some(&cmd.name) == command.as_ref())
             .map(|cmd| cmd.category)
             .next()
             .flatten();
 
-        info!("fetching help for category '{}' (command: {})", category.unwrap_or("none"), command.as_deref().unwrap_or("none"));
+        info!(
+            "fetching help for category '{}' (command: {})",
+            category.unwrap_or("none"),
+            command.as_deref().unwrap_or("none")
+        );
         let help_message = HelpMessage::from_category(category);
         reply(&ctx, help_message.title(), help_message.text()).await?;
     }

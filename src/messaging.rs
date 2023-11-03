@@ -1,6 +1,6 @@
 use serenity::{utils::Colour, Result};
 
-use crate::{consts::*, utils, CommandContext};
+use crate::{commands::CommandContext, consts::*, utils};
 
 /// Mapping enum to select appropriate help messages for various commands and retrieve the associated text.
 pub(crate) enum HelpMessage {

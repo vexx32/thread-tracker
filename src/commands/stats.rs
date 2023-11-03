@@ -1,13 +1,15 @@
-use serenity::utils::{MessageBuilder, Content};
+use serenity::utils::{Content, MessageBuilder};
 use tracing::info;
 
-use crate::{db, commands::CommandResult, CommandContext, messaging::reply};
+use crate::{
+    commands::{CommandContext, CommandResult},
+    db,
+    messaging::reply,
+};
 
 /// Send the bot's statistics as a reply to the input context
 #[poise::command(prefix_command, dm_only, rename = "stats")]
-pub(crate) async fn send_statistics(
-    ctx: CommandContext<'_>,
-) -> CommandResult<()> {
+pub(crate) async fn send_statistics(ctx: CommandContext<'_>) -> CommandResult<()> {
     let data = ctx.data();
     let stats = db::statistics(&data.database).await?;
 

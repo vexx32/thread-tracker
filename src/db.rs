@@ -3,8 +3,6 @@ mod models;
 pub(crate) use models::*;
 pub(crate) use sqlx::PgPool as Database;
 
-
-
 type Result<T> = std::result::Result<T, sqlx::Error>;
 
 /// Get all entries from the watchers table
@@ -14,7 +12,11 @@ pub(crate) async fn list_watchers(database: &Database) -> Result<Vec<ThreadWatch
         .await
 }
 
-pub(crate) async fn list_current_watchers(database: &Database, user_id: u64, guild_id: u64) -> Result<Vec<ThreadWatcherRow>> {
+pub(crate) async fn list_current_watchers(
+    database: &Database,
+    user_id: u64,
+    guild_id: u64,
+) -> Result<Vec<ThreadWatcherRow>> {
     sqlx::query_as("SELECT id, user_id, message_id, channel_id, guild_id, categories FROM watchers WHERE user_id = $1 AND guild_id = $2")
         .bind(user_id as i64)
         .bind(guild_id as i64)
@@ -185,10 +187,10 @@ pub(crate) async fn get_thread(
 }
 
 /// Get all unique channel_ids from tracked threads (globally)
-pub(crate) async fn get_global_tracked_thread_ids(database: &Database) -> Result<Vec<TrackedThreadId>> {
-    sqlx::query_as("SELECT DISTINCT channel_id FROM threads")
-        .fetch_all(database)
-        .await
+pub(crate) async fn get_global_tracked_thread_ids(
+    database: &Database,
+) -> Result<Vec<TrackedThreadId>> {
+    sqlx::query_as("SELECT DISTINCT channel_id FROM threads").fetch_all(database).await
 }
 
 /// Add an entry to the muses table
@@ -250,13 +252,14 @@ pub(crate) async fn remove_muse(
     user_id: u64,
     muse: &str,
 ) -> Result<u64> {
-    let result =
-        sqlx::query("DELETE FROM muses WHERE lower(muse_name) = lower($1) AND user_id = $2 AND guild_id = $3")
-            .bind(muse)
-            .bind(user_id as i64)
-            .bind(guild_id as i64)
-            .execute(database)
-            .await?;
+    let result = sqlx::query(
+        "DELETE FROM muses WHERE lower(muse_name) = lower($1) AND user_id = $2 AND guild_id = $3",
+    )
+    .bind(muse)
+    .bind(user_id as i64)
+    .bind(guild_id as i64)
+    .execute(database)
+    .await?;
 
     Ok(result.rows_affected())
 }
@@ -334,13 +337,14 @@ pub(crate) async fn remove_todo(
     user_id: u64,
     content: &str,
 ) -> Result<u64> {
-    let result =
-        sqlx::query("DELETE FROM todos WHERE lower(content) = lower($1) AND user_id = $2 AND guild_id = $3")
-            .bind(content)
-            .bind(user_id as i64)
-            .bind(guild_id as i64)
-            .execute(database)
-            .await?;
+    let result = sqlx::query(
+        "DELETE FROM todos WHERE lower(content) = lower($1) AND user_id = $2 AND guild_id = $3",
+    )
+    .bind(content)
+    .bind(user_id as i64)
+    .bind(guild_id as i64)
+    .execute(database)
+    .await?;
 
     Ok(result.rows_affected())
 }

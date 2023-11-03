@@ -2,9 +2,7 @@ use anyhow::anyhow;
 use chrono::Utc;
 use serenity::{
     http::CacheHttp,
-    model::prelude::{
-        *,
-    },
+    model::prelude::*,
     utils::{Colour, EmbedMessageBuilding, MessageBuilder},
 };
 use tokio::time::Instant;
@@ -16,13 +14,13 @@ use crate::{
     commands::{
         muses,
         threads::{self, TrackedThread},
-        todos::{self, Todo},
+        todos::{self, Todo}, CommandContext,
     },
     db,
     messaging::{reply, reply_ephemeral},
     utils::{get_channel_name, ChannelMessage, GuildUser},
+    CommandError,
     Database,
-    CommandContext,
 };
 
 /// Stores all necessary information for updating watched thread lists.
@@ -71,13 +69,13 @@ pub(crate) async fn list(ctx: CommandContext<'_>) -> CommandResult<()> {
 
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => return Err(anyhow!("Unable to manage watchers outside of a server").into()),
+        None => return Err(CommandError::new("Unable to manage watchers outside of a server")),
     };
 
     let watchers: Vec<ThreadWatcher> =
         match db::list_current_watchers(&data.database, user.id.0, guild_id.0).await {
             Ok(results) => results.into_iter().map(|tw| tw.into()).collect(),
-            Err(e) => return Err(anyhow!("Unable to list watchers: {}", e).into()),
+            Err(e) => return Err(CommandError::detailed("Unable to list watchers", e)),
         };
 
     let mut message = MessageBuilder::new();
@@ -110,7 +108,7 @@ pub(crate) async fn add(
 
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
-        None => return Err(anyhow!("Unable to manage watchers outside of a server").into()),
+        None => return Err(CommandError::new("Unable to manage watchers outside of a server")),
     };
 
     let data = ctx.data();
@@ -120,10 +118,12 @@ pub(crate) async fn add(
         .await?;
 
     if list.len() > crate::consts::MAX_EMBED_CHARS {
-        return Err(anyhow!("Watched messages cannot span multiple messages. Please use categories to reduce the threads the new watcher must track.").into());
+        return Err(CommandError::new(
+            "Watched messages cannot span multiple messages. Please use categories to reduce the threads the new watcher must track."
+        ));
     }
     else if list.is_empty() {
-        return Err(anyhow!("Could not create the watcher message.").into());
+        return Err(CommandError::new("Could not create the watcher message."));
     }
 
     let channel_id = ctx.channel_id();
@@ -131,7 +131,7 @@ pub(crate) async fn add(
     let reply_handle = reply(&ctx, "Watching threads", &list).await?.pop();
     let watcher_message_id = match reply_handle {
         Some(handle) => handle.message().await?.id,
-        None => return Err(anyhow!("Failed to create watcher message").into()),
+        None => return Err(CommandError::new("Failed to create watcher message")),
     };
 
     let result = db::add_watcher(
@@ -146,15 +146,15 @@ pub(crate) async fn add(
 
     match result {
         Ok(true) => {
-            reply_ephemeral(&ctx, "Watcher created", "The requested watcher has been created.").await?;
+            reply_ephemeral(&ctx, "Watcher created", "The requested watcher has been created.")
+                .await?;
 
             Ok(())
         },
-        Ok(false) => Err(anyhow!(
-            "Something went wrong storing the watcher information, the data was not recorded."
-        )
-        .into()),
-        Err(e) => Err(anyhow!("Error recording the watcher information: {}", e).into()),
+        Ok(false) => Err(CommandError::new(
+            "Something went wrong storing the watcher information, the data was not recorded.",
+        )),
+        Err(e) => Err(CommandError::detailed("Error recording the watcher information", e)),
     }
 }
 
@@ -174,25 +174,24 @@ pub(crate) async fn remove(
         match db::get_watcher(database, watched_message.channel_id.0, watched_message.id.0).await {
             Ok(Some(w)) => w.into(),
             Ok(None) => {
-                return Err(anyhow!(
+                return Err(CommandError::new(format!(
                     "Could not find a watcher for the target message: `{}`",
                     message_url
-                )
-                .into())
+                )))
             },
             Err(e) => {
-                return Err(anyhow!(
-                    "Error looking up watcher for (channel: {}, message: {}): {}",
-                    watched_message.channel_id,
-                    watched_message.id,
-                    e
-                )
-                .into())
+                return Err(CommandError::detailed(
+                    format!(
+                        "Error looking up watcher for (channel: {}, message: {})",
+                        watched_message.channel_id, watched_message.id,
+                    ),
+                    e,
+                ))
             },
         };
 
     if watcher.user_id != user.id {
-        return Err(anyhow!("You can only remove watchers that you created.").into());
+        return Err(CommandError::new("You can only remove watchers that you created."));
     }
 
     info!(

@@ -6,18 +6,16 @@ use serenity::{
 use tracing::{error, info};
 
 use crate::{
-    commands::CommandResult,
+    commands::{CommandResult, CommandContext},
     db::{self, Database},
-    CommandContext, messaging::reply,
+    messaging::reply,
 };
-
 
 /// Add a new muse to your list.
 #[poise::command(slash_command, guild_only, rename = "tt_addmuse", category = "Muses")]
 pub(crate) async fn add(
     ctx: CommandContext<'_>,
-    #[description = "The name of the muse to add"]
-    muse_name: String,
+    #[description = "The name of the muse to add"] muse_name: String,
 ) -> CommandResult<()> {
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
@@ -56,8 +54,7 @@ pub(crate) async fn add(
 #[poise::command(slash_command, guild_only, rename = "tt_removemuse", category = "Muses")]
 pub(crate) async fn remove(
     ctx: CommandContext<'_>,
-    #[description = "The name of the muse to remove"]
-    muse_name: String,
+    #[description = "The name of the muse to remove"] muse_name: String,
 ) -> CommandResult<()> {
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
@@ -81,7 +78,7 @@ pub(crate) async fn remove(
             result.push_line(" was successfully removed.");
             reply(&ctx, "Muse removed", &result.build()).await?;
             Ok(())
-        }
+        },
     }
 }
 
