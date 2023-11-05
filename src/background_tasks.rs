@@ -28,14 +28,15 @@ pub(crate) fn run_periodic_shard_tasks(context: Context) {
 /// - `context` - the Serenity context to delegate to tasks
 /// - `bot` - the bot instance to delegate to tasks
 pub(crate) fn run_periodic_tasks(cache_http: Arc<CacheAndHttp>, data: &Data) {
-    // let database = data.database.clone();
-    // let cache = data.message_cache.clone();
-    // spawn_result_task_loop(WATCHER_UPDATE_INTERVAL, move || {
-    //     update_watchers(Arc::clone(&cache_http), database.clone(), cache.clone())
-    // });
-
     let c = Arc::new(data.message_cache.clone());
     spawn_task_loop(CACHE_TRIM_INTERVAL, move || purge_expired_cache_entries(Arc::clone(&c)));
+
+    // let database = data.database.clone();
+    // let cache = data.message_cache.clone();
+
+    // spawn_result_task_loop(WATCHER_UPDATE_INTERVAL, move || {
+    //     update_watchers(cache_http.clone(), database.clone(), cache.clone())
+    // });
 }
 
 /// Spawns a task which loops indefinitely, with a wait period between each iteration.
@@ -87,40 +88,41 @@ where
 
 /// Performs a set_presence request to ensure the Activity is set correctly.
 pub(crate) async fn heartbeat(ctx: Arc<Context>) {
-    ctx.set_presence(Some(Activity::listening("to /tt_help")), OnlineStatus::Online)
+    ctx.set_presence(Some(Activity::watching("over your threads (/tt_help)")), OnlineStatus::Online)
         .await;
     info!("heartbeat set_presence request completed for shard ID {}", ctx.shard_id);
 }
 
+async fn get_watcher_batches(database: &Database) -> sqlx::Result<Vec<Vec<ThreadWatcher>>> {
+    let mut vec = Vec::new();
+    let list: Vec<ThreadWatcher> =
+        db::list_watchers(database).await?.into_iter().map(|w| w.into()).collect();
+    let batch_size = list.len() / MAX_WATCHER_UPDATE_TASKS;
+
+    let mut list = list.into_iter().peekable();
+    while list.peek().is_some() {
+        vec.push(list.by_ref().take(batch_size).collect());
+    }
+
+    Ok(vec)
+}
+
 /// Updates all recorded watchers and edits their referenced messages with the new content.
 pub(crate) async fn update_watchers(
-    context: Arc<CacheAndHttp>,
+    cache_http: Arc<CacheAndHttp>,
     database: Database,
     message_cache: MessageCache,
 ) -> anyhow::Result<()> {
     let task_start = Instant::now();
     info!("Watcher update loop started");
 
-    let watchers: Vec<Vec<ThreadWatcher>> = {
-        let mut vec = Vec::new();
-        let list: Vec<ThreadWatcher> =
-            db::list_watchers(&database).await?.into_iter().map(|w| w.into()).collect();
-        let batch_size = list.len() / MAX_WATCHER_UPDATE_TASKS;
-
-        let mut list = list.into_iter().peekable();
-        while list.peek().is_some() {
-            vec.push(list.by_ref().take(batch_size).collect());
-        }
-
-        vec
-    };
-
     let mut stagger_interval = tokio::time::interval(Duration::from_millis(100));
+    let batches = get_watcher_batches(&database).await?;
 
     let mut tasks = JoinSet::new();
-    for watcher_batch in watchers {
+    for watcher_batch in batches {
         stagger_interval.tick().await;
-        let context = context.clone();
+        let context = cache_http.clone();
         let database = database.clone();
         let message_cache = message_cache.clone();
         tasks.spawn(async move {
