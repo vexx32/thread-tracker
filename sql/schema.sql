@@ -29,5 +29,3 @@ CREATE TABLE IF NOT EXISTS todos (
     content varchar(300) NOT NULL,
     category varchar(100) NULL
 );
-
-ALTER TABLE todos ADD COLUMN IF NOT EXISTS category varchar(100);

@@ -358,9 +358,10 @@ async fn main() -> anyhow::Result<()> {
         .as_str()
         .unwrap()
         .parse::<PgConnectOptions>()?
-        .log_statements(LevelFilter::Trace);
+        .log_statements(LevelFilter::Trace)
+        .log_slow_statements(LevelFilter::Warn, Duration::from_secs(5));
     let database = PgPoolOptions::new()
-        .max_connections(10)
+        .max_connections(30)
         .connect_with(options)
         .await
         .context("Could not connect to Postgres database")?;

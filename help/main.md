@@ -3,7 +3,7 @@ Thanks for using Thread Tracker! You can call me Titi. To report bugs or make fe
 **`/tt_help`** - Shows this help message. You can use it if you ever have any questions about the current functionality of Thread Tracker. Specify a command to get more detailed help.
 
 __**Thread Commands**__
-> `/tt_threads`, `/tt_track`, `/tt_untrack`, `/tt_category`, `/tt_watch`, `/tt_unwatch`, `/tt_watching`
+> `/tt_threads`, `/tt_replies`, `/tt_track`, `/tt_untrack`, `/tt_category`, `/tt_watch`, `/tt_unwatch`, `/tt_watching`
 > Track your Discord threads and let you know who last responded to them. Use **`/tt_help tt_threads`** for more information.
 
 __**Muse Commands**__

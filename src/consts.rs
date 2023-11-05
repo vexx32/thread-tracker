@@ -17,5 +17,3 @@ pub(crate) const CACHE_LIFETIME: Duration = Duration::from_secs(6000);
 pub(crate) const MAX_WATCHER_UPDATE_TASKS: usize = 3;
 
 pub(crate) const MAX_EMBED_CHARS: usize = 2048;
-
-//pub(crate) const MAX_EMBEDS_PER_MESSAGE: usize = 10;
