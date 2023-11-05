@@ -6,11 +6,12 @@ Please include as much information and context as you can and are comfortable wi
 - Screenshots or videos of the behaviour or responses (either as attachments to the command message or just links)
 - Any other relevant details you can think of!
 
-> **`tt_bug`** `report text` - Sends a direct bug report, optionally along with screenshots.
+> **`/tt_bug`** `report text` - Sends a direct bug report, optionally along with screenshots.
 
-__**Example**__
+## Example
+
 ```
-tt_bug short description of the error / report title
+/tt_bug short description of the error / report title
 When I do X and then Y and Z, Titi gives me this error
 (attached screenshots)
 ```
