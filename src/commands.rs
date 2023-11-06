@@ -1,3 +1,4 @@
+pub(crate) mod greetings;
 pub(crate) mod help;
 pub(crate) mod muses;
 pub(crate) mod stats;
@@ -59,6 +60,7 @@ impl From<sqlx::Error> for CommandError {
 
 pub(crate) fn list() -> Vec<poise::Command<Data, CommandError>> {
     vec![
+        greetings::hello(),
         help::help(),
         muses::add(),
         muses::remove(),
