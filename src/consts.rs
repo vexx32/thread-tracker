@@ -9,7 +9,12 @@ pub(crate) const DELETE_EMOJI: [&str; 2] = ["🚫", "🗑️"];
 pub(crate) const THREAD_NAME_LENGTH: usize = 32;
 
 pub(crate) const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(295);
+
+#[cfg(not(debug_assertions))]
 pub(crate) const WATCHER_UPDATE_INTERVAL: Duration = Duration::from_secs(900);
+#[cfg(debug_assertions)]
+pub(crate) const WATCHER_UPDATE_INTERVAL: Duration = Duration::from_secs(60);
+
 pub(crate) const CACHE_TRIM_INTERVAL: Duration = Duration::from_secs(2995);
 
 pub(crate) const CACHE_LIFETIME: Duration = Duration::from_secs(6000);

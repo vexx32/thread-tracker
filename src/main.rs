@@ -351,17 +351,18 @@ async fn main() -> anyhow::Result<()> {
 
     // Get the discord token set in `Secrets.toml`
     let token_entry = if cfg!(debug_assertions) { "DISCORD_TOKEN_DEV" } else { "DISCORD_TOKEN" };
+    let db_entry = if cfg!(debug_assertions) { "CONNECTION_STRING_DEV" } else { "CONNECTION_STRING" };
 
     let discord_token = configuration[token_entry].as_str().unwrap();
 
-    let options = configuration["CONNECTION_STRING"]
+    let options = configuration[db_entry]
         .as_str()
         .unwrap()
         .parse::<PgConnectOptions>()?
         .log_statements(LevelFilter::Trace)
         .log_slow_statements(LevelFilter::Warn, Duration::from_secs(5));
     let database = PgPoolOptions::new()
-        .max_connections(30)
+        .max_connections(20)
         .connect_with(options)
         .await
         .context("Could not connect to Postgres database")?;
