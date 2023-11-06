@@ -225,6 +225,15 @@ pub(crate) async fn update_watched_message(
             },
         };
 
+    if let Some(channel) = message.channel(cache_http).await?.guild() {
+        // If this is a thread, there will be thread metadata
+        if let Some(metadata) = channel.thread_metadata {
+            if metadata.archived {
+                channel.edit_thread(cache_http.http(), |thread| thread.archived(false)).await?;
+            }
+        }
+    }
+
     let user = watcher.user();
 
     let mut threads: Vec<TrackedThread> = Vec::new();
