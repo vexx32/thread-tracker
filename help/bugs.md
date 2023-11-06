@@ -8,7 +8,7 @@ Please include as much information and context as you can and are comfortable wi
 
 > **`/tt_bug`** `report text` - Sends a direct bug report, optionally along with screenshots.
 
-## Example
+### Example
 
 ```
 /tt_bug short description of the error / report title

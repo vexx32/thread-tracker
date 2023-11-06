@@ -10,17 +10,17 @@ Parameters in _`italics`_ are optional.
 > **`/tt_untrack`** `thread` - Remove a tracked thread from your list.
 > **`/tt_untrack`** `category` - Remove all tracked threads in the given categories. Use `all` as the category to untrack everything.
 
-## Change Categories
+### Change Categories
 
 > **`/tt_category`** `thread` `category` - Change the category of already-tracked threads. Use `unset` or `none` as the category to remove the category.
 
-## List Threads
+### List Threads
 
 > **`/tt_threads`** _`categories`_ — List tracked threads and to do-list items. Optionally, provide categories to filter the list.
 > **`/tt_replies`** _`categories`_ — List tracked threads which are awaiting your reply. Optionally, provide categories to filter the list.
 > **`/tt_random`** _`category`_ — Find a random tracked thread that you don't have the last reply in. Optionally, provide a category to filter the choices.
 
-## Watchers
+### Watchers
 
 > **`/tt_watch`** _`categories`_ — Similar to `tt_threads`, but also periodically edits the message to update the generated list.
 > **`/tt_unwatch`** `URL` — Link a watched message to delete it and stop watching.

@@ -2,22 +2,22 @@ Thanks for using Thread Tracker! You can call me Titi. To report bugs or make fe
 
 **`/tt_help`** - Shows this help message. You can use it if you ever have any questions about the current functionality of Thread Tracker. Specify a command to get more detailed help.
 
-## Thread Tracking
+### Thread Tracking
 
 > `/tt_threads`, `/tt_replies`, `/tt_track`, `/tt_untrack`, `/tt_category`, `/tt_watch`, `/tt_unwatch`, `/tt_watching`
 > Track your Discord threads and let you know who last responded to them. Use **`/tt_help tt_threads`** for more information.
 
-## Muses
+### Muses
 
 > `/tt_muses`, `/tt_addmuse`, `/tt_removemuse`
 > Register muse names to help Titi determine which replies are yours. Use **`/tt_help tt_muses`** for more information.
 
-## Todo List
+### Todo List
 
 > `/tt_todolist`, `/tt_todo`, `/tt_done`
 > A personal to do list that you can update as needed. Use **`/tt_help tt_todolist`** for more information.
 
-## Bug Reports
+### Bug Reports
 
 Please submit any bug reports to our [Discord](https://discord.gg/DxdufuEkJR).
 
