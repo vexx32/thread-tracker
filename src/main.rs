@@ -351,13 +351,13 @@ async fn main() -> anyhow::Result<()> {
 
     // Get the discord token set in `Secrets.toml`
     let token_entry = if cfg!(debug_assertions) { "DISCORD_TOKEN_DEV" } else { "DISCORD_TOKEN" };
-    let db_entry = if cfg!(debug_assertions) { "CONNECTION_STRING_DEV" } else { "CONNECTION_STRING" };
+    let db_entry =
+        if cfg!(debug_assertions) { "CONNECTION_STRING_DEV" } else { "CONNECTION_STRING" };
 
     let discord_token = configuration[token_entry].as_str().unwrap();
+    let connection_string = configuration[db_entry].as_str().unwrap();
 
-    let options = configuration[db_entry]
-        .as_str()
-        .unwrap()
+    let options = connection_string
         .parse::<PgConnectOptions>()?
         .log_statements(LevelFilter::Trace)
         .log_slow_statements(LevelFilter::Warn, Duration::from_secs(5));
@@ -397,15 +397,6 @@ async fn main() -> anyhow::Result<()> {
                 info!("Execution of {} completed", ctx.invoked_command_name());
             })
         },
-        /// Every command invocation must pass this check to continue execution
-        // command_check: Some(|ctx| {
-        //     Box::pin(async move {
-        //         if ctx.author().id == 123456789 {
-        //             return Ok(false);
-        //         }
-        //         Ok(true)
-        //     })
-        // }),
         /// Enforce command checks even for owners (enforced by default)
         /// Set to true to bypass checks, which is useful for testing
         skip_checks_for_owners: false,

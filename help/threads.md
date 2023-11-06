@@ -22,8 +22,6 @@ Parameters in _`italics`_ are optional.
 
 ## Watchers
 
-_Note: These commands are currently unavailable as the functionality is bugged._
-
 > **`/tt_watch`** _`categories`_ — Similar to `tt_threads`, but also periodically edits the message to update the generated list.
 > **`/tt_unwatch`** `URL` — Link a watched message to delete it and stop watching.
 > **`/tt_watching`** - List currently active watchers.

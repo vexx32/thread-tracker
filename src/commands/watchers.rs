@@ -11,53 +11,13 @@ use tracing::{error, info, warn};
 use super::CommandResult;
 use crate::{
     cache::MessageCache,
-    commands::{
-        muses,
-        threads::{self, TrackedThread},
-        todos::{self, Todo}, CommandContext,
-    },
-    db,
+    commands::{muses, threads, todos, CommandContext},
+    db::{self, ThreadWatcher, Todo, TrackedThread},
     messaging::{reply, reply_ephemeral},
-    utils::{get_channel_name, ChannelMessage, GuildUser},
+    utils::get_channel_name,
     CommandError,
     Database,
 };
-
-/// Stores all necessary information for updating watched thread lists.
-#[derive(Debug)]
-pub(crate) struct ThreadWatcher {
-    pub message_id: MessageId,
-    pub channel_id: ChannelId,
-    pub guild_id: GuildId,
-    pub user_id: UserId,
-    pub id: i32,
-    pub categories: Option<String>,
-}
-
-impl ThreadWatcher {
-    /// Get the guild and user for this thread watcher.
-    pub fn user(&self) -> GuildUser {
-        self.into()
-    }
-
-    /// Get the channel and message for this thread watcher.
-    pub fn message(&self) -> ChannelMessage {
-        (self.channel_id, self.message_id).into()
-    }
-}
-
-impl From<db::ThreadWatcherRow> for ThreadWatcher {
-    fn from(watcher: db::ThreadWatcherRow) -> Self {
-        Self {
-            channel_id: ChannelId(watcher.channel_id as u64),
-            message_id: MessageId(watcher.message_id as u64),
-            guild_id: GuildId(watcher.guild_id as u64),
-            user_id: UserId(watcher.user_id as u64),
-            id: watcher.id,
-            categories: watcher.categories,
-        }
-    }
-}
 
 /// List current watchers.
 #[poise::command(slash_command, guild_only, rename = "tt_watchers", category = "Watchers")]
@@ -74,7 +34,7 @@ pub(crate) async fn list(ctx: CommandContext<'_>) -> CommandResult<()> {
 
     let watchers: Vec<ThreadWatcher> =
         match db::list_current_watchers(&data.database, user.id.0, guild_id.0).await {
-            Ok(results) => results.into_iter().map(|tw| tw.into()).collect(),
+            Ok(results) => results,
             Err(e) => return Err(CommandError::detailed("Unable to list watchers", e)),
         };
 
@@ -83,7 +43,9 @@ pub(crate) async fn list(ctx: CommandContext<'_>) -> CommandResult<()> {
     for watcher in watchers {
         let url = format!(
             "https://discord.com/channels/{}/{}/{}",
-            watcher.guild_id, watcher.channel_id, watcher.message_id
+            watcher.guild_id,
+            watcher.channel_id,
+            watcher.message_id
         );
         message
             .push_quote("- Categories: ")
@@ -172,7 +134,7 @@ pub(crate) async fn remove(
 
     let watcher: ThreadWatcher =
         match db::get_watcher(database, watched_message.channel_id.0, watched_message.id.0).await {
-            Ok(Some(w)) => w.into(),
+            Ok(Some(w)) => w,
             Ok(None) => {
                 return Err(CommandError::new(format!(
                     "Could not find a watcher for the target message: `{}`",
@@ -190,7 +152,7 @@ pub(crate) async fn remove(
             },
         };
 
-    if watcher.user_id != user.id {
+    if watcher.user_id() != user.id {
         return Err(CommandError::new("You can only remove watchers that you created."));
     }
 
@@ -232,17 +194,20 @@ pub(crate) async fn update_watched_message(
     let start_time = Instant::now();
 
     let mut message =
-        match cache_http.http().get_message(watcher.channel_id.0, watcher.message_id.0).await {
+        match cache_http.http().get_message(watcher.channel_id, watcher.message_id).await {
             Ok(m) => m,
             Err(e) => {
-                let channel_name = get_channel_name(watcher.channel_id, cache_http)
+                let channel_name = get_channel_name(watcher.channel_id(), cache_http)
                     .await
                     .unwrap_or_else(|| "<unavailable channel>".to_owned());
 
                 if cfg!(debug_assertions) {
                     warn!(
                         "could not find message {} in channel {} for watcher {}: {}.",
-                        watcher.message_id, channel_name, watcher.id, e
+                        watcher.message_id,
+                        channel_name,
+                        watcher.id,
+                        e
                     );
                 }
                 else {

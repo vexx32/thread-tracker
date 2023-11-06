@@ -22,7 +22,7 @@ pub(crate) async fn send_statistics(ctx: CommandContext<'_>) -> CommandResult<()
     write_stats_line(&mut message, "Threads (Total)", stats.threads_total);
     write_stats_line(&mut message, "Muses", stats.muses);
     write_stats_line(&mut message, "To Dos", stats.todos);
-    // write_stats_line(&mut message, "Watchers", stats.watchers);
+    write_stats_line(&mut message, "Watchers", stats.watchers);
 
     let user = ctx.author();
     info!("sending bot statistics to {} ({})", &user.name, user.id);

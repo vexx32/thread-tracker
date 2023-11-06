@@ -5,10 +5,9 @@ use serenity::{
     model::prelude::*,
     prelude::*,
 };
+use tracing::{error, info};
 
-use tracing::{info, error};
-
-use crate::commands::watchers::ThreadWatcher;
+use crate::db::ThreadWatcher;
 
 /// Wrapper struct to simplify passing around user/guild ID pair.
 pub(crate) struct GuildUser {
@@ -18,7 +17,7 @@ pub(crate) struct GuildUser {
 
 impl From<&ThreadWatcher> for GuildUser {
     fn from(value: &ThreadWatcher) -> Self {
-        Self { user_id: value.user_id, guild_id: value.guild_id }
+        Self { user_id: value.user_id(), guild_id: value.guild_id() }
     }
 }
 
@@ -150,22 +149,34 @@ pub(crate) fn split_into_chunks(s: &str, max_chunk_length: usize) -> Vec<String>
     chunks
 }
 
-pub(crate) async fn delete_message(message: &Message, context: &impl CacheHttp, data: &crate::Data) {
+pub(crate) async fn delete_message(
+    message: &Message,
+    context: &impl CacheHttp,
+    data: &crate::Data,
+) {
     if let Err(e) = message.delete(context).await {
         error!("Unable to delete message with ID {:?}: {}", message.id, e);
     }
     else {
         info!("Message deleted successfully!");
-        data.message_cache.remove(&ChannelMessage { message_id: message.id, channel_id: message.channel_id }).await;
+        data.message_cache
+            .remove(&ChannelMessage { message_id: message.id, channel_id: message.channel_id })
+            .await;
     }
 }
 
-pub(crate) async fn register_guild_commands<U, E>(commands: &[poise::Command<U, E>], guild_id: GuildId, ctx: &impl AsRef<Http>) {
+pub(crate) async fn register_guild_commands<U, E>(
+    commands: &[poise::Command<U, E>],
+    guild_id: GuildId,
+    ctx: &impl AsRef<Http>,
+) {
     let commands = poise::builtins::create_application_commands(commands);
-    let result = guild_id.set_application_commands(ctx, |cmds| {
-        *cmds = commands;
-        cmds
-    }).await;
+    let result = guild_id
+        .set_application_commands(ctx, |cmds| {
+            *cmds = commands;
+            cmds
+        })
+        .await;
 
     if let Err(e) = result {
         error!("Unable to register commands in guild {}: {}", guild_id, e);

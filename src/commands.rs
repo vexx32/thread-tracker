@@ -73,8 +73,8 @@ pub(crate) fn list() -> Vec<poise::Command<Data, CommandError>> {
         todos::add(),
         todos::remove(),
         todos::list(),
-        // watchers::add(),
-        // watchers::remove(),
-        // watchers::list(),
+        watchers::add(),
+        watchers::remove(),
+        watchers::list(),
     ]
 }

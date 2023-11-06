@@ -6,7 +6,7 @@ pub(crate) use sqlx::PgPool as Database;
 type Result<T> = std::result::Result<T, sqlx::Error>;
 
 /// Get all entries from the watchers table
-pub(crate) async fn list_watchers(database: &Database) -> Result<Vec<ThreadWatcherRow>> {
+pub(crate) async fn list_watchers(database: &Database) -> Result<Vec<ThreadWatcher>> {
     sqlx::query_as("SELECT id, user_id, message_id, channel_id, guild_id, categories FROM watchers")
         .fetch_all(database)
         .await
@@ -16,7 +16,7 @@ pub(crate) async fn list_current_watchers(
     database: &Database,
     user_id: u64,
     guild_id: u64,
-) -> Result<Vec<ThreadWatcherRow>> {
+) -> Result<Vec<ThreadWatcher>> {
     sqlx::query_as("SELECT id, user_id, message_id, channel_id, guild_id, categories FROM watchers WHERE user_id = $1 AND guild_id = $2")
         .bind(user_id as i64)
         .bind(guild_id as i64)
@@ -29,7 +29,7 @@ pub(crate) async fn get_watcher(
     database: &Database,
     channel_id: u64,
     message_id: u64,
-) -> Result<Option<ThreadWatcherRow>> {
+) -> Result<Option<ThreadWatcher>> {
     sqlx::query_as("SELECT id, user_id, message_id, channel_id, guild_id, categories FROM watchers WHERE channel_id = $1 AND message_id = $2")
         .bind(channel_id as i64)
         .bind(message_id as i64)
@@ -158,7 +158,7 @@ pub(crate) async fn list_threads(
     guild_id: u64,
     user_id: u64,
     category: Option<&str>,
-) -> Result<Vec<TrackedThreadRow>> {
+) -> Result<Vec<TrackedThread>> {
     let query = match category {
         Some(c) => sqlx::query_as("SELECT channel_id, category, guild_id, id FROM threads WHERE user_id = $1 AND guild_id = $2 AND lower(category) = lower($3) ORDER BY id")
             .bind(user_id as i64)
@@ -178,7 +178,7 @@ pub(crate) async fn get_thread(
     guild_id: u64,
     user_id: u64,
     channel_id: u64,
-) -> Result<Option<TrackedThreadRow>> {
+) -> Result<Option<TrackedThread>> {
     sqlx::query_as("SELECT channel_id, category, guild_id, id FROM threads WHERE user_id = $1 AND channel_id = $2 AND guild_id = $3 ORDER BY id")
         .bind(user_id as i64)
         .bind(channel_id as i64)
@@ -221,7 +221,7 @@ pub(crate) async fn get_muse(
     guild_id: u64,
     user_id: u64,
     muse: &str,
-) -> Result<Option<MuseRow>> {
+) -> Result<Option<Muse>> {
     sqlx::query_as(
         "SELECT id, muse_name FROM muses WHERE user_id = $1 AND guild_id = $2 AND lower(muse_name) = lower($3)",
     )
@@ -237,7 +237,7 @@ pub(crate) async fn list_muses(
     database: &Database,
     guild_id: u64,
     user_id: u64,
-) -> Result<Vec<MuseRow>> {
+) -> Result<Vec<Muse>> {
     sqlx::query_as("SELECT id, muse_name FROM muses WHERE user_id = $1 AND guild_id = $2")
         .bind(user_id as i64)
         .bind(guild_id as i64)
@@ -306,7 +306,7 @@ pub(crate) async fn get_todo(
     guild_id: u64,
     user_id: u64,
     content: &str,
-) -> Result<Option<TodoRow>> {
+) -> Result<Option<Todo>> {
     sqlx::query_as("SELECT id, content, category FROM todos WHERE user_id = $1 AND guild_id = $2 AND lower(content) = lower($3)")
         .bind(user_id as i64)
         .bind(guild_id as i64)
@@ -320,7 +320,7 @@ pub(crate) async fn list_todos(
     guild_id: u64,
     user_id: u64,
     category: Option<&str>,
-) -> Result<Vec<TodoRow>> {
+) -> Result<Vec<Todo>> {
     let query = match category {
         Some(cat) => sqlx::query_as("SELECT id, content, category FROM todos WHERE lower(category) = lower($1) AND user_id = $2 AND guild_id = $3")
             .bind(cat),

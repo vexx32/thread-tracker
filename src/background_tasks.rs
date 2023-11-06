@@ -11,9 +11,10 @@ use tracing::{error, info};
 
 use crate::{
     cache::MessageCache,
-    commands::watchers::{self, ThreadWatcher},
+    commands::watchers,
     consts::*,
-    db::{self, Database}, Data,
+    db::{self, Database, ThreadWatcher},
+    Data,
 };
 
 pub(crate) fn run_periodic_shard_tasks(context: Context) {
@@ -31,12 +32,12 @@ pub(crate) fn run_periodic_tasks(cache_http: Arc<CacheAndHttp>, data: &Data) {
     let c = Arc::new(data.message_cache.clone());
     spawn_task_loop(CACHE_TRIM_INTERVAL, move || purge_expired_cache_entries(Arc::clone(&c)));
 
-    // let database = data.database.clone();
-    // let cache = data.message_cache.clone();
+    let database = data.database.clone();
+    let cache = data.message_cache.clone();
 
-    // spawn_result_task_loop(WATCHER_UPDATE_INTERVAL, move || {
-    //     update_watchers(cache_http.clone(), database.clone(), cache.clone())
-    // });
+    spawn_result_task_loop(WATCHER_UPDATE_INTERVAL, move || {
+        update_watchers(cache_http.clone(), database.clone(), cache.clone())
+    });
 }
 
 /// Spawns a task which loops indefinitely, with a wait period between each iteration.
@@ -88,15 +89,17 @@ where
 
 /// Performs a set_presence request to ensure the Activity is set correctly.
 pub(crate) async fn heartbeat(ctx: Arc<Context>) {
-    ctx.set_presence(Some(Activity::watching("over your threads (/tt_help)")), OnlineStatus::Online)
-        .await;
+    ctx.set_presence(
+        Some(Activity::watching("over your threads (/tt_help)")),
+        OnlineStatus::Online,
+    )
+    .await;
     info!("heartbeat set_presence request completed for shard ID {}", ctx.shard_id);
 }
 
 async fn get_watcher_batches(database: &Database) -> sqlx::Result<Vec<Vec<ThreadWatcher>>> {
     let mut vec = Vec::new();
-    let list: Vec<ThreadWatcher> =
-        db::list_watchers(database).await?.into_iter().map(|w| w.into()).collect();
+    let list: Vec<ThreadWatcher> = db::list_watchers(database).await?;
     let batch_size = list.len() / MAX_WATCHER_UPDATE_TASKS;
 
     let mut list = list.into_iter().peekable();

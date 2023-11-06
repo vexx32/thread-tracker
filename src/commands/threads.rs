@@ -11,36 +11,14 @@ use tracing::{error, info};
 
 use crate::{
     cache::MessageCache,
-    commands::{
-        muses,
-        todos::{self, Todo},
-        CommandContext,
-        CommandError,
-        CommandResult,
-    },
+    commands::{muses, todos, CommandContext, CommandError, CommandResult},
     consts::THREAD_NAME_LENGTH,
-    db::{self},
+    db::{self, Todo, TrackedThread},
     messaging::{reply, reply_error},
     utils::*,
     Data,
     Database,
 };
-
-pub(crate) struct TrackedThread {
-    pub channel_id: ChannelId,
-    pub category: Option<String>,
-    pub guild_id: GuildId,
-}
-
-impl From<db::TrackedThreadRow> for TrackedThread {
-    fn from(thread: db::TrackedThreadRow) -> Self {
-        Self {
-            channel_id: ChannelId(thread.channel_id as u64),
-            category: thread.category,
-            guild_id: GuildId(thread.guild_id as u64),
-        }
-    }
-}
 
 /// Get an iterator for the entries from the threads table for the given user.
 ///
@@ -54,10 +32,7 @@ pub(crate) async fn enumerate(
     user: &GuildUser,
     category: Option<&str>,
 ) -> anyhow::Result<impl Iterator<Item = TrackedThread>> {
-    Ok(db::list_threads(database, user.guild_id.0, user.user_id.0, category)
-        .await?
-        .into_iter()
-        .map(|t| t.into()))
+    Ok(db::list_threads(database, user.guild_id.0, user.user_id.0, category).await?.into_iter())
 }
 
 pub(crate) async fn enumerate_tracked_channel_ids(
@@ -694,7 +669,7 @@ async fn get_last_responder(
     context: impl CacheHttp,
     message_cache: &MessageCache,
 ) -> Option<User> {
-    match context.http().get_channel(thread.channel_id.into()).await {
+    match context.http().get_channel(thread.channel_id).await {
         Ok(Channel::Guild(channel)) => {
             let last_message = if let Some(last_message_id) = channel.last_message_id {
                 let channel_message = (last_message_id, channel.id).into();
@@ -753,13 +728,13 @@ async fn push_thread_line<'a>(
     let last_message_author = get_last_responder(thread, context, message_cache).await;
 
     let link =
-        get_thread_link(thread, guild_threads.get(&thread.channel_id).cloned(), context).await;
+        get_thread_link(thread, guild_threads.get(&thread.channel_id()).cloned(), context).await;
     // Thread entries in blockquotes
     message.push("- ").push(link).push(" — ");
 
     match last_message_author {
         Some(user) => {
-            let last_author_name = get_nick_or_name(&user, thread.guild_id, context).await;
+            let last_author_name = get_nick_or_name(&user, thread.guild_id(), context).await;
             if user.id == user_id || muses.contains(&last_author_name) {
                 message.push_line(last_author_name)
             }
@@ -791,7 +766,7 @@ async fn get_thread_link(
                 format!("https://discord.com/channels/{}/{}", thread.guild_id, thread.channel_id),
             )
         },
-        None => link.push(thread.channel_id.mention()),
+        None => link.push(thread.channel_id().mention()),
     };
 
     link
@@ -811,7 +786,7 @@ fn trim_string(name: &str, max_length: usize) -> String {
 /// Attempt to get the thread name from the Discord API
 async fn get_thread_name(thread: &TrackedThread, cache_http: impl CacheHttp) -> Option<String> {
     let name = if let Some(cache) = cache_http.cache() {
-        thread.channel_id.name(cache).await
+        thread.channel_id().name(cache).await
     }
     else {
         None
@@ -821,7 +796,7 @@ async fn get_thread_name(thread: &TrackedThread, cache_http: impl CacheHttp) -> 
         Some(n)
     }
     else {
-        get_channel_name(thread.channel_id, cache_http).await
+        get_channel_name(thread.channel_id(), cache_http).await
     }
 }
 

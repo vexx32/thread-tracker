@@ -7,24 +7,11 @@ use tracing::{error, info};
 use super::CommandResult;
 use crate::{
     commands::CommandContext,
-    db::{self},
+    db::{self, Todo},
     messaging::reply,
     utils::*,
     Database,
 };
-
-/// To do list entry from the database.
-pub(crate) struct Todo {
-    pub content: String,
-    pub category: Option<String>,
-}
-
-impl From<db::TodoRow> for Todo {
-    fn from(value: db::TodoRow) -> Self {
-        Self { content: value.content, category: value.category }
-    }
-}
-
 /// Add a new to do list entry.
 #[poise::command(slash_command, guild_only, rename = "tt_todo", category = "Todo list")]
 pub(crate) async fn add(
@@ -223,8 +210,7 @@ pub(crate) async fn enumerate(
 ) -> anyhow::Result<impl Iterator<Item = Todo>> {
     Ok(db::list_todos(database, user.guild_id.0, user.user_id.0, category)
         .await?
-        .into_iter()
-        .map(|t| t.into()))
+        .into_iter())
 }
 
 /// Append a line to the message builder containing the to do list item's text.
