@@ -32,12 +32,12 @@ pub(crate) fn run_periodic_tasks(cache_http: Arc<CacheAndHttp>, data: &Data) {
     let c = Arc::new(data.message_cache.clone());
     spawn_task_loop(CACHE_TRIM_INTERVAL, move || purge_expired_cache_entries(Arc::clone(&c)));
 
-    let database = data.database.clone();
-    let cache = data.message_cache.clone();
+    // let database = data.database.clone();
+    // let cache = data.message_cache.clone();
 
-    spawn_result_task_loop(WATCHER_UPDATE_INTERVAL, move || {
-        update_watchers(cache_http.clone(), database.clone(), cache.clone())
-    });
+    // spawn_result_task_loop(WATCHER_UPDATE_INTERVAL, move || {
+    //     update_watchers(cache_http.clone(), database.clone(), cache.clone())
+    // });
 }
 
 /// Spawns a task which loops indefinitely, with a wait period between each iteration.
