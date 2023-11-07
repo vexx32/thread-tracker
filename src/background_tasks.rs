@@ -2,7 +2,7 @@ use std::{
     fmt::Display,
     future::Future,
     sync::Arc,
-    time::{Duration, Instant},
+    time::{Duration, Instant}, cmp,
 };
 
 use serenity::{model::prelude::*, prelude::*, CacheAndHttp};
@@ -32,12 +32,12 @@ pub(crate) fn run_periodic_tasks(cache_http: Arc<CacheAndHttp>, data: &Data) {
     let c = Arc::new(data.message_cache.clone());
     spawn_task_loop(CACHE_TRIM_INTERVAL, move || purge_expired_cache_entries(Arc::clone(&c)));
 
-    // let database = data.database.clone();
-    // let cache = data.message_cache.clone();
+    let database = data.database.clone();
+    let cache = data.message_cache.clone();
 
-    // spawn_result_task_loop(WATCHER_UPDATE_INTERVAL, move || {
-    //     update_watchers(cache_http.clone(), database.clone(), cache.clone())
-    // });
+    spawn_result_task_loop(WATCHER_UPDATE_INTERVAL, move || {
+        update_watchers(cache_http.clone(), database.clone(), cache.clone())
+    });
 }
 
 /// Spawns a task which loops indefinitely, with a wait period between each iteration.
@@ -98,16 +98,23 @@ pub(crate) async fn heartbeat(ctx: Arc<Context>) {
 }
 
 async fn get_watcher_batches(database: &Database) -> sqlx::Result<Vec<Vec<ThreadWatcher>>> {
-    let mut vec = Vec::new();
     let list: Vec<ThreadWatcher> = db::list_watchers(database).await?;
-    let batch_size = list.len() / MAX_WATCHER_UPDATE_TASKS;
+    let batch_size = cmp::min(10, list.len() / MAX_WATCHER_UPDATE_TASKS);
 
-    let mut list = list.into_iter().peekable();
-    while list.peek().is_some() {
-        vec.push(list.by_ref().take(batch_size).collect());
+    let mut result = Vec::new();
+    let mut chunk  = Vec::new();
+    for watcher in list {
+        if chunk.len() >= batch_size {
+            result.push(chunk);
+            chunk = Vec::new();
+        }
+
+        chunk.push(watcher);
     }
 
-    Ok(vec)
+    result.push(chunk);
+
+    Ok(result)
 }
 
 /// Updates all recorded watchers and edits their referenced messages with the new content.
