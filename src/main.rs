@@ -232,7 +232,7 @@ impl EventHandler for Handler {
 
     async fn message(&self, context: Context, message: Message) {
         let user_id = message.author.id;
-        if Some(user_id) == self.user() {
+        if Some(user_id) == self.user() && cfg!(not(debug_assertions)) {
             return;
         }
 
@@ -246,6 +246,8 @@ impl EventHandler for Handler {
                 data.message_cache
                     .store((message.channel_id, message.id).into(), message.clone())
                     .await;
+
+                background_tasks::notify_thread_subscribers(&context, &data.database, &message);
             }
         }
 
@@ -413,10 +415,12 @@ async fn main() -> anyhow::Result<()> {
         | GatewayIntents::DIRECT_MESSAGES
         | GatewayIntents::GUILDS;
 
-    // TODO:
-    // if let Err(e) = bot.update_tracked_threads().await {
-    //     return Err(anyhow!(e));
-    // }
+    // Just log result from here, we just want a semi-consistent initial state for the tracked threads.
+    info!("Retrieving currently tracked threads");
+    if let Err(e) = handler.data.read().await.update_tracked_threads().await {
+        error!("Error populating currently tracked threads: {}", e);
+    }
+
     let handler = std::sync::Arc::new(handler);
     let mut client =
         Client::builder(discord_token, intents).event_handler_arc(Arc::clone(&handler)).await?;

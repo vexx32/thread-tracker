@@ -25,3 +25,8 @@ Parameters in _`italics`_ are optional.
 > **`/tt_watch`** _`categories`_ — Similar to `tt_threads`, but also periodically edits the message to update the generated list.
 > **`/tt_unwatch`** `URL` — Link a watched message to delete it and stop watching.
 > **`/tt_watching`** - List currently active watchers.
+
+### Notifications
+
+> **`/tt_notify on`** - Turn on DM notifications for replies to your threads. Works similar to `/tt_replies`; you won't be notified for your own or your muses' responses to a thread.
+> **`/tt_notify off`** - Turn off DM notifications for replies to your threads.

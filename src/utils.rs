@@ -70,20 +70,31 @@ where
     map
 }
 
-/// If the given string starts with `tt_` or `tt?` (case-insensitive), returns true.
+/// If the given string starts with `tt!` or `tt?` (case-insensitive), returns true.
 pub(crate) fn message_is_command(content: &str) -> bool {
     let prefix: String = content.chars().take(3).flat_map(|c| c.to_lowercase()).collect();
-    prefix == "tt_" || prefix == "tt?"
+    prefix == "tt!" || prefix == "tt?"
 }
 
 /// Trim the given string to the maximum length in characters.
-pub(crate) fn substring(name: &str, max_length: usize) -> &str {
-    if name.chars().count() > max_length {
-        let (cutoff, _) = name.char_indices().nth(max_length - 1).unwrap();
-        name[0..cutoff].trim()
+pub(crate) fn substring(string: &str, max_length: usize) -> &str {
+    if string.chars().count() > max_length {
+        let (cutoff, _) = string.char_indices().nth(max_length - 1).unwrap();
+        string[0..cutoff].trim()
     }
     else {
-        name
+        string
+    }
+}
+
+/// Trim the given string to the max length in characters, appending ellipsis if it was trimmed.
+pub(crate) fn truncate_string(string: &str, max_length: usize) -> String {
+    let substring = substring(string, max_length - 1);
+    if substring.len() != string.len() {
+        substring.to_owned() + "\u{2026}"
+    }
+    else {
+        string.to_owned()
     }
 }
 

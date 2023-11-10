@@ -1,8 +1,9 @@
 use std::{
+    cmp,
     fmt::Display,
     future::Future,
     sync::Arc,
-    time::{Duration, Instant}, cmp,
+    time::{Duration, Instant},
 };
 
 use serenity::{model::prelude::*, prelude::*, CacheAndHttp};
@@ -11,11 +12,15 @@ use tracing::{error, info};
 
 use crate::{
     cache::MessageCache,
-    commands::watchers,
+    commands::{threads::send_reply_notification, watchers},
     consts::*,
     db::{self, Database, ThreadWatcher},
     Data,
 };
+
+pub(crate) fn notify_thread_subscribers(context: &Context, database: &Database, message: &Message) {
+    tokio::spawn(send_reply_notification(message.clone(), database.clone(), context.clone()));
+}
 
 pub(crate) fn run_periodic_shard_tasks(context: Context) {
     let ctx = Arc::new(context);
@@ -102,7 +107,7 @@ async fn get_watcher_batches(database: &Database) -> sqlx::Result<Vec<Vec<Thread
     let batch_size = cmp::min(10, list.len() / MAX_WATCHER_UPDATE_TASKS);
 
     let mut result = Vec::new();
-    let mut chunk  = Vec::new();
+    let mut chunk = Vec::new();
     for watcher in list {
         if chunk.len() >= batch_size {
             result.push(chunk);

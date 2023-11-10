@@ -29,6 +29,18 @@ pub(crate) struct TrackedThreadId {
     pub channel_id: i64,
 }
 
+#[derive(FromRow)]
+pub(crate) struct TrackedThreadUser {
+    #[sqlx(try_from = "i64")]
+    pub user_id: u64,
+}
+
+impl Into<UserId> for TrackedThreadUser {
+    fn into(self) -> UserId {
+        self.user_id.into()
+    }
+}
+
 #[derive(Debug, FromRow)]
 pub(crate) struct ThreadWatcher {
     pub id: i32,
@@ -95,4 +107,17 @@ pub(crate) struct Statistics {
     pub muses: i64,
     pub todos: i64,
     pub watchers: i64,
+}
+
+#[derive(FromRow)]
+pub(crate) struct Subscription {
+    pub id: i32,
+    #[sqlx(try_from = "i64")]
+    pub user_id: u64,
+}
+
+impl Subscription {
+    pub(crate) fn user_id(&self) -> UserId {
+        self.user_id.into()
+    }
 }

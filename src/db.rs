@@ -1,9 +1,60 @@
 mod models;
 
 pub(crate) use models::*;
+use poise::serenity_prelude::UserId;
+use serenity::futures::channel::oneshot::channel;
 pub(crate) use sqlx::PgPool as Database;
 
 type Result<T> = std::result::Result<T, sqlx::Error>;
+
+/// Store an entry in the Subscriptions table
+pub(crate) async fn add_subscriber<U>(database: &Database, user_id: U) -> Result<bool>
+where
+    U: Into<u64> + Copy,
+{
+    match get_subscriber(database, user_id).await? {
+        Some(_) => Ok(false),
+        None => {
+            let result = sqlx::query("INSERT INTO subscriptions (user_id) VALUES ($1)")
+                .bind(user_id.into() as i64)
+                .execute(database)
+                .await?;
+
+            Ok(result.rows_affected() > 0)
+        },
+    }
+}
+
+pub(crate) async fn get_subscriber<U>(
+    database: &Database,
+    user_id: U,
+) -> Result<Option<Subscription>>
+where
+    U: Into<u64> + Copy,
+{
+    sqlx::query_as("SELECT id, user_id FROM subscriptions WHERE user_id = $1")
+        .bind(user_id.into() as i64)
+        .fetch_optional(database)
+        .await
+}
+
+pub(crate) async fn list_subscribers(database: &Database) -> Result<Vec<Subscription>> {
+    sqlx::query_as("SELECT id, user_id FROM subscriptions ORDER BY id")
+        .fetch_all(database)
+        .await
+}
+
+pub(crate) async fn remove_subscriber(
+    database: &Database,
+    user_id: impl Into<u64>,
+) -> Result<bool> {
+    let result = sqlx::query("DELETE FROM subscriptions WHERE user_id = $1")
+        .bind(user_id.into() as i64)
+        .execute(database)
+        .await?;
+
+    Ok(result.rows_affected() > 0)
+}
 
 /// Get all entries from the watchers table
 pub(crate) async fn list_watchers(database: &Database) -> Result<Vec<ThreadWatcher>> {
@@ -172,7 +223,7 @@ pub(crate) async fn list_threads(
     query.fetch_all(database).await
 }
 
-/// Get an entry from the threads table with a specific channel ID
+/// Get an entry from the threads table with a specific channel ID and user ID
 pub(crate) async fn get_thread(
     database: &Database,
     guild_id: u64,
@@ -183,7 +234,23 @@ pub(crate) async fn get_thread(
         .bind(user_id as i64)
         .bind(channel_id as i64)
         .bind(guild_id as i64)
-        .fetch_optional(database).await
+        .fetch_optional(database)
+        .await
+}
+
+/// Get all users tracking a specific thread
+pub(crate) async fn get_users_tracking_thread(
+    database: &Database,
+    guild_id: impl Into<u64>,
+    channel_id: impl Into<u64>,
+) -> Result<Vec<UserId>> {
+    let result: Vec<TrackedThreadUser> = sqlx::query_as("SELECT user_id FROM threads WHERE channel_id = $1 AND guild_id = $2 ORDER BY id")
+        .bind(channel_id.into() as i64)
+        .bind(guild_id.into() as i64)
+        .fetch_all(database)
+        .await?;
+
+    Ok(result.into_iter().map(|user| user.into()).collect())
 }
 
 /// Get all unique channel_ids from tracked threads (globally)

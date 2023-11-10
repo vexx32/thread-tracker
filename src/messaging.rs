@@ -1,4 +1,5 @@
-use serenity::{utils::Colour, Result};
+use poise::serenity_prelude::UserId;
+use serenity::{utils::Colour, Result, http::CacheHttp};
 
 use crate::{commands::CommandContext, consts::*, utils};
 
@@ -49,12 +50,48 @@ impl HelpMessage {
     }
 }
 
-pub(crate) async fn reply_ephemeral<'a>(
+/// Send the user a private/direct message.
+///
+/// ### Arguments
+///
+/// - `ctx` - the Serenity context/CacheHttp
+/// - `user_id` - the user to DM
+/// - `title` - the title for the DM'd embed
+/// - `description` - the main message content/embed description
+pub(crate) async fn dm(ctx: impl CacheHttp, user_id: UserId, message: &str, embed_title: Option<&str>, embed_description: Option<&str>) -> Result<()> {
+    let channel = user_id.create_dm_channel(&ctx).await?;
+    channel.send_message(ctx.http(), |msg| {
+        msg.content(message);
+        if embed_title.is_some() || embed_description.is_some(){
+            msg.embed(|embed|
+                embed
+                    .title(embed_title.unwrap())
+                    .description(embed_description.unwrap())
+                    .colour(Colour::PURPLE));
+        }
+
+        msg
+    })
+    .await?;
+
+
+    Ok(())
+}
+
+pub(crate) async fn whisper<'a>(
     ctx: &CommandContext<'a>,
     title: &str,
     description: &str,
 ) -> Result<Vec<poise::ReplyHandle<'a>>> {
     send_chunked_reply(ctx, title, description, Colour::BLURPLE, true).await
+}
+
+pub(crate) async fn whisper_error<'a>(
+    ctx: &CommandContext<'a>,
+    title: &str,
+    description: &str,
+) -> Result<Vec<poise::ReplyHandle<'a>>> {
+    send_chunked_reply(ctx, title, description, Colour::ROSEWATER, true).await
 }
 
 pub(crate) async fn reply<'a>(

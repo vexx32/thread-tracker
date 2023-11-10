@@ -13,7 +13,7 @@ use crate::{
     cache::MessageCache,
     commands::{muses, threads, todos, CommandContext},
     db::{self, ThreadWatcher, Todo, TrackedThread},
-    messaging::{reply, reply_ephemeral},
+    messaging::{reply, whisper},
     utils::get_channel_name,
     CommandError,
     Database,
@@ -79,7 +79,7 @@ pub(crate) async fn add(
     let list = threads::get_list(user, guild_id, category.as_deref(), data, ctx.serenity_context())
         .await?;
 
-    if list.len() > crate::consts::MAX_EMBED_CHARS {
+    if list.chars().count() > crate::consts::MAX_EMBED_CHARS {
         return Err(CommandError::new(
             "Watched messages cannot span multiple messages. Please use categories to reduce the threads the new watcher must track."
         ));
@@ -108,7 +108,7 @@ pub(crate) async fn add(
 
     match result {
         Ok(true) => {
-            reply_ephemeral(&ctx, "Watcher created", "The requested watcher has been created.")
+            whisper(&ctx, "Watcher created", "The requested watcher has been created.")
                 .await?;
 
             Ok(())
@@ -177,7 +177,7 @@ pub(crate) async fn remove(
                 Err(e) => return Err(anyhow!("Unable to locate message {}. Perhaps it was already deleted?", e).into()),
             }
 
-            reply_ephemeral(&ctx, "Watcher removed", &format!("Watcher with id {} removed successfully.", watcher.id)).await?;
+            whisper(&ctx, "Watcher removed", &format!("Watcher with id {} removed successfully.", watcher.id)).await?;
         }
     }
 

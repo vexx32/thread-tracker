@@ -29,3 +29,8 @@ CREATE TABLE IF NOT EXISTS todos (
     content varchar(300) NOT NULL,
     category varchar(100) NULL
 );
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id serial PRIMARY KEY,
+    user_id BIGINT NOT NULL
+);

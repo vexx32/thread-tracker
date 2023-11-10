@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::{collections::{BTreeMap, BTreeSet, HashMap}, f32::consts::E};
 
 use rand::Rng;
 use serenity::{
@@ -12,9 +12,9 @@ use tracing::{error, info};
 use crate::{
     cache::MessageCache,
     commands::{muses, todos, CommandContext, CommandError, CommandResult},
-    consts::THREAD_NAME_LENGTH,
-    db::{self, Todo, TrackedThread},
-    messaging::{reply, reply_error},
+    consts::{MAX_EMBED_CHARS, THREAD_NAME_LENGTH},
+    db::{self, add_subscriber, remove_subscriber, Todo, TrackedThread},
+    messaging::{dm, reply, reply_error, whisper, whisper_error},
     utils::*,
     Data,
     Database,
@@ -507,6 +507,131 @@ pub(crate) async fn send_random_thread(
     }
 
     Ok(())
+}
+
+/// Manage notification status for thread replies.
+#[poise::command(
+    slash_command,
+    category = "Thread tracking",
+    rename = "tt_notify",
+    subcommands("notify_replies_on", "notify_replies_off")
+)]
+pub(crate) async fn notify_replies(_: CommandContext<'_>) -> CommandResult<()> {
+    // Slash commands make the "root" command for subcommands un-callable, so
+    // just do nothing here.
+    Ok(())
+}
+
+/// Subscribe for DMs whenever there's a reply to one of your tracked threads.
+#[poise::command(slash_command, category = "Thread tracking", rename = "on")]
+pub(crate) async fn notify_replies_on(ctx: CommandContext<'_>) -> CommandResult<()> {
+    let user = ctx.author();
+    let data = ctx.data();
+
+    if add_subscriber(&data.database, user.id).await? {
+        whisper(&ctx, "Subscription", "Subscribed to thread replies successfully!").await?;
+    }
+    else {
+        whisper_error(&ctx, "Subscription", "You are already subscribed to thread replies.")
+            .await?;
+    }
+
+    Ok(())
+}
+
+/// Unsubscribe from DMs for thread replies.
+#[poise::command(slash_command, category = "Thread tracking", rename = "off")]
+pub(crate) async fn notify_replies_off(ctx: CommandContext<'_>) -> CommandResult<()> {
+    let user = ctx.author();
+    let data = ctx.data();
+
+    if remove_subscriber(&data.database, user.id).await? {
+        whisper(&ctx, "Subscription", "Unsubscribed from thread replies successfully!").await?;
+    }
+    else {
+        whisper_error(&ctx, "Subscription", "You are not currently subscribed to thread replies.")
+            .await?;
+    }
+
+    Ok(())
+}
+
+pub(crate) async fn send_reply_notification(reply: Message, database: Database, context: Context) {
+    let guild_id = match reply.guild_id {
+        Some(id) => id,
+        None => return,
+    };
+
+    let author = reply.author;
+
+    match db::get_users_tracking_thread(&database, guild_id, reply.channel_id).await {
+        Ok(users) => {
+            let subscribers: Vec<UserId> = match db::list_subscribers(&database).await {
+                Ok(s) => s.into_iter().map(|s| s.user_id()).collect(),
+                Err(_) => return,
+            };
+
+            let (preview_title, reply_preview) = {
+                let mut preview = truncate_string(&reply.content, MAX_EMBED_CHARS);
+                if preview.is_empty() && !reply.embeds.is_empty() {
+                    let embed = reply.embeds.iter().find(|&embed| match &embed.description {
+                        Some(description) => !description.is_empty(),
+                        None => false,
+                    });
+
+                    if let Some(embed) = embed {
+                        preview.push_str(embed.description.as_ref().unwrap());
+                    }
+                }
+
+                if preview.is_empty() {
+                    (None, None)
+                }
+                else {
+                    (Some("Reply preview"), Some(preview))
+                }
+            };
+
+            let mut content = MessageBuilder::new();
+            let link = format!(
+                "https://discord.com/channels/{}/{}/{}",
+                guild_id, reply.channel_id, reply.id
+            );
+            content.push("New reply from ").mention(&author).push(" in thread ").push(link);
+
+            let content = content.build();
+
+            for user in users {
+                if user == author.id {
+                    // Don't notify people of their own replies
+                    continue;
+                }
+
+                let muses = match muses::get_list(&database, user, guild_id).await {
+                    Ok(m) => m,
+                    Err(e) => {
+                        error!("Unable to get muses for user {}: {}", user, e);
+                        Vec::new()
+                    },
+                };
+
+                if subscribers.contains(&user) && !muses.contains(&author.name) {
+                    info!("Sending reply notification to user ID {}", user);
+
+                    if let Err(e) =
+                        dm(&context, user, &content, preview_title, reply_preview.as_deref())
+                            .await
+                    {
+                        error!("Unable to DM user {} for thread reply notification: {}", user, e);
+                    }
+                }
+            }
+        },
+        Err(e) => error!(
+            "Error getting users tracking thread {} in guild {}: {}",
+            reply.channel_id, guild_id, e
+        ),
+    };
 }
 
 /// Get a random thread for the current user that is awaiting a reply.

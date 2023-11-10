@@ -4,7 +4,7 @@ Thanks for using Thread Tracker! You can call me Titi. To report bugs or make fe
 
 ### Thread Tracking
 
-> `/tt_threads`, `/tt_replies`, `/tt_track`, `/tt_untrack`, `/tt_category`, `/tt_watch`, `/tt_unwatch`, `/tt_watching`
+> `/tt_threads`, `/tt_replies`, `/tt_track`, `/tt_untrack`, `/tt_category`, `/tt_watch`, `/tt_unwatch`, `/tt_watching`, `/tt_notify [on|off]`
 > Track your Discord threads and let you know who last responded to them. Use **`/tt_help tt_threads`** for more information.
 
 ### Muses
