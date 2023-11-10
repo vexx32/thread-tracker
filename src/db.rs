@@ -2,7 +2,6 @@ mod models;
 
 pub(crate) use models::*;
 use poise::serenity_prelude::UserId;
-use serenity::futures::channel::oneshot::channel;
 pub(crate) use sqlx::PgPool as Database;
 
 type Result<T> = std::result::Result<T, sqlx::Error>;

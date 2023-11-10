@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet, HashMap}, f32::consts::E};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use rand::Rng;
 use serenity::{

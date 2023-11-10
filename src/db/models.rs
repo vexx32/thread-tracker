@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use poise::serenity_prelude::{ChannelId, GuildId, MessageId, UserId};
 use sqlx::FromRow;
 
@@ -35,9 +37,9 @@ pub(crate) struct TrackedThreadUser {
     pub user_id: u64,
 }
 
-impl Into<UserId> for TrackedThreadUser {
-    fn into(self) -> UserId {
-        self.user_id.into()
+impl From<TrackedThreadUser> for UserId {
+    fn from(value: TrackedThreadUser) -> Self {
+        value.user_id.into()
     }
 }
 
