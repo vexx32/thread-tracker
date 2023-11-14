@@ -556,7 +556,7 @@ pub(crate) async fn notify_replies_off(ctx: CommandContext<'_>) -> CommandResult
     Ok(())
 }
 
-pub(crate) async fn send_reply_notification(reply: Message, database: Database, context: Context) {
+pub(crate) async fn send_reply_notification(reply: Message, database: Database, context: impl CacheHttp) {
     let guild_id = match reply.guild_id {
         Some(id) => id,
         None => return,

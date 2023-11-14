@@ -8,16 +8,17 @@ publish = false
 
 [dependencies]
 anyhow = "1.0.75"
-serenity = { version = "0.11.7", default-features = false, features = ["client", "gateway", "rustls_backend", "model", "cache", "temp_cache"] }
-tokio = { version = "1.33.0", features = ["full"] }
-tracing = "0.1.40"
-serde = "1.0.190"
-sqlx = { version = "0.7.2", features = ["runtime-tokio", "tls-rustls", "postgres"] }
-postgres = "0.19.7"
 chrono = "0.4.31"
-thiserror = "1.0.50"
-rand = "0.8.5"
-toml = "0.8.0"
-url = "2.4.1"
-tracing-subscriber = "0.3.17"
 poise = "0.5.7"
+postgres = "0.19.7"
+rand = "0.8.5"
+serde = "1.0.190"
+serenity = { version = "0.11.7", default-features = false, features = ["client", "gateway", "rustls_backend", "model", "cache", "temp_cache"] }
+sqlx = { version = "0.7.2", features = ["runtime-tokio", "tls-rustls", "postgres"] }
+thiserror = "1.0.50"
+timer = "0.2.0"
+tokio = { version = "1.33.0", features = ["full"] }
+toml = "0.8.0"
+tracing = "0.1.40"
+tracing-subscriber = "0.3.17"
+url = "2.4.1"

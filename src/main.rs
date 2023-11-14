@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 
+use background_tasks::Task;
 use cache::MessageCache;
 use commands::{threads, CommandError};
 use db::Database;
@@ -27,14 +28,14 @@ use sqlx::{
     ConnectOptions,
     Executor,
 };
-use tokio::time::sleep;
+use tokio::{time::sleep, sync::mpsc::{Sender, self}};
 use toml::Table;
 use tracing::{debug, error, info, log::LevelFilter};
 use utils::message_is_command;
 
 use crate::{
-    background_tasks::{run_periodic_shard_tasks, run_periodic_tasks},
-    consts::DELETE_EMOJI,
+    background_tasks::{run_periodic_shard_tasks, start_periodic_tasks, listen_for_background_tasks},
+    consts::{DELETE_EMOJI, MPSC_BUFFER_SIZE, SHARD_CHECKUP_INTERVAL},
     messaging::reply_error,
 };
 
@@ -124,6 +125,8 @@ struct Handler {
     shard_manager: Mutex<Option<std::sync::Arc<tokio::sync::Mutex<ShardManager>>>>,
     /// The bot's user id
     user_id: AtomicU64,
+    /// The root sender for the background task message queue
+    channel: Sender<Task>,
 }
 
 impl Handler {
@@ -132,10 +135,11 @@ impl Handler {
     /// ### Arguments
     ///
     /// - `database` - database pool connection
-    fn new(options: poise::FrameworkOptions<Data, CommandError>, database: Database) -> Self {
+    fn new(options: poise::FrameworkOptions<Data, CommandError>, database: Database, channel: Sender<Task>) -> Self {
         Self {
-            data: Arc::new(RwLock::new(Data::new(database))),
             options,
+            channel,
+            data: Arc::new(RwLock::new(Data::new(database))),
             shard_manager: Mutex::new(None),
             user_id: AtomicU64::new(0),
         }
@@ -247,7 +251,10 @@ impl EventHandler for Handler {
                     .store((message.channel_id, message.id).into(), message.clone())
                     .await;
 
-                background_tasks::notify_thread_subscribers(&context, &data.database, &message);
+                // Send notification task to background task runner.
+                if let Err(e) = self.channel.send(Task::Notify(message.clone())).await {
+                    error!("Error sending reply notifications due to internal communication error: {}", e);
+                }
             }
         }
 
@@ -315,7 +322,7 @@ impl EventHandler for Handler {
             error!("Unable to register commands globally: {}", e);
         }
 
-        run_periodic_shard_tasks(ctx);
+        run_periodic_shard_tasks(&ctx, &self.channel);
     }
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
@@ -405,7 +412,10 @@ async fn main() -> anyhow::Result<()> {
         ..Default::default()
     };
 
-    let mut handler = Handler::new(options, database);
+    // Setup the MPSC channel for sending off background tasks
+    let (sender, receiver) = mpsc::channel(MPSC_BUFFER_SIZE);
+
+    let mut handler = Handler::new(options, database, sender);
 
     poise::set_qualified_names(&mut handler.options.commands);
 
@@ -430,7 +440,7 @@ async fn main() -> anyhow::Result<()> {
     let manager = client.shard_manager.clone();
     tokio::spawn(async move {
         loop {
-            sleep(Duration::from_secs(30)).await;
+            sleep(SHARD_CHECKUP_INTERVAL).await;
 
             let lock = manager.lock().await;
             let runners = lock.runners.lock().await;
@@ -443,7 +453,9 @@ async fn main() -> anyhow::Result<()> {
 
     *handler.shard_manager.lock().unwrap() = Some(client.shard_manager.clone());
 
-    run_periodic_tasks(Arc::clone(&client.cache_and_http), &*handler.data.read().await);
+    listen_for_background_tasks(receiver, handler.data.clone(), client.cache_and_http.clone());
+    start_periodic_tasks(&handler.channel);
+
     client.start_autosharded().await.context("Error starting client")?;
 
     Ok(())
