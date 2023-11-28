@@ -28,6 +28,8 @@ pub(crate) const CACHE_LIFETIME: Duration = Duration::from_secs(6000);
 
 pub(crate) const MAX_WATCHER_UPDATE_TASKS: usize = 5;
 
+pub(crate) const MIN_WATCHER_BATCH_SIZE: usize = 10;
+
 pub(crate) const MPSC_BUFFER_SIZE: usize = 32;
 
 pub(crate) const MAX_EMBED_CHARS: usize = 2048;

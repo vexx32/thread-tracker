@@ -24,6 +24,7 @@ where
     }
 }
 
+/// Retrieve an entry from the Subscriptions table by UserId.
 pub(crate) async fn get_subscriber<U>(
     database: &Database,
     user_id: U,
@@ -37,12 +38,14 @@ where
         .await
 }
 
+/// Retrieve all entries from the Subscriptions table.
 pub(crate) async fn list_subscribers(database: &Database) -> Result<Vec<Subscription>> {
     sqlx::query_as("SELECT id, user_id FROM subscriptions ORDER BY id")
         .fetch_all(database)
         .await
 }
 
+/// Delete an entry from the Subscriptions table.
 pub(crate) async fn remove_subscriber(
     database: &Database,
     user_id: impl Into<u64>,
@@ -55,13 +58,14 @@ pub(crate) async fn remove_subscriber(
     Ok(result.rows_affected() > 0)
 }
 
-/// Get all entries from the watchers table
+/// Get all entries from the watchers table.
 pub(crate) async fn list_watchers(database: &Database) -> Result<Vec<ThreadWatcher>> {
     sqlx::query_as("SELECT id, user_id, message_id, channel_id, guild_id, categories FROM watchers")
         .fetch_all(database)
         .await
 }
 
+/// Get all entries from the watchers table associated with a given UserId and GuildId.
 pub(crate) async fn list_current_watchers(
     database: &Database,
     user_id: u64,
@@ -74,7 +78,7 @@ pub(crate) async fn list_current_watchers(
         .await
 }
 
-/// Get an entry from the watchers table by channel and message ID
+/// Get an entry from the watchers table by channel and message ID.
 pub(crate) async fn get_watcher(
     database: &Database,
     channel_id: u64,
@@ -86,7 +90,7 @@ pub(crate) async fn get_watcher(
         .fetch_optional(database).await
 }
 
-/// Add a new entry to the watchers table
+/// Add a new entry to the watchers table.
 pub(crate) async fn add_watcher(
     database: &Database,
     user_id: u64,
@@ -106,7 +110,7 @@ pub(crate) async fn add_watcher(
     Ok(result.rows_affected() > 0)
 }
 
-/// Remove an entry from the watchers table
+/// Remove an entry from the watchers table.
 pub(crate) async fn remove_watcher(database: &Database, watcher_id: i32) -> Result<u64> {
     let result = sqlx::query("DELETE FROM watchers WHERE id = $1")
         .bind(watcher_id)
@@ -116,7 +120,7 @@ pub(crate) async fn remove_watcher(database: &Database, watcher_id: i32) -> Resu
     Ok(result.rows_affected())
 }
 
-/// Add a new entry to the threads table
+/// Add a new entry to the threads table.
 pub(crate) async fn add_thread(
     database: &Database,
     guild_id: u64,
@@ -139,7 +143,7 @@ pub(crate) async fn add_thread(
     }
 }
 
-/// Update the category of an entry in the threads table
+/// Update the category of an entry in the threads table.
 pub(crate) async fn update_thread_category(
     database: &Database,
     guild_id: u64,
@@ -160,7 +164,7 @@ pub(crate) async fn update_thread_category(
     Ok(result.rows_affected() > 0)
 }
 
-/// Remove an entry from the threads table
+/// Remove an entry from the threads table.
 pub(crate) async fn remove_thread(
     database: &Database,
     guild_id: u64,
@@ -178,7 +182,7 @@ pub(crate) async fn remove_thread(
     Ok(result.rows_affected())
 }
 
-/// Remove all entries from the threads table for a given user and guild ID
+/// Remove all entries from the threads table for a given user and guild ID.
 pub(crate) async fn remove_all_threads(
     database: &Database,
     guild_id: u64,
@@ -202,7 +206,7 @@ pub(crate) async fn remove_all_threads(
     Ok(result.rows_affected())
 }
 
-/// Get all entries from the threads table
+/// Get all entries from the threads table.
 pub(crate) async fn list_threads(
     database: &Database,
     guild_id: u64,
@@ -222,7 +226,7 @@ pub(crate) async fn list_threads(
     query.fetch_all(database).await
 }
 
-/// Get an entry from the threads table with a specific channel ID and user ID
+/// Get an entry from the threads table with a specific channel ID and user ID.
 pub(crate) async fn get_thread(
     database: &Database,
     guild_id: u64,
@@ -237,7 +241,7 @@ pub(crate) async fn get_thread(
         .await
 }
 
-/// Get all users tracking a specific thread
+/// Get all users tracking a specific thread.
 pub(crate) async fn get_users_tracking_thread(
     database: &Database,
     guild_id: impl Into<u64>,
@@ -252,7 +256,7 @@ pub(crate) async fn get_users_tracking_thread(
     Ok(result.into_iter().map(|user| user.into()).collect())
 }
 
-/// Get all unique channel_ids from tracked threads (globally)
+/// Get all unique channel_ids from tracked threads (globally).
 pub(crate) async fn get_global_tracked_thread_ids(
     database: &Database,
 ) -> Result<Vec<TrackedThreadId>> {

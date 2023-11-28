@@ -28,13 +28,20 @@ use sqlx::{
     ConnectOptions,
     Executor,
 };
-use tokio::{time::sleep, sync::mpsc::{Sender, self}};
+use tokio::{
+    sync::mpsc::{self, Sender},
+    time::sleep,
+};
 use toml::Table;
 use tracing::{debug, error, info, log::LevelFilter};
 use utils::message_is_command;
 
 use crate::{
-    background_tasks::{run_periodic_shard_tasks, start_periodic_tasks, listen_for_background_tasks},
+    background_tasks::{
+        listen_for_background_tasks,
+        run_periodic_shard_tasks,
+        start_periodic_tasks,
+    },
     consts::{DELETE_EMOJI, MPSC_BUFFER_SIZE, SHARD_CHECKUP_INTERVAL},
     messaging::reply_error,
 };
@@ -51,6 +58,7 @@ mod utils;
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Debug)]
+/// Data needed for bot commands.
 struct Data {
     /// Postgres database pool
     database: Database,
@@ -63,6 +71,7 @@ struct Data {
 }
 
 impl Data {
+    /// Create a new Data.
     fn new(database: Database) -> Self {
         Self {
             database,
@@ -72,6 +81,7 @@ impl Data {
         }
     }
 
+    /// Retrieve the current guild count.
     fn guilds(&self) -> usize {
         self.guild_count.load(Ordering::SeqCst)
     }
@@ -115,7 +125,7 @@ impl Data {
     }
 }
 
-// Data to be passed to all commands
+/// Event handler struct, managing Serenity's events and handling dispatching them to Poise.
 struct Handler {
     /// The shared command data
     data: Arc<RwLock<Data>>,
@@ -130,12 +140,12 @@ struct Handler {
 }
 
 impl Handler {
-    /// Create a new bot instance.
-    ///
-    /// ### Arguments
-    ///
-    /// - `database` - database pool connection
-    fn new(options: poise::FrameworkOptions<Data, CommandError>, database: Database, channel: Sender<Task>) -> Self {
+    /// Create a new Handler.
+    fn new(
+        options: poise::FrameworkOptions<Data, CommandError>,
+        database: Database,
+        channel: Sender<Task>,
+    ) -> Self {
         Self {
             options,
             channel,
@@ -145,16 +155,12 @@ impl Handler {
         }
     }
 
-    /// Sets the current user ID for the bot
-    ///
-    /// ### Arguments
-    ///
-    /// - `id` - the UserId
+    /// Sets the current user ID for the bot. Typically called from the `ready` event.
     fn set_user(&self, id: UserId) {
         self.user_id.store(id.0, Ordering::SeqCst);
     }
 
-    /// Gets the current user ID for the bot, if it's been set
+    /// Gets the current user ID for the bot, if it's been set.
     fn user(&self) -> Option<UserId> {
         let value = self.user_id.load(Ordering::SeqCst);
 
@@ -166,6 +172,7 @@ impl Handler {
         }
     }
 
+    /// Forward an event to Poise to streamline command handling.
     async fn forward_to_poise(&self, ctx: &Context, event: &poise::Event<'_>) {
         // FrameworkContext contains all data that poise::Framework usually manages
         let shard_manager = (*self.shard_manager.lock().unwrap()).clone().unwrap();
@@ -232,6 +239,8 @@ impl EventHandler for Handler {
                 }
             }
         }
+
+        self.forward_to_poise(&context, &poise::Event::ReactionAdd { add_reaction: reaction }).await;
     }
 
     async fn message(&self, context: Context, message: Message) {
@@ -253,7 +262,10 @@ impl EventHandler for Handler {
 
                 // Send notification task to background task runner.
                 if let Err(e) = self.channel.send(Task::Notify(message.clone())).await {
-                    error!("Error sending reply notifications due to internal communication error: {}", e);
+                    error!(
+                        "Error sending reply notifications due to internal communication error: {}",
+                        e
+                    );
                 }
             }
         }
@@ -281,17 +293,19 @@ impl EventHandler for Handler {
                 utils::register_guild_commands(&self.options.commands, guild.id, &ctx).await;
             }
         }
+
+        self.forward_to_poise(&ctx, &poise::Event::GuildCreate { guild, is_new }).await;
     }
 
     async fn guild_delete(
         &self,
-        _ctx: Context,
+        ctx: Context,
         guild_partial: UnavailableGuild,
         guild_full: Option<Guild>,
     ) {
         if !guild_partial.unavailable {
             let guild_name =
-                guild_full.map(|g| g.name).unwrap_or_else(|| format!("{}", guild_partial.id));
+                guild_full.as_ref().map(|g| g.name.clone()).unwrap_or_else(|| format!("{}", guild_partial.id));
             info!(
                 "notified that Titi has been removed from the `{}` guild ({})",
                 guild_name, guild_partial.id
@@ -299,6 +313,8 @@ impl EventHandler for Handler {
 
             self.data.read().await.guild_count.fetch_sub(1, Ordering::SeqCst);
         }
+
+        self.forward_to_poise(&ctx, &poise::Event::GuildDelete { incomplete: guild_partial, full: guild_full }).await;
     }
 
     async fn ready(&self, ctx: Context, ready: Ready) {
@@ -323,6 +339,8 @@ impl EventHandler for Handler {
         }
 
         run_periodic_shard_tasks(&ctx, &self.channel);
+
+        self.forward_to_poise(&ctx, &poise::Event::Ready { data_about_bot: ready }).await;
     }
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
@@ -330,6 +348,7 @@ impl EventHandler for Handler {
     }
 }
 
+/// Handler to be invoked on errors received from Poise.
 async fn on_error(error: poise::FrameworkError<'_, Data, CommandError>) {
     // This is our custom error handler
     // They are many errors that can occur, so we only handle the ones we want to customize
@@ -351,6 +370,7 @@ async fn on_error(error: poise::FrameworkError<'_, Data, CommandError>) {
 }
 
 #[tokio::main]
+/// Main bot application thread.
 async fn main() -> anyhow::Result<()> {
     use anyhow::Context;
 

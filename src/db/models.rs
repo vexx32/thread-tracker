@@ -17,21 +17,26 @@ pub(crate) struct TrackedThread {
 }
 
 impl TrackedThread {
+    /// Get the ChannelId for this thread.
     pub fn channel_id(&self) -> ChannelId {
         self.channel_id.into()
     }
 
+    /// Get the GuildId for this thread.
     pub fn guild_id(&self) -> GuildId {
         self.guild_id.into()
     }
 }
 
 #[derive(FromRow)]
+#[repr(transparent)]
 pub(crate) struct TrackedThreadId {
-    pub channel_id: i64,
+    #[sqlx(try_from = "i64")]
+    pub channel_id: u64,
 }
 
 #[derive(FromRow)]
+#[repr(transparent)]
 pub(crate) struct TrackedThreadUser {
     #[sqlx(try_from = "i64")]
     pub user_id: u64,
@@ -63,25 +68,29 @@ impl ThreadWatcher {
         self.into()
     }
 
+    /// Get the UserId for this thread watcher.
     pub fn user_id(&self) -> UserId {
         self.user_id.into()
     }
 
+    /// Get the MessageId for this thread watcher.
     pub fn message_id(&self) -> MessageId {
         self.message_id.into()
     }
 
+    /// Get the ChannelId for this thread watcher.
     pub fn channel_id(&self) -> ChannelId {
         self.channel_id.into()
     }
 
+    /// Get the GuildId for this thread watcher.
     pub fn guild_id(&self) -> GuildId {
         self.guild_id.into()
     }
 
     /// Get the channel and message for this thread watcher.
     pub fn message(&self) -> ChannelMessage {
-        (self.channel_id(), self.message_id.into()).into()
+        (self.channel_id(), self.message_id()).into()
     }
 }
 
@@ -101,17 +110,6 @@ pub(crate) struct Todo {
 }
 
 #[derive(FromRow)]
-pub(crate) struct Statistics {
-    pub users: i64,
-    pub servers: i64,
-    pub threads_distinct: i64,
-    pub threads_total: i64,
-    pub muses: i64,
-    pub todos: i64,
-    pub watchers: i64,
-}
-
-#[derive(FromRow)]
 pub(crate) struct Subscription {
     pub id: i32,
     #[sqlx(try_from = "i64")]
@@ -122,4 +120,15 @@ impl Subscription {
     pub(crate) fn user_id(&self) -> UserId {
         self.user_id.into()
     }
+}
+
+#[derive(FromRow)]
+pub(crate) struct Statistics {
+    pub users: i64,
+    pub servers: i64,
+    pub threads_distinct: i64,
+    pub threads_total: i64,
+    pub muses: i64,
+    pub todos: i64,
+    pub watchers: i64,
 }

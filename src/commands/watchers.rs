@@ -19,7 +19,7 @@ use crate::{
     Database,
 };
 
-/// List current watchers.
+/// List currently tracked watchers.
 #[poise::command(slash_command, guild_only, rename = "tt_watchers", category = "Watchers")]
 pub(crate) async fn list(ctx: CommandContext<'_>) -> CommandResult<()> {
     let user = ctx.author();
@@ -76,7 +76,7 @@ pub(crate) async fn add(
     let data = ctx.data();
 
     info!("adding watcher for {} ({}), categories {:?}", user.name, user.id, category);
-    let list = threads::get_list(user, guild_id, category.as_deref(), data, ctx.serenity_context())
+    let list = threads::get_threads_and_todos(user, guild_id, category.as_deref(), data, ctx.serenity_context())
         .await?;
 
     if list.chars().count() > crate::consts::MAX_EMBED_CHARS {

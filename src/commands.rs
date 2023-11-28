@@ -58,6 +58,7 @@ impl From<sqlx::Error> for CommandError {
     }
 }
 
+/// Retrieve the full list of commands for the bot.
 pub(crate) fn list() -> Vec<poise::Command<Data, CommandError>> {
     vec![
         greetings::hello(),

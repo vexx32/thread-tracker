@@ -175,12 +175,6 @@ pub(crate) fn categorise(todos: Vec<Todo>) -> BTreeMap<Option<String>, Vec<Todo>
 }
 
 /// Retrieve a list of all to do entries in the target categories.
-///
-/// ### Arguments
-///
-/// - `database` - the database to query
-/// - `user` - the user to query to do entries for
-/// - `categories` - an optional list of categories to find to do entries in
 pub(crate) async fn get_todos(
     database: &Database,
     user: &GuildUser,

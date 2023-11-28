@@ -9,7 +9,7 @@ use tracing::{error, info};
 
 use crate::db::ThreadWatcher;
 
-/// Wrapper struct to simplify passing around user/guild ID pair.
+/// Wrapper struct for a UserId and GuildId to represent a User in a specific Guild.
 pub(crate) struct GuildUser {
     pub user_id: UserId,
     pub guild_id: GuildId,
@@ -48,11 +48,6 @@ impl From<(ChannelId, MessageId)> for ChannelMessage {
 }
 
 /// Returns a `BTreeMap` which maps a derived key from `key_function` to a `Vec<TValue>` which contains the values that produced that key.
-///
-/// ### Arguments
-///
-/// - `items` - the initial set of items
-/// - `key_function` - the function which produces key values from the input `TValue` items in the input vec
 pub(crate) fn partition_into_map<TKey, TValue, F>(
     items: Vec<TValue>,
     key_function: F,
@@ -98,6 +93,7 @@ pub(crate) fn truncate_string(string: &str, max_length: usize) -> String {
     }
 }
 
+/// Retrieve the name of a Discord channel as a string. May return None if the channel cannot be accessed.
 pub(crate) async fn get_channel_name(
     channel_id: ChannelId,
     cache_http: impl CacheHttp,
@@ -105,6 +101,7 @@ pub(crate) async fn get_channel_name(
     channel_id.to_channel(cache_http.http()).await.map_or(None, |c| c.guild()).map(|gc| gc.name)
 }
 
+/// Subdivide a string into pieces of a given maximum length. All but the last piece will be the max length.
 pub(crate) fn subdivide_string(s: &str, max_chunk_length: usize) -> Vec<&str> {
     let mut result = Vec::with_capacity(s.len() / max_chunk_length);
     let mut iter = s.chars();
@@ -122,6 +119,7 @@ pub(crate) fn subdivide_string(s: &str, max_chunk_length: usize) -> Vec<&str> {
     result
 }
 
+/// Split a multi-line string into discrete chunks by line.
 pub(crate) fn split_into_chunks(s: &str, max_chunk_length: usize) -> Vec<String> {
     if s.len() <= max_chunk_length {
         return vec![s.to_owned()];
@@ -160,6 +158,7 @@ pub(crate) fn split_into_chunks(s: &str, max_chunk_length: usize) -> Vec<String>
     chunks
 }
 
+/// Delete the target Message.
 pub(crate) async fn delete_message(
     message: &Message,
     context: &impl CacheHttp,
@@ -176,6 +175,7 @@ pub(crate) async fn delete_message(
     }
 }
 
+/// Register the provided commands in the given guild.
 pub(crate) async fn register_guild_commands<U, E>(
     commands: &[poise::Command<U, E>],
     guild_id: GuildId,
@@ -193,37 +193,3 @@ pub(crate) async fn register_guild_commands<U, E>(
         error!("Unable to register commands in guild {}: {}", guild_id, e);
     }
 }
-
-// pub(crate) fn find_string_option<'a>(
-//     args: &'a [CommandDataOption],
-//     name: &str,
-// ) -> Option<&'a str> {
-//     match find_named_option(args, name) {
-//         Some(CommandDataOptionValue::String(s)) => Some(s),
-//         _ => None,
-//     }
-// }
-
-// pub(crate) fn find_channel_option<'a>(
-//     args: &'a [CommandDataOption],
-//     name: &str,
-// ) -> Option<&'a PartialChannel> {
-//     match find_named_option(args, name) {
-//         Some(CommandDataOptionValue::Channel(s)) => Some(s),
-//         _ => None,
-//     }
-// }
-
-// pub(crate) fn find_integer_option(args: &[CommandDataOption], name: &str) -> Option<i64> {
-//     match find_named_option(args, name) {
-//         Some(&CommandDataOptionValue::Integer(i)) => Some(i),
-//         _ => None,
-//     }
-// }
-
-// fn find_named_option<'a>(
-//     args: &'a [CommandDataOption],
-//     name: &str,
-// ) -> Option<&'a CommandDataOptionValue> {
-//     args.iter().find(|opt| opt.name == name).and_then(|opt| opt.resolved.as_ref())
-// }

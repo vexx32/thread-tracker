@@ -10,13 +10,18 @@ use serenity::{model::prelude::*, prelude::*};
 
 use crate::{consts::CACHE_LIFETIME, utils::ChannelMessage};
 
+/// Specialised `MemoryCache` that stores received `Message` items.
 pub(crate) type MessageCache = MemoryCache<ChannelMessage, Message>;
 
+/// Type alias for a HashMap that only stores `Cached<T>` items.
 type CacheMap<TKey, TValue> = HashMap<TKey, Cached<TValue>>;
 
 #[derive(Debug)]
+/// Wrapper struct for managing cached data.
 struct Cached<T> {
+    /// Reference to the cached data.
     pub data: Arc<T>,
+    /// The Instant when the data was cached.
     pub timestamp: Instant,
 }
 
@@ -33,10 +38,12 @@ impl<T> Cached<T> {
 }
 
 #[derive(Debug, Clone)]
+/// Thread-safe wrapper for a `CacheMap`
 pub(crate) struct MemoryCache<TKey, TData>
 where
     TKey: PartialEq + Eq + Hash + Clone,
 {
+    /// The internal storage of the cache, in a threadsafe wrapper.
     storage: Arc<RwLock<CacheMap<TKey, TData>>>,
 }
 

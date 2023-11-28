@@ -50,7 +50,7 @@ pub(crate) async fn add(
     }
 }
 
-/// Removes a muse from your list.
+/// Remove a muse from your list.
 #[poise::command(slash_command, guild_only, rename = "tt_removemuse", category = "Muses")]
 pub(crate) async fn remove(
     ctx: CommandContext<'_>,
@@ -82,7 +82,7 @@ pub(crate) async fn remove(
     }
 }
 
-/// Show your list of muses.
+/// Show your muse list.
 #[poise::command(slash_command, guild_only, rename = "tt_muses", category = "Muses")]
 pub(crate) async fn list(ctx: CommandContext<'_>) -> CommandResult<()> {
     let guild_id = match ctx.guild_id() {
@@ -116,11 +116,6 @@ pub(crate) async fn list(ctx: CommandContext<'_>) -> CommandResult<()> {
 }
 
 /// Get the list of muses for the user out of the database.
-///
-/// ### Arguments
-///
-/// - `database` - the database to get the list from
-/// - `user` - the user to retrieve the list of muses for
 pub(crate) async fn get_list(
     database: &Database,
     user_id: UserId,

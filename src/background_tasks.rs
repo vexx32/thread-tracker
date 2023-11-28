@@ -16,6 +16,7 @@ use crate::{
     Data,
 };
 
+/// Task dispatch type, carrying messages and any data required for them to complete the associated task.
 #[derive(Clone)]
 pub(crate) enum Task {
     /// Handle notifications for new thread replies, if any are needed.
@@ -28,6 +29,7 @@ pub(crate) enum Task {
     PurgeCache,
 }
 
+/// Start a new thread which listens for `Task` messages and running the appropriate actions for each task.
 pub(crate) fn listen_for_background_tasks(mut receiver: Receiver<Task>, data: Arc<RwLock<Data>>, context: Arc<CacheAndHttp>) {
     use Task::*;
 
@@ -49,6 +51,7 @@ pub(crate) fn listen_for_background_tasks(mut receiver: Receiver<Task>, data: Ar
     });
 }
 
+/// Core task spawning function for per-shard tasks.
 pub(crate) fn run_periodic_shard_tasks(context: &Context, sender: &Sender<Task>) {
     info!("Starting periodic per-shard tasks");
     let c = Arc::new(context.clone());
@@ -56,11 +59,6 @@ pub(crate) fn run_periodic_shard_tasks(context: &Context, sender: &Sender<Task>)
 }
 
 /// Core task spawning function. Creates a set of periodically recurring tasks on their own threads.
-///
-/// ### Arguments
-///
-/// - `context` - the Serenity context to delegate to tasks
-/// - `bot` - the bot instance to delegate to tasks
 pub(crate) fn start_periodic_tasks(sender: &Sender<Task>) {
     info!("Starting periodic global tasks");
     spawn_task_loop(sender.clone(), CACHE_TRIM_INTERVAL, true, || Task::PurgeCache);
@@ -68,11 +66,6 @@ pub(crate) fn start_periodic_tasks(sender: &Sender<Task>) {
 }
 
 /// Spawns a task which loops indefinitely, with a wait period between each iteration.
-///
-/// ### Arguments
-///
-/// - `period` - the length of time between each task run
-/// - `task` - the Future representing the task to run
 fn spawn_task_loop<F>(sender: Sender<Task>, period: Duration, delay: bool, mut task: F)
 where
     F: FnMut() -> Task + Send + 'static,
@@ -159,9 +152,10 @@ pub(crate) async fn update_watchers(
     Ok(())
 }
 
+/// Retrieves the list of watchers in the database, subdivided into batches of at least 10.
 async fn get_watcher_batches(database: &Database) -> sqlx::Result<Vec<Vec<ThreadWatcher>>> {
     let list: Vec<ThreadWatcher> = db::list_watchers(database).await?;
-    let batch_size = cmp::min(10, list.len() / MAX_WATCHER_UPDATE_TASKS);
+    let batch_size = cmp::min(MIN_WATCHER_BATCH_SIZE, list.len() / MAX_WATCHER_UPDATE_TASKS);
 
     let mut result = Vec::new();
     let mut chunk = Vec::new();
@@ -180,10 +174,6 @@ async fn get_watcher_batches(database: &Database) -> sqlx::Result<Vec<Vec<Thread
 }
 
 /// Purge any expired entries in the message cache.
-///
-/// ### Arguments
-///
-/// - `cache` - the message cache
 async fn purge_expired_cache_entries(cache: Arc<MessageCache>) {
     info!("purging any expired cache entries");
     cache.purge_expired().await;

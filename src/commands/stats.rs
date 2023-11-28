@@ -32,6 +32,7 @@ pub(crate) async fn send_statistics(ctx: CommandContext<'_>) -> CommandResult<()
     Ok(())
 }
 
+/// Write a line to the message being built, in the format `- **<name>** - <value>`
 fn write_stats_line(msg: &mut MessageBuilder, name: impl Into<Content>, value: impl Into<Content>) {
     msg.push("- **").push(name).push("** — ").push_line(value);
 }

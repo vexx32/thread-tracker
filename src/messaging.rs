@@ -13,6 +13,7 @@ pub(crate) enum HelpMessage {
 }
 
 impl HelpMessage {
+    /// Retrieve a specific HelpMessage based on the category name as a string, case insensitive.
     pub fn from_category(category: Option<&str>) -> Self {
         match category.map(|s| s.to_ascii_lowercase()).as_deref() {
             Some("bugs") => Self::Bugs,
@@ -50,14 +51,7 @@ impl HelpMessage {
     }
 }
 
-/// Send the user a private/direct message.
-///
-/// ### Arguments
-///
-/// - `ctx` - the Serenity context/CacheHttp
-/// - `user_id` - the user to DM
-/// - `title` - the title for the DM'd embed
-/// - `description` - the main message content/embed description
+/// Send the target user a private/direct message.
 pub(crate) async fn dm(ctx: impl CacheHttp, user_id: UserId, message: &str, embed_title: Option<&str>, embed_description: Option<&str>) -> Result<()> {
     let channel = user_id.create_dm_channel(&ctx).await?;
     channel.send_message(ctx.http(), |msg| {
@@ -78,6 +72,7 @@ pub(crate) async fn dm(ctx: impl CacheHttp, user_id: UserId, message: &str, embe
     Ok(())
 }
 
+/// Send an ephemeral reply.
 pub(crate) async fn whisper<'a>(
     ctx: &CommandContext<'a>,
     title: &str,
@@ -86,6 +81,7 @@ pub(crate) async fn whisper<'a>(
     send_chunked_reply(ctx, title, description, Colour::BLURPLE, true).await
 }
 
+/// Send an ephemeral error response.
 pub(crate) async fn whisper_error<'a>(
     ctx: &CommandContext<'a>,
     title: &str,
@@ -94,6 +90,7 @@ pub(crate) async fn whisper_error<'a>(
     send_chunked_reply(ctx, title, description, Colour::ROSEWATER, true).await
 }
 
+/// Send a reply.
 pub(crate) async fn reply<'a>(
     ctx: &CommandContext<'a>,
     title: &str,
@@ -102,6 +99,7 @@ pub(crate) async fn reply<'a>(
     send_chunked_reply(ctx, title, description, Colour::PURPLE, false).await
 }
 
+/// Send an error response.
 pub(crate) async fn reply_error<'a>(
     ctx: &CommandContext<'a>,
     title: &str,
@@ -110,7 +108,8 @@ pub(crate) async fn reply_error<'a>(
     send_chunked_reply(ctx, title, description, Colour::RED, false).await
 }
 
-pub(crate) async fn send_chunked_reply<'a>(
+/// Send a reply, divided into chunks if needed, to fit replies into Discord's message limit.
+async fn send_chunked_reply<'a>(
     ctx: &CommandContext<'a>,
     title: &str,
     description: &str,
@@ -133,24 +132,6 @@ pub(crate) async fn send_chunked_reply<'a>(
 
     Ok(results)
 }
-
-// /// Log errors encountered when sending messages, and cache successful sent messages.
-// ///
-// /// ### Arguments
-// ///
-// /// - `task` - the async task that attempts to send a message.
-// /// - `message_cache` - the cache to store sent messages in.
-// pub(crate) async fn handle_send_result(
-//     task: impl Future<Output = Result<Message, SerenityError>>,
-//     message_cache: &MessageCache,
-// ) {
-//     match task.await {
-//         Ok(msg) => {
-//             message_cache.store((msg.id, msg.channel_id).into(), msg).await;
-//         },
-//         Err(err) => error!("Error sending message: {:?}", err),
-//     };
-// }
 
 // pub(crate) async fn submit_bug_report(
 //     message: &str,

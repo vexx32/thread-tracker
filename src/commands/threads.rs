@@ -21,12 +21,6 @@ use crate::{
 };
 
 /// Get an iterator for the entries from the threads table for the given user.
-///
-/// ### Arguments
-///
-/// - `database` - the database to retrieve entries from
-/// - `user` the user to get thread entries for
-/// - `category` the category to filter results by
 pub(crate) async fn enumerate(
     database: &Database,
     user: &GuildUser,
@@ -35,13 +29,14 @@ pub(crate) async fn enumerate(
     Ok(db::list_threads(database, user.guild_id.0, user.user_id.0, category).await?.into_iter())
 }
 
+/// Iterate over the tracked ChannelId values from the threads table.
 pub(crate) async fn enumerate_tracked_channel_ids(
     database: &Database,
 ) -> sqlx::Result<impl Iterator<Item = ChannelId>> {
     Ok(db::get_global_tracked_thread_ids(database)
         .await?
         .into_iter()
-        .map(|t| ChannelId(t.channel_id as u64)))
+        .map(|t| ChannelId(t.channel_id)))
 }
 
 /// Add thread(s) to tracking.
@@ -293,7 +288,7 @@ pub(crate) async fn send_list(
     let title = "Currently tracked threads";
 
     let threads_list =
-        get_list(ctx.author(), guild_id, category.as_deref(), ctx.data(), &ctx).await?;
+        get_threads_and_todos(ctx.author(), guild_id, category.as_deref(), ctx.data(), &ctx).await?;
 
     reply(&ctx, title, &threads_list).await?;
 
@@ -325,16 +320,7 @@ pub(crate) async fn send_pending_list(
 }
 
 /// Get the list of threads and todos.
-///
-/// ### Arguments
-///
-/// - `title` - the title to use for the thread list
-/// - `user` - the user which requested the thread list
-/// - `guild_id` - the guild ID the threads are tracked in
-/// - `category` - the category to filter the threads/todos by
-/// - `data` - the contextual data from the command
-/// - `context` - the Serenity context
-pub(crate) async fn get_list(
+pub(crate) async fn get_threads_and_todos(
     user: &User,
     guild_id: GuildId,
     category: Option<&str>,
@@ -400,15 +386,6 @@ pub(crate) async fn get_list(
 }
 
 /// Get the list of threads pending reply.
-///
-/// ### Arguments
-///
-/// - `title` - the title to use for the thread list
-/// - `user` - the user which requested the thread list
-/// - `guild_id` - the guild ID the threads are tracked in
-/// - `category` - the category to filter the threads/todos by
-/// - `data` - the contextual data from the command
-/// - `context` - the Serenity context
 pub(crate) async fn get_pending_thread_list(
     user: &User,
     guild_id: GuildId,
@@ -556,6 +533,7 @@ pub(crate) async fn notify_replies_off(ctx: CommandContext<'_>) -> CommandResult
     Ok(())
 }
 
+/// Send reply notification DMs to all users tracking the thread a new reply was posted in.
 pub(crate) async fn send_reply_notification(reply: Message, database: Database, context: impl CacheHttp) {
     let guild_id = match reply.guild_id {
         Some(id) => id,
@@ -635,13 +613,6 @@ pub(crate) async fn send_reply_notification(reply: Message, database: Database, 
 }
 
 /// Get a random thread for the current user that is awaiting a reply.
-///
-/// ### Arguments
-///
-/// - `category` - constrain the selection to the given category
-/// - `user` - the user to find a random thread for
-/// - `guild_id` - the guild to find a random tracked thread in
-/// - `context` - the Serenity context
 pub(crate) async fn get_random_thread(
     category: Option<&str>,
     user: &User,
@@ -662,13 +633,6 @@ pub(crate) async fn get_random_thread(
 }
 
 /// Get the list of threads which are pending replies.
-///
-/// ### Arguments
-///
-/// - `category` - constrain the selection to the given category
-/// - `user` - the user to find a random thread for
-/// - `guild_id` - the guild to find a random tracked thread in
-/// - `context` - the Serenity context
 async fn get_pending_threads(
     category: Option<&str>,
     user: &User,
@@ -697,15 +661,6 @@ async fn get_pending_threads(
 }
 
 /// Build a formatted thread and todo list message.
-///
-/// ### Arguments
-///
-/// - `threads` - the list of threads
-/// - `todos` - the list of todos
-/// - `muses` - the target user's muses
-/// - `user` - the target user
-/// - `context` - the event context
-/// - `message_cache` - the message cache
 pub(crate) async fn get_formatted_list(
     threads: Vec<TrackedThread>,
     todos: Vec<Todo>,
@@ -819,6 +774,7 @@ async fn get_last_responder(
     }
 }
 
+/// Get the last message from a channel, if any.
 async fn get_last_channel_message(
     channel: GuildChannel,
     context: impl CacheHttp,
