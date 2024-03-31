@@ -14,11 +14,28 @@ use crate::{
     commands::{muses, todos, CommandContext, CommandError, CommandResult},
     consts::{MAX_EMBED_CHARS, THREAD_NAME_LENGTH},
     db::{self, add_subscriber, remove_subscriber, Todo, TrackedThread},
-    messaging::{dm, reply, reply_error, whisper, whisper_error, send_invalid_command_call_error},
+    messaging::{dm, reply, reply_error, send_invalid_command_call_error, whisper, whisper_error},
     utils::*,
     Data,
     Database,
 };
+
+struct LastReplyInfo {
+    author: User,
+    timestamp: Timestamp,
+}
+
+impl From<Message> for LastReplyInfo {
+    fn from(value: Message) -> Self {
+        Self { author: value.author, timestamp: value.timestamp }
+    }
+}
+
+impl From<&Message> for LastReplyInfo {
+    fn from(value: &Message) -> Self {
+        Self { author: value.author.clone(), timestamp: value.timestamp }
+    }
+}
 
 /// Get an iterator for the entries from the threads table for the given user.
 pub(crate) async fn enumerate(
@@ -567,7 +584,11 @@ pub(crate) async fn notify_replies_off(ctx: CommandContext<'_>) -> CommandResult
 }
 
 /// Send reply notification DMs to all users tracking the thread a new reply was posted in.
-pub(crate) async fn send_reply_notification(reply: Message, database: Database, context: impl CacheHttp) {
+pub(crate) async fn send_reply_notification(
+    reply: Message,
+    database: Database,
+    context: impl CacheHttp,
+) {
     let guild_id = match reply.guild_id {
         Some(id) => id,
         None => return,
@@ -630,8 +651,7 @@ pub(crate) async fn send_reply_notification(reply: Message, database: Database, 
                     info!("Sending reply notification to user ID {}", user);
 
                     if let Err(e) =
-                        dm(&context, user, &content, preview_title, reply_preview.as_deref())
-                            .await
+                        dm(&context, user, &content, preview_title, reply_preview.as_deref()).await
                     {
                         error!("Unable to DM user {} for thread reply notification: {}", user, e);
                     }
@@ -680,9 +700,9 @@ async fn get_pending_threads(
     for thread in enumerate(&data.database, &guild_user, category).await? {
         let last_message_author = get_last_responder(&thread, context, &data.message_cache).await;
         match last_message_author {
-            Some(author) => {
-                let last_author_name = get_nick_or_name(&author, guild_id, context).await;
-                if author.id != user.id && !muses.contains(&last_author_name) {
+            Some(reply_info) => {
+                let last_author_name = get_nick_or_name(&reply_info.author, guild_id, context).await;
+                if reply_info.author.id != user.id && !muses.contains(&last_author_name) {
                     pending_threads.push((last_author_name, thread));
                 }
             },
@@ -781,7 +801,7 @@ async fn get_last_responder(
     thread: &TrackedThread,
     context: impl CacheHttp,
     message_cache: &MessageCache,
-) -> Option<User> {
+) -> Option<LastReplyInfo> {
     match context.http().get_channel(thread.channel_id).await {
         Ok(Channel::Guild(channel)) => {
             let last_message = if let Some(last_message_id) = channel.last_message_id {
@@ -799,8 +819,8 @@ async fn get_last_responder(
             // Messages can be deleted or otherwise unavailable, so this fallback should get the most recent
             // *available* message in the channel.
             match last_message {
-                Some(m) => Some(m.author.clone()),
-                None => get_last_channel_message(channel, context).await.map(|m| m.author),
+                Some(m) => Some(m.as_ref().into()),
+                None => get_last_channel_message(channel, context).await.map(|m| m.into()),
             }
         },
         _ => None,
@@ -847,14 +867,16 @@ async fn push_thread_line<'a>(
     message.push("- ").push(link).push(" — ");
 
     match last_message_author {
-        Some(user) => {
-            let last_author_name = get_nick_or_name(&user, thread.guild_id(), context).await;
-            if user.id == user_id || muses.contains(&last_author_name) {
-                message.push_line(last_author_name)
+        Some(reply_info) => {
+            let last_author_name = get_nick_or_name(&reply_info.author, thread.guild_id(), context).await;
+            if reply_info.author.id == user_id || muses.contains(&last_author_name) {
+                message.push(last_author_name);
             }
             else {
-                message.push_line(Bold + last_author_name)
+                message.push(Bold + last_author_name);
             }
+
+            message.push_line(format!(" (<t:{}:R>)", reply_info.timestamp.unix_timestamp()))
         },
         None => message.push_line(Bold + "No replies yet"),
     }
