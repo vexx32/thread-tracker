@@ -1,7 +1,8 @@
 use poise::serenity_prelude::UserId;
 use serenity::{utils::Colour, Result, http::CacheHttp};
+use tracing::error;
 
-use crate::{commands::CommandContext, consts::*, utils};
+use crate::{commands::{CommandContext, CommandResult}, consts::*, utils};
 
 /// Mapping enum to select appropriate help messages for various commands and retrieve the associated text.
 pub(crate) enum HelpMessage {
@@ -131,6 +132,17 @@ async fn send_chunked_reply<'a>(
     }
 
     Ok(results)
+}
+
+pub(crate) async fn send_invalid_command_call_error(ctx: CommandContext<'_>) -> CommandResult<()>
+{
+    let result = whisper_error(&ctx, "Invalid command called", "The command you called is not intended to be called directly. This may happen if command registrations have been recently updated. Check for any subcommands or other options when trying to enter the command and use those as well instead of only this base command.").await;
+
+    if let Err(e) = result {
+        error!("Error sending an error response to the user: {}", e);
+    }
+
+    Ok(())
 }
 
 // pub(crate) async fn submit_bug_report(

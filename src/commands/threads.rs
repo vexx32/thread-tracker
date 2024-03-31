@@ -14,7 +14,7 @@ use crate::{
     commands::{muses, todos, CommandContext, CommandError, CommandResult},
     consts::{MAX_EMBED_CHARS, THREAD_NAME_LENGTH},
     db::{self, add_subscriber, remove_subscriber, Todo, TrackedThread},
-    messaging::{dm, reply, reply_error, whisper, whisper_error},
+    messaging::{dm, reply, reply_error, whisper, whisper_error, send_invalid_command_call_error},
     utils::*,
     Data,
     Database,
@@ -179,15 +179,25 @@ pub(crate) async fn set_category(
     Ok(())
 }
 
-/// Remove thread(s) from tracking.
-#[poise::command(slash_command, guild_only, rename = "tt_untrack", category = "Thread tracking")]
-pub(crate) async fn remove(
+/// Remove threads from tracking.
+#[poise::command(
+    slash_command,
+    guild_only,
+    rename = "tt_untrack",
+    category = "Thread tracking",
+    subcommands("untrack_thread", "untrack_category")
+)]
+pub(crate) async fn untrack(ctx: CommandContext<'_>) -> CommandResult<()> {
+    send_invalid_command_call_error(ctx).await
+}
+
+/// Remove an individual thread from tracking.
+#[poise::command(slash_command, guild_only, rename = "thread")]
+pub(crate) async fn untrack_thread(
     ctx: CommandContext<'_>,
     #[description = "The thread or channel to remove from tracking"]
     #[channel_types("NewsThread", "PrivateThread", "PublicThread", "Text")]
-    thread: Option<GuildChannel>,
-    #[description = "Category to untrack all threads from; use 'all' to untrack everything"]
-    category: Option<String>,
+    thread: GuildChannel,
 ) -> CommandResult<()> {
     const ERROR_TITLE: &str = "Error adding tracked thread";
 
@@ -198,11 +208,58 @@ pub(crate) async fn remove(
         },
     };
 
-    if thread.is_none() && category.is_none() {
-        return Err(CommandError::new(
-            "tt_untrack called with neither thread nor category to remove",
-        ));
+    let data = ctx.data();
+    let database = &data.database;
+    let user = ctx.author();
+
+    let mut threads_removed = MessageBuilder::new();
+    let mut errors = MessageBuilder::new();
+
+    info!("removing tracked thread `{}` for {} ({})", thread.id, user.name, user.id);
+    let result = db::remove_thread(database, guild_id.0, thread.id.0, user.id.0).await;
+
+    match result {
+        Ok(0) => {
+            errors.push_line(format!("- {} is not currently being tracked", thread.id.mention()))
+        },
+        Ok(_) => {
+            data.remove_tracked_thread(thread.id).await.ok();
+            threads_removed.push_line(format!("- {:}", thread.id.mention()))
+        },
+        Err(e) => errors.push_line(format!(
+            "- Failed to unregister thread {}: {}",
+            thread.id.mention(),
+            e
+        )),
+    };
+
+    if !errors.0.is_empty() {
+        error!("Errors handling thread removal:\n{}", errors);
+        reply_error(&ctx, ERROR_TITLE, &errors.build()).await?;
     }
+
+    if !threads_removed.0.is_empty() {
+        reply(&ctx, "Tracked threads removed", &threads_removed.build()).await?;
+    }
+
+    Ok(())
+}
+
+/// Remove all threads in the selected category from tracking.
+#[poise::command(slash_command, guild_only, rename = "category")]
+pub(crate) async fn untrack_category(
+    ctx: CommandContext<'_>,
+    #[description = "Category to untrack all threads from; use 'all' to untrack everything"]
+    name: String,
+) -> CommandResult<()> {
+    const ERROR_TITLE: &str = "Error adding tracked thread";
+
+    let guild_id = match ctx.guild_id() {
+        Some(id) => id,
+        None => {
+            return Err(CommandError::new("Unable to manage tracked threads outside of a server"))
+        },
+    };
 
     let data = ctx.data();
     let database = &data.database;
@@ -211,52 +268,29 @@ pub(crate) async fn remove(
     let mut threads_removed = MessageBuilder::new();
     let mut errors = MessageBuilder::new();
 
-    if let Some(thread) = thread {
-        info!("removing tracked thread `{}` for {} ({})", thread.id, user.name, user.id);
-        let result = db::remove_thread(database, guild_id.0, thread.id.0, user.id.0).await;
+    let (category, category_message) = match name.to_lowercase().as_str() {
+        "all" => (None, String::new()),
+        _ => (Some(name.as_str()), format!(" in category {}", name)),
+    };
 
-        match result {
-            Ok(0) => errors
-                .push_line(format!("- {} is not currently being tracked", thread.id.mention())),
-            Ok(_) => {
-                data.remove_tracked_thread(thread.id).await.ok();
-                threads_removed.push_line(format!("- {:}", thread.id.mention()))
-            },
-            Err(e) => errors.push_line(format!(
-                "- Failed to unregister thread {}: {}",
-                thread.id.mention(),
-                e
-            )),
-        };
-    }
+    info!("removing all tracked threads{} for {} ({})", category_message, user.name, user.id);
+    match db::remove_all_threads(database, guild_id.0, user.id.0, category).await {
+        Ok(0) => threads_removed
+            .push_line(format!("No threads are currently being tracked{}.", category_message)),
+        Ok(count) => threads_removed
+            .push_line(format!("All {} threads{} removed from tracking.", count, category_message)),
+        Err(e) => {
+            error!(
+                "Error untracking all threads{} for user {} ({}): {}",
+                category_message, user.name, user.id, e
+            );
+            errors.push_line(format!("Error untracking all threads{}: {}", category_message, e))
+        },
+    };
 
-    if let Some(category) = category {
-        let (category, category_message) = match category.to_lowercase().as_str() {
-            "all" => (None, String::new()),
-            _ => (Some(category.as_str()), format!(" in category {}", category)),
-        };
-
-        info!("removing all tracked threads{} for {} ({})", category_message, user.name, user.id);
-        match db::remove_all_threads(database, guild_id.0, user.id.0, category).await {
-            Ok(0) => threads_removed
-                .push_line(format!("No threads are currently being tracked{}.", category_message)),
-            Ok(count) => threads_removed.push_line(format!(
-                "All {} threads{} removed from tracking.",
-                count, category_message
-            )),
-            Err(e) => {
-                error!(
-                    "Error untracking all threads{} for user {} ({}): {}",
-                    category_message, user.name, user.id, e
-                );
-                errors.push_line(format!("Error untracking all threads{}: {}", category_message, e))
-            },
-        };
-
-        if let Err(e) = data.update_tracked_threads().await {
-            error!("Error updating in-memory list of tracked threads: {}", e)
-        };
-    }
+    if let Err(e) = data.update_tracked_threads().await {
+        error!("Error updating in-memory list of tracked threads: {}", e)
+    };
 
     if !errors.0.is_empty() {
         error!("Errors handling thread removal:\n{}", errors);
@@ -288,7 +322,8 @@ pub(crate) async fn send_list(
     let title = "Currently tracked threads";
 
     let threads_list =
-        get_threads_and_todos(ctx.author(), guild_id, category.as_deref(), ctx.data(), &ctx).await?;
+        get_threads_and_todos(ctx.author(), guild_id, category.as_deref(), ctx.data(), &ctx)
+            .await?;
 
     reply(&ctx, title, &threads_list).await?;
 
@@ -493,10 +528,8 @@ pub(crate) async fn send_random_thread(
     rename = "tt_notify",
     subcommands("notify_replies_on", "notify_replies_off")
 )]
-pub(crate) async fn notify_replies(_: CommandContext<'_>) -> CommandResult<()> {
-    // Slash commands make the "root" command for subcommands un-callable, so
-    // just do nothing here.
-    Ok(())
+pub(crate) async fn notify_replies(ctx: CommandContext<'_>) -> CommandResult<()> {
+    send_invalid_command_call_error(ctx).await
 }
 
 /// Subscribe for DMs whenever there's a reply to one of your tracked threads.
@@ -808,7 +841,7 @@ async fn push_thread_line<'a>(
 ) -> &'a mut MessageBuilder {
     let last_message_author = get_last_responder(thread, context, message_cache).await;
 
-    let link =
+    let link: MessageBuilder =
         get_thread_link(thread, guild_threads.get(&thread.channel_id()).cloned(), context).await;
     // Thread entries in blockquotes
     message.push("- ").push(link).push(" — ");

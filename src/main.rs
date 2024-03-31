@@ -328,14 +328,17 @@ impl EventHandler for Handler {
         data.guild_count.store(guild_count, Ordering::Relaxed);
 
         let commands = poise::builtins::create_application_commands(&self.options.commands);
+
+        // Register current commands.
         let result = Command::set_global_application_commands(&ctx, |cmds| {
             *cmds = commands;
             cmds
         })
         .await;
 
-        if let Err(e) = result {
-            error!("Unable to register commands globally: {}", e);
+        match result {
+            Ok(cmds) => info!("Successfully updated global command registration with {} commands", cmds.len()),
+            Err(e) => error!("Unable to register commands globally: {}", e),
         }
 
         run_periodic_shard_tasks(&ctx, &self.channel);
