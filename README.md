@@ -1,6 +1,6 @@
 # Thread Tracker
 
-A simple Discord bot built in Rust with [Serenity](https://docs.rs/serenity/latest/serenity/) and kept running with [Shuttle.rs](https://shuttle.rs).
+A simple Discord bot built in Rust with [Serenity](https://docs.rs/serenity/latest/serenity/) and [Poise](https://docs.rs/poise/latest/poise/).
 
 ## Get Started
 
