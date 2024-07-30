@@ -11,12 +11,12 @@ use serenity::{
     prelude::*,
     utils::{ContentModifier::*, EmbedMessageBuilding, MessageBuilder},
 };
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::{
     commands::{CommandContext, CommandResult, CommandError},
     consts::setting_names::*,
-    messaging::{send_invalid_command_call_error, whisper, whisper_error, reply}, db::{update_user_setting, get_user_setting, add_scheduled_message},
+    messaging::{send_invalid_command_call_error, whisper, whisper_error, reply, reply_error}, db::{update_user_setting, get_user_setting, add_scheduled_message, get_scheduled_message, delete_scheduled_message},
 };
 
 #[derive(Debug)]
@@ -58,10 +58,40 @@ impl ChoiceParameter for TimeZoneParameter {
     guild_only,
     rename = "tt_schedule",
     category = "Scheduling",
-    subcommands("add_message", "set_timezone")
+    subcommands("add_message", "remove_message", "set_timezone")
 )]
 pub(crate) async fn schedule(ctx: CommandContext<'_>) -> CommandResult<()> {
     send_invalid_command_call_error(ctx).await
+}
+
+/// Delete a scheduled message
+#[poise::command(slash_command, guild_only, rename = "remove", category = "Scheduling")]
+pub(crate) async fn remove_message(
+    ctx: CommandContext<'_>,
+    #[description = "The numeric ID of the message to delete"]
+    message_id: i64,
+) -> CommandResult<()> {
+    const REPLY_TITLE: &str = "Remove scheduled message";
+
+    let data = ctx.data();
+    let author = ctx.author();
+
+    let Some(message) = get_scheduled_message(&data.database, message_id).await? else {
+        return Err(CommandError::new(format!("Could not find a message with the ID {}", message_id)))
+    };
+
+    if message.user_id() != author.id {
+        warn!("User {} ({}) attempted to delete message with ID {} which is owned by user ID {}", author.name, author.id, message_id, message.user_id());
+        return Err(CommandError::new(format!("Could not find a message with the ID {}", message_id)))
+    }
+
+    match delete_scheduled_message(&data.database, message_id).await {
+        Ok(true) => reply(&ctx, REPLY_TITLE, "Scheduled message deleted successfully.").await?,
+        Ok(false) => reply_error(&ctx, REPLY_TITLE, "Scheduled message was not found or could not be deleted.").await?,
+        Err(e) => return Err(CommandError::detailed("Error deleting scheduled message", e)),
+    };
+
+    Ok(())
 }
 
 /// Add a new scheduled message
