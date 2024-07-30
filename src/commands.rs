@@ -1,6 +1,7 @@
 pub(crate) mod greetings;
 pub(crate) mod help;
 pub(crate) mod muses;
+pub(crate) mod scheduling;
 pub(crate) mod stats;
 pub(crate) mod threads;
 pub(crate) mod todos;
@@ -9,6 +10,8 @@ pub(crate) mod watchers;
 use std::{borrow::Cow, fmt::Display};
 
 use crate::{Data, Error};
+
+use poise::ChoiceParameter;
 
 pub(crate) type CommandContext<'a> = poise::Context<'a, Data, CommandError>;
 pub(crate) type CommandResult<T> = std::result::Result<T, CommandError>;
@@ -58,6 +61,14 @@ impl From<sqlx::Error> for CommandError {
     }
 }
 
+#[derive(Debug, Copy, Clone, ChoiceParameter)]
+pub(crate) enum SortResultsBy {
+    #[name = "Oldest first"]
+    OldestFirst,
+    #[name = "Newest first"]
+    NewestFirst,
+}
+
 /// Retrieve the full list of commands for the bot.
 pub(crate) fn list() -> Vec<poise::Command<Data, CommandError>> {
     vec![
@@ -67,6 +78,7 @@ pub(crate) fn list() -> Vec<poise::Command<Data, CommandError>> {
         muses::remove(),
         muses::list(),
         stats::send_statistics(),
+        scheduling::schedule(),
         threads::add(),
         threads::untrack(),
         threads::set_category(),

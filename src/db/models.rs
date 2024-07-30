@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+use chrono::NaiveDateTime;
+use chrono_tz::Tz;
 use poise::serenity_prelude::{ChannelId, GuildId, MessageId, UserId};
 use sqlx::FromRow;
 
@@ -131,4 +133,57 @@ pub(crate) struct Statistics {
     pub muses: i64,
     pub todos: i64,
     pub watchers: i64,
+}
+
+#[derive(FromRow)]
+pub(crate) struct UserSetting {
+    #[sqlx(try_from = "i64")]
+    pub user_id: u64,
+    pub name: String,
+    pub value: String,
+}
+
+impl UserSetting {
+    pub(crate) fn user_id(&self) -> UserId {
+        self.user_id.into()
+    }
+}
+
+#[derive(FromRow)]
+pub(crate) struct ScheduledMessage {
+    pub id: i64,
+    #[sqlx(try_from = "i64")]
+    pub user_id: u64,
+    #[sqlx(try_from = "i64")]
+    pub channel_id: u64,
+    pub datetime: String,
+    pub repeat: String,
+    pub title: String,
+    pub message: String,
+}
+
+impl ScheduledMessage {
+    pub(crate) fn user_id(&self) -> UserId {
+        self.user_id.into()
+    }
+
+    pub(crate) fn channel_id(&self) -> ChannelId {
+        self.channel_id.into()
+    }
+}
+
+#[derive(FromRow)]
+pub(crate) struct ScheduledMessageSummary {
+    pub id: i64,
+    #[sqlx(try_from = "i64")]
+    pub channel_id: u64,
+    pub datetime: String,
+    pub repeat: String,
+    pub title: String,
+}
+
+impl ScheduledMessageSummary {
+    pub(crate) fn channel_id(&self) -> ChannelId {
+        self.channel_id.into()
+    }
 }

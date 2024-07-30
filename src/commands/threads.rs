@@ -1,17 +1,17 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::{collections::{BTreeMap, BTreeSet, HashMap}, sync::Arc, cmp::Reverse};
 
 use rand::Rng;
 use serenity::{
-    http::{CacheHttp, Http},
+    http::CacheHttp,
     model::prelude::*,
     prelude::*,
-    utils::{ContentModifier::*, EmbedMessageBuilding, MessageBuilder},
+    utils::{ContentModifier::*, EmbedMessageBuilding, MessageBuilder}, builder::GetMessages,
 };
 use tracing::{error, info};
 
 use crate::{
     cache::MessageCache,
-    commands::{muses, todos, CommandContext, CommandError, CommandResult},
+    commands::{muses, todos, CommandContext, CommandError, CommandResult, SortResultsBy},
     consts::{MAX_EMBED_CHARS, THREAD_NAME_LENGTH},
     db::{self, add_subscriber, remove_subscriber, Todo, TrackedThread},
     messaging::{dm, reply, reply_error, send_invalid_command_call_error, whisper, whisper_error},
@@ -22,18 +22,23 @@ use crate::{
 
 struct LastReplyInfo {
     author: User,
+    author_nick: String,
     timestamp: Timestamp,
 }
 
-impl From<Message> for LastReplyInfo {
-    fn from(value: Message) -> Self {
-        Self { author: value.author, timestamp: value.timestamp }
+impl LastReplyInfo {
+    fn new(message: &Message, author_nick: String) -> Self {
+        Self {
+            author: message.author.clone(),
+            author_nick,
+            timestamp: message.timestamp,
+        }
     }
 }
 
-impl From<&Message> for LastReplyInfo {
-    fn from(value: &Message) -> Self {
-        Self { author: value.author.clone(), timestamp: value.timestamp }
+impl PartialEq for LastReplyInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.author == other.author && self.author_nick == other.author_nick && self.timestamp == other.timestamp
     }
 }
 
@@ -43,7 +48,7 @@ pub(crate) async fn enumerate(
     user: &GuildUser,
     category: Option<&str>,
 ) -> anyhow::Result<impl Iterator<Item = TrackedThread>> {
-    Ok(db::list_threads(database, user.guild_id.0, user.user_id.0, category).await?.into_iter())
+    Ok(db::list_threads(database, user.guild_id.get(), user.user_id.get(), category).await?.into_iter())
 }
 
 /// Iterate over the tracked ChannelId values from the threads table.
@@ -53,7 +58,7 @@ pub(crate) async fn enumerate_tracked_channel_ids(
     Ok(db::get_global_tracked_thread_ids(database)
         .await?
         .into_iter()
-        .map(|t| ChannelId(t.channel_id)))
+        .map(|t| ChannelId::new(t.channel_id)))
 }
 
 /// Add thread(s) to tracking.
@@ -86,7 +91,7 @@ pub(crate) async fn add(
             cache_last_channel_message(channel.guild().as_ref(), ctx, message_cache).await;
 
             let result =
-                db::add_thread(database, guild_id.0, thread.id.0, user.id.0, category.as_deref())
+                db::add_thread(database, guild_id.get(), thread.id.get(), user.id.get(), category.as_deref())
                     .await;
             match result {
                 Ok(true) => {
@@ -157,9 +162,9 @@ pub(crate) async fn set_category(
     match thread.id.to_channel(ctx).await {
         Ok(_) => match db::update_thread_category(
             database,
-            guild_id.0,
-            thread.id.0,
-            user.id.0,
+            guild_id.get(),
+            thread.id.get(),
+            user.id.get(),
             category.as_deref(),
         )
         .await
@@ -233,7 +238,7 @@ pub(crate) async fn untrack_thread(
     let mut errors = MessageBuilder::new();
 
     info!("removing tracked thread `{}` for {} ({})", thread.id, user.name, user.id);
-    let result = db::remove_thread(database, guild_id.0, thread.id.0, user.id.0).await;
+    let result = db::remove_thread(database, guild_id.get(), thread.id.get(), user.id.get()).await;
 
     match result {
         Ok(0) => {
@@ -291,7 +296,7 @@ pub(crate) async fn untrack_category(
     };
 
     info!("removing all tracked threads{} for {} ({})", category_message, user.name, user.id);
-    match db::remove_all_threads(database, guild_id.0, user.id.0, category).await {
+    match db::remove_all_threads(database, guild_id.get(), user.id.get(), category).await {
         Ok(0) => threads_removed
             .push_line(format!("No threads are currently being tracked{}.", category_message)),
         Ok(count) => threads_removed
@@ -326,6 +331,7 @@ pub(crate) async fn untrack_category(
 pub(crate) async fn send_list(
     ctx: CommandContext<'_>,
     #[description = "Only show threads from this category"] category: Option<String>,
+    #[description = "How to sort the threads in the list, based on the most recent reply"] sort: Option<SortResultsBy>,
 ) -> CommandResult<()> {
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
@@ -339,7 +345,7 @@ pub(crate) async fn send_list(
     let title = "Currently tracked threads";
 
     let threads_list =
-        get_threads_and_todos(ctx.author(), guild_id, category.as_deref(), ctx.data(), &ctx)
+        get_threads_and_todos(ctx.author(), guild_id, category.as_deref(), sort, ctx.data(), &ctx)
             .await?;
 
     reply(&ctx, title, &threads_list).await?;
@@ -352,6 +358,7 @@ pub(crate) async fn send_list(
 pub(crate) async fn send_pending_list(
     ctx: CommandContext<'_>,
     #[description = "Only show threads from this category"] category: Option<String>,
+    #[description = "How to sort the threads in the list, based on the most recent reply"] sort: Option<SortResultsBy>,
 ) -> CommandResult<()> {
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
@@ -363,7 +370,7 @@ pub(crate) async fn send_pending_list(
     ctx.defer().await?;
 
     let threads_list =
-        get_pending_thread_list(ctx.author(), guild_id, category.as_deref(), ctx.data(), &ctx)
+        get_pending_thread_list(ctx.author(), guild_id, category.as_deref(), sort, ctx.data(), &ctx)
             .await?;
 
     reply(&ctx, "Threads awaiting replies", &threads_list).await?;
@@ -376,6 +383,7 @@ pub(crate) async fn get_threads_and_todos(
     user: &User,
     guild_id: GuildId,
     category: Option<&str>,
+    sort: Option<SortResultsBy>,
     data: &Data,
     context: &impl CacheHttp,
 ) -> CommandResult<String> {
@@ -421,7 +429,7 @@ pub(crate) async fn get_threads_and_todos(
     };
 
     let message =
-        match get_formatted_list(threads, todos, muses, &guild_user, context, &data.message_cache)
+        match get_formatted_list(threads, todos, muses, sort, &guild_user, context, &data.message_cache)
             .await
         {
             Ok(m) => m,
@@ -442,6 +450,7 @@ pub(crate) async fn get_pending_thread_list(
     user: &User,
     guild_id: GuildId,
     category: Option<&str>,
+    sort_threads: Option<SortResultsBy>,
     data: &Data,
     context: &impl CacheHttp,
 ) -> CommandResult<String> {
@@ -452,16 +461,26 @@ pub(crate) async fn get_pending_thread_list(
     let categorised_threads = partition_into_map(pending_threads, |item| item.1.category.clone());
 
     let mut message = MessageBuilder::new();
-    for name in categorised_threads.keys() {
+
+    for (name, mut threads) in categorised_threads {
         if let Some(n) = name {
             message.push("### ").push_line(n).push_line("");
         }
 
-        if let Some(threads) = categorised_threads.get(name) {
-            for (last_responder, thread) in threads {
-                let link = get_thread_link(thread, None, context).await;
-                message.push("- ").push(link).push(" — ").push_line(Bold + last_responder);
+        if let Some(sort_order) = sort_threads {
+            match sort_order {
+                SortResultsBy::NewestFirst => {
+                    threads.sort_by_key(|item| Reverse(item.0.timestamp));
+                },
+                SortResultsBy::OldestFirst => {
+                    threads.sort_by_key(|item| item.0.timestamp);
+                }
             }
+        }
+
+        for (reply_info, thread) in threads {
+            let link = get_thread_link(&thread, None, context).await;
+            message.push("- ").push(link.to_string()).push(" — ").push_line(Bold + &reply_info.author_nick);
         }
 
         message.push_line("");
@@ -502,7 +521,7 @@ pub(crate) async fn send_random_thread(
         Ok(None) => {
             message.push("Congrats! You don't seem to have any threads that are waiting on your reply! :tada:");
         },
-        Ok(Some((last_author, thread))) => {
+        Ok(Some((reply_info, thread))) => {
             message.push("Titi has chosen... this thread");
 
             if let Some(category) = &thread.category {
@@ -517,12 +536,12 @@ pub(crate) async fn send_random_thread(
 
             message.push_line("");
             message
-                .push_quote(get_thread_link(&thread, None, &ctx).await)
+                .push_quote(get_thread_link(&thread, None, &ctx).await.build())
                 .push(" — ")
-                .push_line(Bold + last_author);
+                .push_line(Bold + reply_info.author_nick);
         },
         Err(e) => {
-            errors.push("- ").push_line(e);
+            errors.push("- ").push_line(e.to_string());
         },
     };
 
@@ -666,12 +685,12 @@ pub(crate) async fn send_reply_notification(
 }
 
 /// Get a random thread for the current user that is awaiting a reply.
-pub(crate) async fn get_random_thread(
+async fn get_random_thread(
     category: Option<&str>,
     user: &User,
     guild_id: GuildId,
     context: &CommandContext<'_>,
-) -> CommandResult<Option<(String, TrackedThread)>> {
+) -> CommandResult<Option<(LastReplyInfo, TrackedThread)>> {
     let mut pending_threads =
         get_pending_threads(category, user, guild_id, context, context.data()).await?;
 
@@ -692,21 +711,17 @@ async fn get_pending_threads(
     guild_id: GuildId,
     context: &impl CacheHttp,
     data: &Data,
-) -> CommandResult<Vec<(String, TrackedThread)>> {
+) -> CommandResult<Vec<(LastReplyInfo, TrackedThread)>> {
     let guild_user = GuildUser { user_id: user.id, guild_id };
     let muses = muses::get_list(&data.database, guild_user.user_id, guild_user.guild_id).await?;
     let mut pending_threads = Vec::new();
 
     for thread in enumerate(&data.database, &guild_user, category).await? {
-        let last_message_author = get_last_responder(&thread, context, &data.message_cache).await;
-        match last_message_author {
-            Some(reply_info) => {
-                let last_author_name = get_nick_or_name(&reply_info.author, guild_id, context).await;
-                if reply_info.author.id != user.id && !muses.contains(&last_author_name) {
-                    pending_threads.push((last_author_name, thread));
-                }
-            },
-            None => pending_threads.push((String::from("No replies yet"), thread)),
+        let last_reply_info = get_last_responder(&thread, context, &data.message_cache).await;
+        if let Some(reply_info) = last_reply_info {
+            if reply_info.author.id != user.id && !muses.contains(&reply_info.author_nick) {
+                pending_threads.push((reply_info, thread));
+            }
         }
     }
 
@@ -718,11 +733,12 @@ pub(crate) async fn get_formatted_list(
     threads: Vec<TrackedThread>,
     todos: Vec<Todo>,
     muses: Vec<String>,
+    sort: Option<SortResultsBy>,
     user: &GuildUser,
     context: &impl CacheHttp,
     message_cache: &MessageCache,
 ) -> Result<String, SerenityError> {
-    let threads = categorise(threads);
+    let mut threads = categorise(threads);
     let todos = todos::categorise(todos);
 
     let mut guild_threads: HashMap<ChannelId, String> = HashMap::new();
@@ -735,20 +751,33 @@ pub(crate) async fn get_formatted_list(
 
     let mut categories = BTreeSet::new();
     for key in threads.keys() {
-        categories.insert(key);
+        categories.insert(key.clone());
     }
 
     for key in todos.keys() {
-        categories.insert(key);
+        categories.insert(key.clone());
     }
 
     for name in categories {
-        if let Some(n) = name {
+        if let Some(n) = &name {
             message.push("### ").push_line(n).push_line("");
         }
 
-        if let Some(threads) = threads.get(name) {
+        if let Some(threads) = threads.get_mut(&name) {
+            let mut threads_reply_info = Vec::new();
             for thread in threads {
+                let last_responder = get_last_responder(thread, context, message_cache).await;
+                threads_reply_info.push((last_responder, thread));
+            }
+
+            if let Some(sort) = sort {
+                match sort {
+                    SortResultsBy::NewestFirst => threads_reply_info.sort_by_key(|x| x.0.as_ref().map(|r| r.timestamp)),
+                    SortResultsBy::OldestFirst => threads_reply_info.sort_by_key(|x| x.0.as_ref().map(|r| Reverse(r.timestamp))),
+                }
+            }
+
+            for (_, thread) in threads_reply_info {
                 push_thread_line(
                     &mut message,
                     thread,
@@ -762,7 +791,7 @@ pub(crate) async fn get_formatted_list(
             }
         }
 
-        if let Some(todos) = todos.get(name) {
+        if let Some(todos) = todos.get(&name) {
             if name.is_some() {
                 for todo in todos {
                     todos::push_todo_line(&mut message, todo);
@@ -802,7 +831,7 @@ async fn get_last_responder(
     context: impl CacheHttp,
     message_cache: &MessageCache,
 ) -> Option<LastReplyInfo> {
-    match context.http().get_channel(thread.channel_id).await {
+    match context.http().get_channel(thread.channel_id.into()).await {
         Ok(Channel::Guild(channel)) => {
             let last_message = if let Some(last_message_id) = channel.last_message_id {
                 let channel_message = (last_message_id, channel.id).into();
@@ -818,9 +847,17 @@ async fn get_last_responder(
             // This fallback is necessary as Discord may not report a correct or available message as the last_message_id.
             // Messages can be deleted or otherwise unavailable, so this fallback should get the most recent
             // *available* message in the channel.
-            match last_message {
-                Some(m) => Some(m.as_ref().into()),
-                None => get_last_channel_message(channel, context).await.map(|m| m.into()),
+            let last_message = match last_message {
+                Some(m) => Some(m),
+                None => get_last_channel_message(channel, &context).await.map(Arc::new),
+            };
+
+            if let Some(message) = last_message {
+                let nick = get_nick_or_name(&message.author, thread.guild_id(), &context).await;
+                Some(LastReplyInfo::new(message.as_ref(), nick))
+            }
+            else {
+                None
             }
         },
         _ => None,
@@ -833,7 +870,7 @@ async fn get_last_channel_message(
     context: impl CacheHttp,
 ) -> Option<Message> {
     channel
-        .messages(context.http(), |messages| messages.limit(1))
+        .messages(context.http(), GetMessages::new().limit(1))
         .await
         .ok()
         .and_then(|mut m| m.pop())
@@ -861,10 +898,10 @@ async fn push_thread_line<'a>(
 ) -> &'a mut MessageBuilder {
     let last_message_author = get_last_responder(thread, context, message_cache).await;
 
-    let link: MessageBuilder =
+    let mut link: MessageBuilder =
         get_thread_link(thread, guild_threads.get(&thread.channel_id()).cloned(), context).await;
     // Thread entries in blockquotes
-    message.push("- ").push(link).push(" — ");
+    message.push("- ").push(link.build()).push(" — ");
 
     match last_message_author {
         Some(reply_info) => {
@@ -876,7 +913,9 @@ async fn push_thread_line<'a>(
                 message.push(Bold + last_author_name);
             }
 
-            message.push_line(format!(" (<t:{}:R>)", reply_info.timestamp.unix_timestamp()))
+            message.push(" (");
+            message.push_timestamp(reply_info.timestamp);
+            message.push_line(")")
         },
         None => message.push_line(Bold + "No replies yet"),
     }
@@ -891,7 +930,7 @@ async fn get_thread_link(
     let mut link = MessageBuilder::new();
     let channel_name = match name {
         Some(n) => Some(n),
-        None => get_thread_name(thread, cache_http).await,
+        None => get_channel_name(thread.channel_id(), cache_http).await,
     };
 
     match channel_name {
@@ -902,7 +941,7 @@ async fn get_thread_link(
                 format!("https://discord.com/channels/{}/{}", thread.guild_id, thread.channel_id),
             )
         },
-        None => link.push(thread.channel_id().mention()),
+        None => link.push(thread.channel_id().mention().to_string()),
     };
 
     link
@@ -919,27 +958,10 @@ fn trim_string(name: &str, max_length: usize) -> String {
     }
 }
 
-/// Attempt to get the thread name from the Discord API
-async fn get_thread_name(thread: &TrackedThread, cache_http: impl CacheHttp) -> Option<String> {
-    let name = if let Some(cache) = cache_http.cache() {
-        thread.channel_id().name(cache).await
-    }
-    else {
-        None
-    };
-
-    if let Some(n) = name {
-        Some(n)
-    }
-    else {
-        get_channel_name(thread.channel_id(), cache_http).await
-    }
-}
-
 /// Retrieve the most recent message in the given channel and store it in the cache.
 async fn cache_last_channel_message(
     channel: Option<&GuildChannel>,
-    http: impl AsRef<Http>,
+    cache_http: impl CacheHttp,
     message_cache: &MessageCache,
 ) {
     if let Some(channel) = channel {
@@ -947,7 +969,7 @@ async fn cache_last_channel_message(
             let channel_message = (last_message_id, channel.id).into();
 
             if !message_cache.contains_key(&channel_message).await {
-                if let Ok(last_message) = channel_message.fetch(http).await {
+                if let Ok(last_message) = channel_message.fetch(cache_http).await {
                     message_cache.store(channel_message, last_message).await;
                 }
             }

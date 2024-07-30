@@ -4,6 +4,7 @@ use serenity::{
     http::{CacheHttp, Http},
     model::prelude::*,
     prelude::*,
+    utils::MessageBuilder,
 };
 use tracing::{error, info};
 
@@ -30,8 +31,8 @@ pub(crate) struct ChannelMessage {
 
 impl ChannelMessage {
     /// Retrieves the original message from Discord API
-    pub async fn fetch(&self, http: impl AsRef<Http>) -> Result<Message, SerenityError> {
-        self.channel_id.message(http, self.message_id).await
+    pub async fn fetch(&self, cache_http: impl CacheHttp) -> Result<Message, SerenityError> {
+        self.channel_id.message(cache_http, self.message_id).await
     }
 }
 
@@ -182,14 +183,21 @@ pub(crate) async fn register_guild_commands<U, E>(
     ctx: &impl AsRef<Http>,
 ) {
     let commands = poise::builtins::create_application_commands(commands);
-    let result = guild_id
-        .set_application_commands(ctx, |cmds| {
-            *cmds = commands;
-            cmds
-        })
-        .await;
+    let result = guild_id.set_commands(ctx, commands).await;
 
     if let Err(e) = result {
         error!("Unable to register commands in guild {}: {}", guild_id, e);
+    }
+}
+
+/// Custom extensions for MessageBuilder.
+pub(crate) trait MessageBuilderExtensions {
+    /// Push a Discord-formatted timestamp to the message builder.
+    fn push_timestamp(self, timestamp: Timestamp) -> Self;
+}
+
+impl MessageBuilderExtensions for &mut MessageBuilder {
+    fn push_timestamp(self, timestamp: Timestamp) -> Self {
+        self.push(format!("<t:{}:R>", timestamp.unix_timestamp()))
     }
 }

@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use serenity::{model::prelude::*, prelude::*, CacheAndHttp};
+use serenity::{model::prelude::*, prelude::*, gateway::ActivityData};
 use tokio::{task::JoinSet, sync::mpsc::{Receiver, Sender}};
 use tracing::{error, info};
 
@@ -30,7 +30,7 @@ pub(crate) enum Task {
 }
 
 /// Start a new thread which listens for `Task` messages and running the appropriate actions for each task.
-pub(crate) fn listen_for_background_tasks(mut receiver: Receiver<Task>, data: Arc<RwLock<Data>>, context: Arc<CacheAndHttp>) {
+pub(crate) fn listen_for_background_tasks(mut receiver: Receiver<Task>, data: Arc<RwLock<Data>>, context: Arc<impl CacheHttp + 'static>) {
     use Task::*;
 
     info!("Starting background task listening thread");
@@ -90,14 +90,13 @@ where
 /// Performs a set_presence request to ensure the Activity is set correctly.
 pub(crate) async fn heartbeat(ctx: &Context) {
     ctx.set_presence(
-        Some(Activity::watching("over your threads (/tt_help)")),
+        Some(ActivityData::watching("over your threads (/tt_help)")),
         OnlineStatus::Online,
-    )
-    .await;
+    );
     info!("heartbeat set_presence request completed for shard ID {}", ctx.shard_id);
 }
 
-fn start_watcher_update_thread(context: Arc<CacheAndHttp>, database: Database, cache: MessageCache) {
+fn start_watcher_update_thread(context: Arc<impl CacheHttp + 'static>, database: Database, cache: MessageCache) {
     tokio::spawn(async move {
         if let Err(e) = update_watchers(context, database, cache).await {
             error!("Error updating watchers: {}", e);
@@ -107,7 +106,7 @@ fn start_watcher_update_thread(context: Arc<CacheAndHttp>, database: Database, c
 
 /// Updates all recorded watchers and edits their referenced messages with the new content.
 pub(crate) async fn update_watchers(
-    cache_http: Arc<CacheAndHttp>,
+    cache_http: Arc<impl CacheHttp + 'static>,
     database: Database,
     message_cache: MessageCache,
 ) -> anyhow::Result<()> {
@@ -116,18 +115,19 @@ pub(crate) async fn update_watchers(
 
     let mut stagger_interval = tokio::time::interval(Duration::from_millis(100));
     let batches = get_watcher_batches(&database).await?;
+    let context = Arc::clone(&cache_http);
 
     let mut tasks = JoinSet::new();
     for watcher_batch in batches {
         stagger_interval.tick().await;
-        let context = cache_http.clone();
         let database = database.clone();
+        let ctx = Arc::clone(&context);
         let message_cache = message_cache.clone();
         tasks.spawn(async move {
             for watcher in watcher_batch {
                 let id = watcher.id;
                 let result =
-                    watchers::update_watched_message(watcher, &context, &database, &message_cache)
+                    watchers::update_watched_message(watcher, &ctx, &database, &message_cache)
                         .await;
                 if let Err(e) = result {
                     error!("error updating watcher {}: {}", id, e);

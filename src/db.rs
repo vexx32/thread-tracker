@@ -2,14 +2,162 @@ mod models;
 
 pub(crate) use models::*;
 use poise::serenity_prelude::UserId;
+
 pub(crate) use sqlx::PgPool as Database;
 
 type Result<T> = std::result::Result<T, sqlx::Error>;
 
-/// Store an entry in the Subscriptions table
-pub(crate) async fn add_subscriber<U>(database: &Database, user_id: U) -> Result<bool>
+pub(crate) async fn delete_scheduled_message(database: &Database, id: i64) -> Result<bool> {
+    match get_scheduled_message(database, id).await? {
+        Some(_) => {
+            let result = sqlx::query("DELETE FROM scheduled_messages WHERE id = $1")
+                .bind(id)
+                .execute(database)
+                .await?;
+
+            Ok(result.rows_affected() > 0)
+        },
+        None => Ok(false),
+    }
+}
+
+/// Update an existing scheduled message
+pub(crate) async fn update_scheduled_message(
+    database: &Database,
+    id: i64,
+    datetime: Option<String>,
+    repeat: Option<String>,
+    title: Option<String>,
+    message: Option<String>,
+    channel_id: Option<impl Into<u64>>,
+) -> Result<bool> {
+    let channel_id = channel_id.map(|cid| cid.into());
+    match get_scheduled_message(database, id).await? {
+        Some(mut record) => {
+            if let Some(datetime) = datetime {
+                record.datetime = datetime;
+            }
+
+            if let Some(repeat) = repeat {
+                record.repeat = repeat;
+            }
+
+            if let Some(title) = title {
+                record.title = title;
+            }
+
+            if let Some(message) = message {
+                record.message = message;
+            }
+
+            if let Some(channel_id) = channel_id {
+                record.channel_id = channel_id;
+            }
+
+            let result = sqlx::query("UPDATE scheduled_messages SET channel_id = $2, datetime = $3, repeat = $4, title = $5, message = $6 WHERE id = $1")
+                .bind(id)
+                .bind(record.channel_id as i64)
+                .bind(record.datetime)
+                .bind(record.repeat)
+                .bind(record.title)
+                .bind(record.message)
+                .execute(database)
+                .await?;
+
+            Ok(result.rows_affected() > 0)
+        },
+        None => Ok(false),
+    }
+}
+
+/// Add a new scheduled message
+pub(crate) async fn add_scheduled_message(
+    database: &Database,
+    user_id: impl Into<u64>,
+    datetime: &str,
+    repeat: &str,
+    title: &str,
+    message: &str,
+    channel_id: impl Into<u64>,
+) -> Result<bool> {
+    let result = sqlx::query("INSERT INTO scheduled_messages (user_id, channel_id, datetime, repeat, title, message) VALUES ($1, $2, $3, $4, $5, $6)")
+        .bind(user_id.into() as i64)
+        .bind(channel_id.into() as i64)
+        .bind(datetime)
+        .bind(repeat)
+        .bind(title)
+        .bind(message)
+        .execute(database)
+        .await?;
+
+    Ok(result.rows_affected() > 0)
+}
+
+/// Gets a list of all scheduled messages for a given user
+pub(crate) async fn list_scheduled_messages(database: &Database, user_id: impl Into<u64>) -> Result<Vec<ScheduledMessageSummary>>
+{
+    sqlx::query_as("SELECT id, channel_id, datetime, repeat, title FROM scheduled_messages WHERE user_id = $1")
+        .bind(user_id.into() as i64)
+        .fetch_all(database)
+        .await
+}
+
+/// Get a scheduled message
+pub(crate) async fn get_scheduled_message(database: &Database, id: i64) -> Result<Option<ScheduledMessage>>
+{
+    sqlx::query_as("SELECT id, user_id, channel_id, datetime, repeat, title, message FROM scheduled_messages WHERE id = $1")
+        .bind(id)
+        .fetch_optional(database)
+        .await
+}
+
+/// Add or update a user setting in the user_settings table
+pub(crate) async fn update_user_setting<Id>(database: &Database, user_id: Id, name: &str, value: &str) -> Result<bool>
 where
-    U: Into<u64> + Copy,
+    Id: Into<u64> + Copy,
+{
+    let result = match get_user_setting(database, user_id, name).await? {
+        Some(entry) => {
+            if entry.value == value {
+                return Ok(false)
+            }
+
+            sqlx::query("UPDATE user_settings SET value = $1 WHERE user_id = $2 AND name = $3")
+                .bind(value)
+                .bind(user_id.into() as i64)
+                .bind(name)
+                .execute(database)
+                .await?
+        },
+        None => {
+            sqlx::query("INSERT INTO user_settings (user_id, name, value) VALUES ($1, $2, $3)")
+                .bind(user_id.into() as i64)
+                .bind(name)
+                .bind(value)
+                .execute(database)
+                .await?
+        }
+    };
+
+    Ok(result.rows_affected() > 0)
+}
+
+/// Retrieve a stored user setting from the user_settings table
+pub(crate) async fn get_user_setting<Id>(database: &Database, user_id: Id, name: &str) -> Result<Option<UserSetting>>
+where
+    Id: Into<u64> + Copy,
+{
+    sqlx::query_as("SELECT user_id, name, value FROM user_settings WHERE user_id = $1 AND name = $2")
+        .bind(user_id.into() as i64)
+        .bind(name)
+        .fetch_optional(database)
+        .await
+}
+
+/// Store an entry in the Subscriptions table
+pub(crate) async fn add_subscriber<Id>(database: &Database, user_id: Id) -> Result<bool>
+where
+    Id: Into<u64> + Copy,
 {
     match get_subscriber(database, user_id).await? {
         Some(_) => Ok(false),
@@ -25,12 +173,12 @@ where
 }
 
 /// Retrieve an entry from the Subscriptions table by UserId.
-pub(crate) async fn get_subscriber<U>(
+pub(crate) async fn get_subscriber<Id>(
     database: &Database,
-    user_id: U,
+    user_id: Id,
 ) -> Result<Option<Subscription>>
 where
-    U: Into<u64> + Copy,
+    Id: Into<u64> + Copy,
 {
     sqlx::query_as("SELECT id, user_id FROM subscriptions WHERE user_id = $1")
         .bind(user_id.into() as i64)

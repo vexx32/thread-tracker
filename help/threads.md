@@ -16,8 +16,8 @@ Parameters in _`italics`_ are optional.
 
 ### List Threads
 
-> **`/tt_threads`** _`categories`_ — List tracked threads and to do-list items. Optionally, provide categories to filter the list.
-> **`/tt_replies`** _`categories`_ — List tracked threads which are awaiting your reply. Optionally, provide categories to filter the list.
+> **`/tt_threads`** _`categories`_ _`sort`_ — List tracked threads and to do-list items. Optionally, provide categories to filter the list and a sort order.
+> **`/tt_replies`** _`categories`_ _`sort`_ — List tracked threads which are awaiting your reply. Optionally, provide categories to filter the list and a sort order.
 > **`/tt_random`** _`category`_ — Find a random tracked thread that you don't have the last reply in. Optionally, provide a category to filter the choices.
 
 ### Watchers

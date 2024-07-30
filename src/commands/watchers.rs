@@ -2,8 +2,8 @@ use anyhow::anyhow;
 use chrono::Utc;
 use serenity::{
     http::CacheHttp,
-    model::prelude::*,
-    utils::{Colour, EmbedMessageBuilding, MessageBuilder},
+    model::{prelude::*, Colour},
+    utils::{EmbedMessageBuilding, MessageBuilder}, builder::{EditThread, EditMessage, CreateEmbed, CreateEmbedFooter},
 };
 use tokio::time::Instant;
 use tracing::{error, info, warn};
@@ -33,7 +33,7 @@ pub(crate) async fn list(ctx: CommandContext<'_>) -> CommandResult<()> {
     };
 
     let watchers: Vec<ThreadWatcher> =
-        match db::list_current_watchers(&data.database, user.id.0, guild_id.0).await {
+        match db::list_current_watchers(&data.database, user.id.get(), guild_id.get()).await {
             Ok(results) => results,
             Err(e) => return Err(CommandError::detailed("Unable to list watchers", e)),
         };
@@ -76,7 +76,7 @@ pub(crate) async fn add(
     let data = ctx.data();
 
     info!("adding watcher for {} ({}), categories {:?}", user.name, user.id, category);
-    let list = threads::get_threads_and_todos(user, guild_id, category.as_deref(), data, ctx.serenity_context())
+    let list = threads::get_threads_and_todos(user, guild_id, category.as_deref(), None, data, ctx.serenity_context())
         .await?;
 
     if list.chars().count() > crate::consts::MAX_EMBED_CHARS {
@@ -98,10 +98,10 @@ pub(crate) async fn add(
 
     let result = db::add_watcher(
         &data.database,
-        user.id.0,
-        watcher_message_id.0,
-        channel_id.0,
-        guild_id.0,
+        user.id.get(),
+        watcher_message_id.get(),
+        channel_id.get(),
+        guild_id.get(),
         category.as_deref(),
     )
     .await;
@@ -133,7 +133,7 @@ pub(crate) async fn remove(
     let message_url = watched_message.link();
 
     let watcher: ThreadWatcher =
-        match db::get_watcher(database, watched_message.channel_id.0, watched_message.id.0).await {
+        match db::get_watcher(database, watched_message.channel_id.get(), watched_message.id.get()).await {
             Ok(Some(w)) => w,
             Ok(None) => {
                 return Err(CommandError::new(format!(
@@ -186,7 +186,7 @@ pub(crate) async fn remove(
 
 pub(crate) async fn update_watched_message(
     watcher: ThreadWatcher,
-    cache_http: &impl CacheHttp,
+    cache_http: impl CacheHttp,
     database: &Database,
     message_cache: &MessageCache,
 ) -> anyhow::Result<()> {
@@ -194,7 +194,7 @@ pub(crate) async fn update_watched_message(
     let start_time = Instant::now();
 
     let mut message =
-        match cache_http.http().get_message(watcher.channel_id, watcher.message_id).await {
+        match cache_http.http().get_message(watcher.channel_id.into(), watcher.message_id.into()).await {
             Ok(m) => m,
             Err(e) => {
                 let channel_name = get_channel_name(watcher.channel_id(), cache_http)
@@ -225,11 +225,11 @@ pub(crate) async fn update_watched_message(
             },
         };
 
-    if let Some(channel) = message.channel(cache_http).await?.guild() {
+    if let Some(mut channel) = message.channel(&cache_http).await?.guild() {
         // If this is a thread, there will be thread metadata
         if let Some(metadata) = channel.thread_metadata {
             if metadata.archived {
-                channel.edit_thread(cache_http.http(), |thread| thread.archived(false)).await?;
+                channel.edit_thread(&cache_http, EditThread::new().archived(false)).await?;
             }
         }
     }
@@ -257,22 +257,23 @@ pub(crate) async fn update_watched_message(
         threads,
         todos,
         muses,
+        None,
         &watcher.user(),
-        cache_http,
+        &cache_http,
         message_cache,
     )
     .await?;
 
     let edit_result = message
-        .edit(&cache_http, |msg| {
-            msg.embed(|embed| {
-                embed
-                    .colour(Colour::PURPLE)
-                    .title("Watching threads")
-                    .description(threads_content)
-                    .footer(|footer| footer.text(format!("Last updated: {}", Utc::now())))
-            })
-        })
+        .edit(
+            &cache_http,
+            EditMessage::new()
+                .add_embed(
+                    CreateEmbed::new()
+                        .colour(Colour::PURPLE)
+                        .title("Watching threads")
+                        .description(threads_content)
+                        .footer(CreateEmbedFooter::new(format!("Last updated: {} UTC", Utc::now())))))
         .await;
     if let Err(e) = edit_result {
         // If we return here, an error updating one watcher message would prevent the rest from being updated.

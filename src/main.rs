@@ -13,23 +13,17 @@ use cache::MessageCache;
 use commands::{threads, CommandError};
 use db::Database;
 use poise::{
-    serenity_prelude::{Command, ShardManager},
+    serenity_prelude::*,
     FrameworkError,
 };
-use serenity::{
-    model::{
-        channel::Message,
-        prelude::{interaction::Interaction, *},
-    },
-    prelude::*,
-};
+use serenity::model::channel::Message;
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
     ConnectOptions,
     Executor,
 };
 use tokio::{
-    sync::mpsc::{self, Sender},
+    sync::{mpsc::{self, Sender}, RwLock},
     time::sleep,
 };
 use toml::Table;
@@ -132,7 +126,7 @@ struct Handler {
     /// The Poise framework options
     options: poise::FrameworkOptions<Data, CommandError>,
     /// The Serenity shard manager
-    shard_manager: Mutex<Option<std::sync::Arc<tokio::sync::Mutex<ShardManager>>>>,
+    shard_manager: Mutex<Option<std::sync::Arc<ShardManager>>>,
     /// The bot's user id
     user_id: AtomicU64,
     /// The root sender for the background task message queue
@@ -157,7 +151,7 @@ impl Handler {
 
     /// Sets the current user ID for the bot. Typically called from the `ready` event.
     fn set_user(&self, id: UserId) {
-        self.user_id.store(id.0, Ordering::SeqCst);
+        self.user_id.store(id.get(), Ordering::SeqCst);
     }
 
     /// Gets the current user ID for the bot, if it's been set.
@@ -173,7 +167,7 @@ impl Handler {
     }
 
     /// Forward an event to Poise to streamline command handling.
-    async fn forward_to_poise(&self, ctx: &Context, event: &poise::Event<'_>) {
+    async fn forward_to_poise(&self, ctx: &Context, event: FullEvent) {
         // FrameworkContext contains all data that poise::Framework usually manages
         let shard_manager = (*self.shard_manager.lock().unwrap()).clone().unwrap();
         let framework_data = poise::FrameworkContext {
@@ -240,7 +234,7 @@ impl EventHandler for Handler {
             }
         }
 
-        self.forward_to_poise(&context, &poise::Event::ReactionAdd { add_reaction: reaction }).await;
+        self.forward_to_poise(&context, FullEvent::ReactionAdd { add_reaction: reaction }).await;
     }
 
     async fn message(&self, context: Context, message: Message) {
@@ -270,7 +264,7 @@ impl EventHandler for Handler {
             }
         }
 
-        self.forward_to_poise(&context, &poise::Event::Message { new_message: message }).await;
+        self.forward_to_poise(&context, FullEvent::Message { new_message: message }).await;
     }
 
     async fn message_update(
@@ -280,12 +274,12 @@ impl EventHandler for Handler {
         new: Option<Message>,
         event: MessageUpdateEvent,
     ) {
-        self.forward_to_poise(&ctx, &poise::Event::MessageUpdate { old_if_available, new, event })
+        self.forward_to_poise(&ctx, FullEvent::MessageUpdate { old_if_available, new, event })
             .await;
     }
 
-    async fn guild_create(&self, ctx: Context, guild: Guild, is_new: bool) {
-        if is_new {
+    async fn guild_create(&self, ctx: Context, guild: Guild, is_new: Option<bool>) {
+        if let Some(true) = is_new {
             info!("notified that Titi was added to a new guild: `{}` ({})!", guild.name, guild.id);
             self.data.read().await.guild_count.fetch_add(1, Ordering::SeqCst);
 
@@ -294,7 +288,7 @@ impl EventHandler for Handler {
             }
         }
 
-        self.forward_to_poise(&ctx, &poise::Event::GuildCreate { guild, is_new }).await;
+        self.forward_to_poise(&ctx, FullEvent::GuildCreate { guild, is_new }).await;
     }
 
     async fn guild_delete(
@@ -314,7 +308,7 @@ impl EventHandler for Handler {
             self.data.read().await.guild_count.fetch_sub(1, Ordering::SeqCst);
         }
 
-        self.forward_to_poise(&ctx, &poise::Event::GuildDelete { incomplete: guild_partial, full: guild_full }).await;
+        self.forward_to_poise(&ctx, FullEvent::GuildDelete { incomplete: guild_partial, full: guild_full }).await;
     }
 
     async fn ready(&self, ctx: Context, ready: Ready) {
@@ -330,11 +324,7 @@ impl EventHandler for Handler {
         let commands = poise::builtins::create_application_commands(&self.options.commands);
 
         // Register current commands.
-        let result = Command::set_global_application_commands(&ctx, |cmds| {
-            *cmds = commands;
-            cmds
-        })
-        .await;
+        let result = Command::set_global_commands(&ctx, commands).await;
 
         match result {
             Ok(cmds) => info!("Successfully updated global command registration with {} commands", cmds.len()),
@@ -343,11 +333,11 @@ impl EventHandler for Handler {
 
         run_periodic_shard_tasks(&ctx, &self.channel);
 
-        self.forward_to_poise(&ctx, &poise::Event::Ready { data_about_bot: ready }).await;
+        self.forward_to_poise(&ctx, FullEvent::Ready { data_about_bot: ready }).await;
     }
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
-        self.forward_to_poise(&ctx, &poise::Event::InteractionCreate { interaction }).await;
+        self.forward_to_poise(&ctx, FullEvent::InteractionCreate { interaction }).await;
     }
 }
 
@@ -358,7 +348,7 @@ async fn on_error(error: poise::FrameworkError<'_, Data, CommandError>) {
     // and forward the rest to the default handler
     match &error {
         FrameworkError::Setup { error: e, .. } => panic!("Failed to start bot: {:?}", e),
-        FrameworkError::Command { error: e, ctx } => {
+        FrameworkError::Command { error: e, ctx , ..} => {
             error!("Error in command `{}`: {}", ctx.command().name, e);
             if let Err(e) = reply_error(ctx, "Error running command", &e.to_string()).await {
                 error!("Could not send error response to user: {}", e);
@@ -396,14 +386,12 @@ async fn main() -> anyhow::Result<()> {
     let database = PgPoolOptions::new()
         .max_connections(20)
         .connect_with(options)
-        .await
-        .context("Could not connect to Postgres database")?;
+        .await?;
 
     // Run the schema migration
     database
         .execute(include_str!("../sql/schema.sql"))
-        .await
-        .context("failed to run migrations")?;
+        .await?;
 
     // FrameworkOptions contains all of poise's configuration option in one struct
     // Every option can be omitted to use its default value
@@ -411,26 +399,26 @@ async fn main() -> anyhow::Result<()> {
         commands: commands::list(),
         prefix_options: poise::PrefixFrameworkOptions {
             prefix: Some("tt!".into()),
-            edit_tracker: Some(poise::EditTracker::for_timespan(Duration::from_secs(3600))),
+            edit_tracker: Some(Arc::new(poise::EditTracker::for_timespan(Duration::from_secs(3600)))),
             mention_as_prefix: true,
             ..Default::default()
         },
-        /// The global error handler for all error cases that may occur
+        // The global error handler for all error cases that may occur
         on_error: |error| Box::pin(on_error(error)),
-        /// This code is run before every command
+        // This code is run before every command
         pre_command: |ctx| {
             Box::pin(async move {
                 info!("Executing command {}...", ctx.invoked_command_name());
             })
         },
-        /// This code is run after a command if it was successful (returned Ok)
+        // This code is run after a command if it was successful (returned Ok)
         post_command: |ctx| {
             Box::pin(async move {
                 info!("Execution of {} completed", ctx.invoked_command_name());
             })
         },
-        /// Enforce command checks even for owners (enforced by default)
-        /// Set to true to bypass checks, which is useful for testing
+        // Enforce command checks even for owners (enforced by default)
+        // Set to true to bypass checks, which is useful for testing
         skip_checks_for_owners: false,
         ..Default::default()
     };
@@ -458,15 +446,14 @@ async fn main() -> anyhow::Result<()> {
     let mut client =
         Client::builder(discord_token, intents).event_handler_arc(Arc::clone(&handler)).await?;
 
-    client.cache_and_http.cache.set_max_messages(1);
+    client.cache.set_max_messages(1);
 
     let manager = client.shard_manager.clone();
     tokio::spawn(async move {
         loop {
             sleep(SHARD_CHECKUP_INTERVAL).await;
 
-            let lock = manager.lock().await;
-            let runners = lock.runners.lock().await;
+            let runners = manager.runners.lock().await;
 
             for (id, runner) in runners.iter() {
                 info!("Shard ID {} is {} with a latency of {:?}", id, runner.stage, runner.latency);
@@ -476,7 +463,7 @@ async fn main() -> anyhow::Result<()> {
 
     *handler.shard_manager.lock().unwrap() = Some(client.shard_manager.clone());
 
-    listen_for_background_tasks(receiver, handler.data.clone(), client.cache_and_http.clone());
+    listen_for_background_tasks(receiver, handler.data.clone(), client.http.clone());
     start_periodic_tasks(&handler.channel);
 
     client.start_autosharded().await.context("Error starting client")?;

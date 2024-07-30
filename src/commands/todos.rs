@@ -12,6 +12,7 @@ use crate::{
     utils::*,
     Database,
 };
+
 /// Add a new to do list entry.
 #[poise::command(slash_command, guild_only, rename = "tt_todo", category = "Todo list")]
 pub(crate) async fn add(
@@ -33,7 +34,7 @@ pub(crate) async fn add(
     let mut result = MessageBuilder::new();
     let mut errors = MessageBuilder::new();
     result.push("Todo list entry ").push(Italic + &entry);
-    match db::add_todo(database, guild_id.0, user.id.0, &entry, category.as_deref()).await {
+    match db::add_todo(database, guild_id.get(), user.id.get(), &entry, category.as_deref()).await {
         Ok(true) => {
             result.push_line(" added successfully.");
             reply(&ctx, "To do list entry added", &result.build()).await?;
@@ -45,7 +46,7 @@ pub(crate) async fn add(
         },
         Err(e) => {
             error!("Error adding todo list item for {}: {}", user.name, e);
-            errors.push_line(e);
+            errors.push_line(e.as_database_error().map(|x| x.to_string()).unwrap_or(String::from("unknown error")));
             Err(anyhow!(errors.build()).into())
         },
     }
@@ -73,18 +74,18 @@ pub(crate) async fn remove(
         info!("removing todo `{}` for {} ({})", entry, user.name, user.id);
         message.push("To do list entry ").push(Italic + &entry).push(" was ");
 
-        db::remove_todo(database, guild_id.0, user.id.0, &entry).await
+        db::remove_todo(database, guild_id.get(), user.id.get(), &entry).await
     }
     else if let Some(category) = category {
         info!("removing all todos in category `{}` for {} ({})", category, user.name, user.id);
         match category.as_str() {
             "all" => {
                 message.push("To do list entries were ");
-                db::remove_all_todos(database, guild_id.0, user.id.0, None).await
+                db::remove_all_todos(database, guild_id.get(), user.id.get(), None).await
             },
             cat => {
                 message.push(format!("To do list entries in category `{}` were ", cat));
-                db::remove_all_todos(database, guild_id.0, user.id.0, Some(cat)).await
+                db::remove_all_todos(database, guild_id.get(), user.id.get(), Some(cat)).await
             },
         }
     }
@@ -163,7 +164,7 @@ pub(crate) async fn list(
             Ok(())
         },
         Err(e) => {
-            message.push("Error retrieving ").mention(&user.id).push(": ").push_line(e);
+            message.push("Error retrieving ").mention(&user.id).push(": ").push_line(e.to_string());
             Err(anyhow!(message.build()).into())
         },
     }
@@ -202,7 +203,7 @@ pub(crate) async fn enumerate(
     user: &GuildUser,
     category: Option<&str>,
 ) -> anyhow::Result<impl Iterator<Item = Todo>> {
-    Ok(db::list_todos(database, user.guild_id.0, user.user_id.0, category)
+    Ok(db::list_todos(database, user.guild_id.get(), user.user_id.get(), category)
         .await?
         .into_iter())
 }

@@ -23,7 +23,7 @@ pub(crate) async fn help(
             .commands
             .iter()
             .filter(|cmd| Some(&cmd.name) == command.as_ref())
-            .map(|cmd| cmd.category)
+            .map(|cmd| cmd.category.as_deref())
             .next()
             .flatten();
 

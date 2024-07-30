@@ -59,7 +59,7 @@ where
 
     /// Get an entry out of the cache.
     pub async fn get(&self, id: &TKey) -> Option<Arc<TData>> {
-        self.storage.read().await.get(id).map(|c| Arc::clone(&c.data))
+        self.storage.read().await.get(id).map(|c| &c.data).cloned()
     }
 
     /// Remove an entry from the cache.

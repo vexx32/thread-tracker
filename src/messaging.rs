@@ -1,5 +1,5 @@
-use poise::serenity_prelude::UserId;
-use serenity::{utils::Colour, Result, http::CacheHttp};
+use poise::{serenity_prelude::UserId, CreateReply};
+use serenity::{model::Colour, Result, http::CacheHttp, builder::{CreateMessage, CreateEmbed}};
 use tracing::error;
 
 use crate::{commands::{CommandContext, CommandResult}, consts::*, utils};
@@ -55,20 +55,21 @@ impl HelpMessage {
 /// Send the target user a private/direct message.
 pub(crate) async fn dm(ctx: impl CacheHttp, user_id: UserId, message: &str, embed_title: Option<&str>, embed_description: Option<&str>) -> Result<()> {
     let channel = user_id.create_dm_channel(&ctx).await?;
-    channel.send_message(ctx.http(), |msg| {
-        msg.content(message);
-        if embed_title.is_some() || embed_description.is_some(){
-            msg.embed(|embed|
-                embed
-                    .title(embed_title.unwrap())
-                    .description(embed_description.unwrap())
-                    .colour(Colour::PURPLE));
+
+    let mut message = CreateMessage::new().content(message);
+
+    match (embed_title, embed_description) {
+        (Some(_), _) | (_, Some(_)) => {
+            let embed = CreateEmbed::new()
+                .title(embed_title.unwrap_or(""))
+                .description(embed_description.unwrap_or(""))
+                .colour(Colour::PURPLE);
+            message = message.embed(embed);
         }
+        _ => {},
+    }
 
-        msg
-    })
-    .await?;
-
+    channel.send_message(ctx, message).await?;
 
     Ok(())
 }
@@ -121,12 +122,15 @@ async fn send_chunked_reply<'a>(
     let mut results = Vec::new();
 
     for msg in messages {
+        let embed = CreateEmbed::new()
+            .title(title)
+            .description(msg)
+            .colour(colour);
+        let reply = CreateReply::default()
+            .embed(embed)
+            .ephemeral(ephemeral);
         results.push(
-            ctx.send(|reply| {
-                reply
-                    .embed(|embed| embed.title(title).description(msg).colour(colour))
-                    .ephemeral(ephemeral)
-            })
+            ctx.send(reply)
             .await?,
         );
     }

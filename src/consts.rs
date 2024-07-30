@@ -2,6 +2,7 @@ use std::time::Duration;
 
 pub(crate) mod greetings;
 pub(crate) mod help;
+pub(crate) mod setting_names;
 
 pub(crate) const DELETE_EMOJI: [&str; 2] = ["🚫", "🗑️"];
 

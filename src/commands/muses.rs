@@ -30,7 +30,7 @@ pub(crate) async fn add(
     let mut result = MessageBuilder::new();
     let mut errors = MessageBuilder::new();
     result.push("Muse ").push(Italic + &muse_name);
-    match db::add_muse(database, guild_id.0, user.id.0, &muse_name).await {
+    match db::add_muse(database, guild_id.get(), user.id.get(), &muse_name).await {
         Ok(true) => {
             result.push_line(" added successfully.");
             reply(&ctx, "Add muse", &result.build()).await?;
@@ -43,7 +43,7 @@ pub(crate) async fn add(
         },
         Err(e) => {
             error!("Error adding muse for {}: {}", user.name, e);
-            errors.push_line(e);
+            errors.push_line(e.as_database_error().map(|x| x.to_string()).unwrap_or(String::from("unknown error")));
             let error = errors.build();
             Err(anyhow!(error).into())
         },
@@ -68,7 +68,7 @@ pub(crate) async fn remove(
 
     let mut result = MessageBuilder::new();
     result.push("Muse ").push(Italic + &muse_name);
-    match db::remove_muse(database, guild_id.0, user.id.0, &muse_name).await? {
+    match db::remove_muse(database, guild_id.get(), user.id.get(), &muse_name).await? {
         0 => {
             result.push_line(" was not found.");
             let error = result.build();
@@ -121,7 +121,7 @@ pub(crate) async fn get_list(
     user_id: UserId,
     guild_id: GuildId,
 ) -> anyhow::Result<Vec<String>> {
-    Ok(db::list_muses(database, guild_id.0, user_id.0)
+    Ok(db::list_muses(database, guild_id.get(), user_id.get())
         .await?
         .into_iter()
         .map(|m| m.muse_name)
