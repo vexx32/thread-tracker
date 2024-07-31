@@ -21,7 +21,7 @@ pub(crate) async fn delete_scheduled_message(database: &Database, id: i64) -> Re
     }
 }
 
-/// Update an existing scheduled message
+/// Update an existing scheduled message. Datetime and repeat should be validated before being stored.
 pub(crate) async fn update_scheduled_message(
     database: &Database,
     id: i64,
