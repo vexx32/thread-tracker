@@ -1,5 +1,6 @@
 mod models;
 
+use chrono::{DateTime, Utc};
 pub(crate) use models::*;
 use poise::serenity_prelude::UserId;
 
@@ -25,7 +26,7 @@ pub(crate) async fn delete_scheduled_message(database: &Database, id: i64) -> Re
 pub(crate) async fn update_scheduled_message(
     database: &Database,
     id: i64,
-    datetime: Option<String>,
+    datetime: Option<DateTime<Utc>>,
     repeat: Option<String>,
     title: Option<String>,
     message: Option<String>,
@@ -35,7 +36,7 @@ pub(crate) async fn update_scheduled_message(
     match get_scheduled_message(database, id).await? {
         Some(mut record) => {
             if let Some(datetime) = datetime {
-                record.datetime = datetime;
+                record.datetime = datetime.to_rfc3339();
             }
 
             if let Some(repeat) = repeat {
@@ -74,16 +75,17 @@ pub(crate) async fn update_scheduled_message(
 pub(crate) async fn add_scheduled_message(
     database: &Database,
     user_id: impl Into<u64>,
-    datetime: &str,
+    datetime: DateTime<Utc>,
     repeat: &str,
     title: &str,
     message: &str,
     channel_id: impl Into<u64>,
 ) -> Result<bool> {
-    let result = sqlx::query("INSERT INTO scheduled_messages (user_id, channel_id, datetime, repeat, title, message) VALUES ($1, $2, $3, $4, $5, $6)")
+    let result = sqlx::query(
+        "INSERT INTO scheduled_messages (user_id, channel_id, datetime, repeat, title, message, archived) VALUES ($1, $2, $3, $4, $5, $6, FALSE)")
         .bind(user_id.into() as i64)
         .bind(channel_id.into() as i64)
-        .bind(datetime)
+        .bind(datetime.to_rfc3339())
         .bind(repeat)
         .bind(title)
         .bind(message)

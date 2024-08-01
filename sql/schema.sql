@@ -49,5 +49,6 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
     datetime varchar(60) NOT NULL,
     repeat varchar(60) NULL,
     title varchar(300) NOT NULL,
-    message varchar(2000) NOT NULL
+    message varchar(2000) NOT NULL,
+    archived BOOLEAN NOT NULL
 );

@@ -1,8 +1,7 @@
 use std::{collections::HashMap, str::FromStr};
 
 use anyhow::anyhow;
-use chrono::{DateTime, Days, Months, NaiveDateTime, TimeDelta};
-use chrono_tz::Tz;
+use chrono::{DateTime, Days, Months, NaiveDateTime, TimeDelta, Utc};
 use poise::choice_parameter::ChoiceParameter;
 use regex::Regex;
 use serenity::{
@@ -146,14 +145,17 @@ pub(crate) async fn update_message(
                     let mut parsed_datetime = None;
                     if let Some(d) = &datetime {
                         // Check the datetime parses successfully
-                        parsed_datetime = Some(parse_datetime(&data.database, d, author.id).await?);
+                        parsed_datetime = Some(parse_datetime_to_utc(&data.database, d, author.id).await?);
                     }
 
                     if let Some(r) = &repeat {
                         // Check the repeat is valid and can be applied to the scheduled time successfully.
                         let dt = match parsed_datetime {
                             Some(d) => d,
-                            None => parse_datetime(&data.database, &existing_message.datetime, author.id).await?,
+                            None => match DateTime::parse_from_rfc3339(&existing_message.datetime) {
+                                Ok(dt) => dt.to_utc(),
+                                Err(e) => return Err(CommandError::detailed("Error parsing already stored datetime!", e)),
+                            },
                         };
 
                         apply_repeat_duration(r, dt)?;
@@ -161,7 +163,7 @@ pub(crate) async fn update_message(
 
                     let channel_id = channel.map(|c| c.id.get());
 
-                    match update_scheduled_message(&data.database, message_id, datetime, repeat, title, message, channel_id).await {
+                    match update_scheduled_message(&data.database, message_id, parsed_datetime, repeat, title, message, channel_id).await {
                         Ok(true) => {
                             reply(&ctx, REPLY_TITLE, "Scheduled message updated successfully.").await?;
                             Ok(())
@@ -238,7 +240,7 @@ pub(crate) async fn add_message(
     let data = ctx.data();
     let author = ctx.author();
 
-    let target_datetime = parse_datetime(&data.database, &datetime, author.id).await?;
+    let target_datetime = parse_datetime_to_utc(&data.database, &datetime, author.id).await?;
 
     // If a repeat was specified, verify that adding it to the target datetime won't cause an error.
     if let Some(repeat) = &repeat {
@@ -249,7 +251,7 @@ pub(crate) async fn add_message(
     let success = add_scheduled_message(
         &data.database,
         author.id,
-        &datetime,
+        target_datetime,
         &repeat,
         &title,
         &message,
@@ -278,8 +280,8 @@ pub(crate) async fn add_message(
 
 fn apply_repeat_duration(
     repeat: &str,
-    current_datetime: DateTime<Tz>,
-) -> anyhow::Result<DateTime<Tz>> {
+    current_datetime: DateTime<Utc>,
+) -> anyhow::Result<DateTime<Utc>> {
     if repeat.is_empty() {
         return Err(anyhow!("The repeat duration is empty."));
     }
@@ -394,20 +396,26 @@ fn format_scheduled_message(
 }
 
 /// Parse a string into a valid datetime.
-async fn parse_datetime(database: &Database, datetime: &str, user_id: UserId) -> CommandResult<DateTime<Tz>> {
+async fn parse_datetime_to_utc(database: &Database, datetime: &str, user_id: UserId) -> anyhow::Result<DateTime<Utc>> {
     let parsed_datetime = match NaiveDateTime::parse_from_str(datetime, "%Y-%m-%d %H:%M:%S") {
         Ok(val) => val,
-        Err(e) => return Err(CommandError::detailed("Error parsing input datetime", e)),
+        Err(e) => return Err(CommandError::detailed("Error parsing input datetime", e).into()),
     };
     let user_timezone = get_user_setting(database, user_id, USER_TIMEZONE).await?
         .map(|opt| chrono_tz::Tz::from_str(&opt.value).unwrap_or(chrono_tz::Tz::UTC))
         .unwrap_or(chrono_tz::Tz::UTC);
 
     match parsed_datetime.and_local_timezone(user_timezone).earliest() {
-        Some(dt) => Ok(dt),
+        Some(dt) => Ok(dt.to_utc()),
         None => Err(CommandError::new(format!(
-            "Could not create a local datetime for {} in timezone {}",
+            "Could not construct a local datetime for {} in timezone {}",
             parsed_datetime, user_timezone
-        ))),
+        )).into()),
     }
+}
+
+/// Validate datetime is current or future
+async fn validate_datetime(datetime: DateTime<Utc>) -> bool {
+    let current_time = chrono::offset::Utc::now();
+    datetime > current_time
 }
