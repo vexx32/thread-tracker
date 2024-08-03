@@ -4,16 +4,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+use chrono::DateTime;
 use serenity::{model::prelude::*, prelude::*, gateway::ActivityData};
 use tokio::{task::JoinSet, sync::mpsc::{Receiver, Sender}};
 use tracing::{error, info};
 
 use crate::{
-    cache::MessageCache,
-    commands::{threads::send_reply_notification, watchers},
-    consts::*,
-    db::{self, Database, ThreadWatcher},
-    Data,
+    cache::MessageCache, commands::{scheduling::apply_repeat_duration, threads::send_reply_notification, watchers}, consts::*, db::{self, archive_scheduled_message, get_all_scheduled_messages, update_scheduled_message, Database, ThreadWatcher}, messaging::send_message, Data
 };
 
 /// Task dispatch type, carrying messages and any data required for them to complete the associated task.
@@ -27,6 +24,8 @@ pub(crate) enum Task {
     UpdateWatchers,
     /// Purge expired cache entries.
     PurgeCache,
+    /// Send any scheduled messages at the proper time(s)
+    SendScheduledMessages,
 }
 
 /// Start a new thread which listens for `Task` messages and running the appropriate actions for each task.
@@ -46,9 +45,73 @@ pub(crate) fn listen_for_background_tasks(mut receiver: Receiver<Task>, data: Ar
                 Heartbeat(context) => heartbeat(&context).await,
                 UpdateWatchers => start_watcher_update_thread(context.clone(), database.clone(), cache.clone()),
                 PurgeCache => purge_expired_cache_entries(Arc::new(cache.clone())).await,
+                SendScheduledMessages => start_scheduled_messages_thread(database.clone(), context.clone()).await,
             };
         }
     });
+}
+
+pub(crate) async fn start_scheduled_messages_thread(database: Database, ctx: Arc<impl CacheHttp + 'static>) {
+    tokio::spawn(async move {
+        if let Err(e) = send_scheduled_messages(database, ctx).await {
+            error!("Error sending scheduled messages: {}", e);
+        }
+    });
+}
+
+pub(crate) async fn send_scheduled_messages(database: Database, ctx: Arc<impl CacheHttp + 'static>) -> anyhow::Result<()> {
+    info!("Sending out any scheduled messages.");
+
+    let messages = get_all_scheduled_messages(&database).await?;
+
+    for message in messages.iter().filter(|m| !m.archived) {
+        let scheduled_time = match DateTime::parse_from_rfc3339(&message.datetime) {
+            Ok(dt) => dt.to_utc(),
+            Err(e) => {
+                error!("Error parsing scheduled message's timestamp '{}' with title '{}': {}", &message.datetime, &message.title, e);
+                continue;
+            }
+        };
+
+        if scheduled_time > chrono::offset::Utc::now() {
+            continue;
+        }
+
+        info!("Sending out scheduled message {} with title '{}', scheduled for {}", message.id, message.title, message.datetime);
+
+        if message.repeat.is_empty() || message.repeat == "None" {
+            if let Err(e) = archive_scheduled_message(&database, message.id).await {
+                error!("Unable to flag scheduled message {} as sent: {}", message.id, e);
+            }
+        }
+        else {
+            match apply_repeat_duration(&message.repeat, scheduled_time) {
+                Ok(next) => {
+                    if let Err(e) = update_scheduled_message(&database, message.id, Some(next), None, None, None, None::<u64>).await {
+                        error!("Unable to re-schedule repeating message: {} -- archiving message as a fallback.", e);
+                        if let Err(e) = archive_scheduled_message(&database, message.id).await {
+                            error!("Unable to flag scheduled message {} as archived: {}", message.id, e);
+                        }
+                    }
+                },
+                Err(e) => {
+                    error!("Unable to re-schedule repeating message: {} -- archiving message as a fallback.", e);
+                    if let Err(e) = archive_scheduled_message(&database, message.id).await {
+                        error!("Unable to flag scheduled message {} as archived: {}", message.id, e);
+                    }
+                },
+            };
+        }
+
+        if let Err(e) = send_message(&ctx, message.channel_id(), &message.title, &message.message, Colour::FABLED_PINK).await {
+            error!("Unable to send scheduled message, archiving it instead: {}", e);
+            if let Err(e) = archive_scheduled_message(&database, message.id).await {
+                error!("Unable to flag scheduled message {} as archived: {}", message.id, e);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Core task spawning function for per-shard tasks.
@@ -63,6 +126,7 @@ pub(crate) fn start_periodic_tasks(sender: &Sender<Task>) {
     info!("Starting periodic global tasks");
     spawn_task_loop(sender.clone(), CACHE_TRIM_INTERVAL, true, || Task::PurgeCache);
     spawn_task_loop(sender.clone(), WATCHER_UPDATE_INTERVAL, true, || Task::UpdateWatchers);
+    spawn_task_loop(sender.clone(), SCHEDULED_MESSAGE_INTERVAL, true, || Task::SendScheduledMessages);
 }
 
 /// Spawns a task which loops indefinitely, with a wait period between each iteration.

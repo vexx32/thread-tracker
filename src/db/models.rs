@@ -160,6 +160,7 @@ pub(crate) struct ScheduledMessage {
     pub repeat: String,
     pub title: String,
     pub message: String,
+    pub archived: bool,
 }
 
 impl ScheduledMessage {

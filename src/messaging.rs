@@ -1,8 +1,20 @@
-use poise::{serenity_prelude::UserId, CreateReply};
-use serenity::{model::Colour, Result, http::CacheHttp, builder::{CreateMessage, CreateEmbed}};
+use std::borrow::Cow;
+
+use anyhow::anyhow;
+use poise::{serenity_prelude::*, CreateReply};
+use serenity::{
+    builder::{CreateEmbed, CreateMessage},
+    http::CacheHttp,
+    model::Colour,
+    Result,
+};
 use tracing::error;
 
-use crate::{commands::{CommandContext, CommandResult}, consts::*, utils};
+use crate::{
+    commands::{CommandContext, CommandResult},
+    consts::*,
+    utils,
+};
 
 /// Mapping enum to select appropriate help messages for various commands and retrieve the associated text.
 pub(crate) enum HelpMessage {
@@ -53,7 +65,13 @@ impl HelpMessage {
 }
 
 /// Send the target user a private/direct message.
-pub(crate) async fn dm(ctx: impl CacheHttp, user_id: UserId, message: &str, embed_title: Option<&str>, embed_description: Option<&str>) -> Result<()> {
+pub(crate) async fn dm(
+    ctx: impl CacheHttp,
+    user_id: UserId,
+    message: &str,
+    embed_title: Option<&str>,
+    embed_description: Option<&str>,
+) -> Result<()> {
     let channel = user_id.create_dm_channel(&ctx).await?;
 
     let mut message = CreateMessage::new().content(message);
@@ -65,7 +83,7 @@ pub(crate) async fn dm(ctx: impl CacheHttp, user_id: UserId, message: &str, embe
                 .description(embed_description.unwrap_or(""))
                 .colour(Colour::PURPLE);
             message = message.embed(embed);
-        }
+        },
         _ => {},
     }
 
@@ -122,24 +140,37 @@ async fn send_chunked_reply<'a>(
     let mut results = Vec::new();
 
     for msg in messages {
-        let embed = CreateEmbed::new()
-            .title(title)
-            .description(msg)
-            .colour(colour);
-        let reply = CreateReply::default()
-            .embed(embed)
-            .ephemeral(ephemeral);
-        results.push(
-            ctx.send(reply)
-            .await?,
-        );
+        let embed = CreateEmbed::default().title(title).description(msg).colour(colour);
+        let reply = CreateReply::default().embed(embed).ephemeral(ephemeral);
+        results.push(ctx.send(reply).await?);
     }
 
     Ok(results)
 }
 
-pub(crate) async fn send_invalid_command_call_error(ctx: CommandContext<'_>) -> CommandResult<()>
+pub(crate) async fn send_message<'a, S>(
+    ctx: impl CacheHttp,
+    channel_id: ChannelId,
+    title: S,
+    description: S,
+    colour: Colour,
+) -> anyhow::Result<()>
+where
+    S: Into<Cow<'a, str>>,
 {
+    let Some(channel) = channel_id.to_channel(&ctx).await?.guild() else {
+        return Err(anyhow!("This method can only be used to send messages to guild channels"));
+    };
+
+    let embed =
+        CreateEmbed::new().title(title.into()).description(description.into()).colour(colour);
+    let message = CreateMessage::default().add_embed(embed);
+    channel.send_message(ctx, message).await?;
+
+    Ok(())
+}
+
+pub(crate) async fn send_invalid_command_call_error(ctx: CommandContext<'_>) -> CommandResult<()> {
     let result = whisper_error(&ctx, "Invalid command called", "The command you called is not intended to be called directly. This may happen if command registrations have been recently updated. Check for any subcommands or other options when trying to enter the command and use those as well instead of only this base command.").await;
 
     if let Err(e) = result {

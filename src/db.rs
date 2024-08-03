@@ -8,6 +8,7 @@ pub(crate) use sqlx::PgPool as Database;
 
 type Result<T> = std::result::Result<T, sqlx::Error>;
 
+/// Delete a scheduled message completely.
 pub(crate) async fn delete_scheduled_message(database: &Database, id: i64) -> Result<bool> {
     match get_scheduled_message(database, id).await? {
         Some(_) => {
@@ -20,6 +21,16 @@ pub(crate) async fn delete_scheduled_message(database: &Database, id: i64) -> Re
         },
         None => Ok(false),
     }
+}
+
+/// Flag a scheduled message as archived or already-sent, so that it cannot be sent again in future.
+pub(crate) async fn archive_scheduled_message(database: &Database, id: i64) -> Result<bool> {
+    let result = sqlx::query("UPDATE scheduled_messages SET archived = TRUE WHERE id = $1")
+        .bind(id)
+        .execute(database)
+        .await?;
+
+    Ok(result.rows_affected() > 0)
 }
 
 /// Update an existing scheduled message. Datetime and repeat should be validated before being stored.
@@ -95,33 +106,53 @@ pub(crate) async fn add_scheduled_message(
     Ok(result.rows_affected() > 0)
 }
 
-/// Gets a list of all scheduled messages for a given user
-pub(crate) async fn list_scheduled_messages(database: &Database, user_id: impl Into<u64>) -> Result<Vec<ScheduledMessageSummary>>
-{
-    sqlx::query_as("SELECT id, channel_id, datetime, repeat, title FROM scheduled_messages WHERE user_id = $1")
-        .bind(user_id.into() as i64)
+/// Gets all currently set scheduled messages
+pub(crate) async fn get_all_scheduled_messages(
+    database: &Database,
+) -> Result<Vec<ScheduledMessage>> {
+    sqlx::query_as("SELECT id, user_id, channel_id, datetime, repeat, title, message, archived from scheduled_messages")
         .fetch_all(database)
         .await
 }
 
+/// Gets a list of all scheduled messages for a given user
+pub(crate) async fn list_scheduled_messages_for_user(
+    database: &Database,
+    user_id: impl Into<u64>,
+) -> Result<Vec<ScheduledMessageSummary>> {
+    sqlx::query_as(
+        "SELECT id, channel_id, datetime, repeat, title FROM scheduled_messages WHERE user_id = $1",
+    )
+    .bind(user_id.into() as i64)
+    .fetch_all(database)
+    .await
+}
+
 /// Get a scheduled message
-pub(crate) async fn get_scheduled_message(database: &Database, id: i64) -> Result<Option<ScheduledMessage>>
-{
-    sqlx::query_as("SELECT id, user_id, channel_id, datetime, repeat, title, message FROM scheduled_messages WHERE id = $1")
+pub(crate) async fn get_scheduled_message(
+    database: &Database,
+    id: i64,
+) -> Result<Option<ScheduledMessage>> {
+    sqlx::query_as("SELECT id, user_id, channel_id, datetime, repeat, title, message, archived FROM scheduled_messages WHERE id = $1")
         .bind(id)
         .fetch_optional(database)
         .await
 }
 
 /// Add or update a user setting in the user_settings table
-pub(crate) async fn update_user_setting<Id>(database: &Database, user_id: Id, name: &str, value: &str) -> Result<bool>
+pub(crate) async fn update_user_setting<Id>(
+    database: &Database,
+    user_id: Id,
+    name: &str,
+    value: &str,
+) -> Result<bool>
 where
     Id: Into<u64> + Copy,
 {
     let result = match get_user_setting(database, user_id, name).await? {
         Some(entry) => {
             if entry.value == value {
-                return Ok(false)
+                return Ok(false);
             }
 
             sqlx::query("UPDATE user_settings SET value = $1 WHERE user_id = $2 AND name = $3")
@@ -138,22 +169,28 @@ where
                 .bind(value)
                 .execute(database)
                 .await?
-        }
+        },
     };
 
     Ok(result.rows_affected() > 0)
 }
 
 /// Retrieve a stored user setting from the user_settings table
-pub(crate) async fn get_user_setting<Id>(database: &Database, user_id: Id, name: &str) -> Result<Option<UserSetting>>
+pub(crate) async fn get_user_setting<Id>(
+    database: &Database,
+    user_id: Id,
+    name: &str,
+) -> Result<Option<UserSetting>>
 where
     Id: Into<u64> + Copy,
 {
-    sqlx::query_as("SELECT user_id, name, value FROM user_settings WHERE user_id = $1 AND name = $2")
-        .bind(user_id.into() as i64)
-        .bind(name)
-        .fetch_optional(database)
-        .await
+    sqlx::query_as(
+        "SELECT user_id, name, value FROM user_settings WHERE user_id = $1 AND name = $2",
+    )
+    .bind(user_id.into() as i64)
+    .bind(name)
+    .fetch_optional(database)
+    .await
 }
 
 /// Store an entry in the Subscriptions table
@@ -190,9 +227,7 @@ where
 
 /// Retrieve all entries from the Subscriptions table.
 pub(crate) async fn list_subscribers(database: &Database) -> Result<Vec<Subscription>> {
-    sqlx::query_as("SELECT id, user_id FROM subscriptions ORDER BY id")
-        .fetch_all(database)
-        .await
+    sqlx::query_as("SELECT id, user_id FROM subscriptions ORDER BY id").fetch_all(database).await
 }
 
 /// Delete an entry from the Subscriptions table.
@@ -397,11 +432,13 @@ pub(crate) async fn get_users_tracking_thread(
     guild_id: impl Into<u64>,
     channel_id: impl Into<u64>,
 ) -> Result<Vec<UserId>> {
-    let result: Vec<TrackedThreadUser> = sqlx::query_as("SELECT user_id FROM threads WHERE channel_id = $1 AND guild_id = $2 ORDER BY id")
-        .bind(channel_id.into() as i64)
-        .bind(guild_id.into() as i64)
-        .fetch_all(database)
-        .await?;
+    let result: Vec<TrackedThreadUser> = sqlx::query_as(
+        "SELECT user_id FROM threads WHERE channel_id = $1 AND guild_id = $2 ORDER BY id",
+    )
+    .bind(channel_id.into() as i64)
+    .bind(guild_id.into() as i64)
+    .fetch_all(database)
+    .await?;
 
     Ok(result.into_iter().map(|user| user.into()).collect())
 }

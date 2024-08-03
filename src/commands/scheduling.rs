@@ -17,7 +17,7 @@ use crate::{
     db::{
         Database,
         add_scheduled_message, delete_scheduled_message, get_scheduled_message, get_user_setting,
-        update_user_setting, update_scheduled_message, list_scheduled_messages,
+        update_user_setting, update_scheduled_message, list_scheduled_messages_for_user,
     },
     messaging::{reply, reply_error, send_invalid_command_call_error, whisper, whisper_error},
     utils::truncate_string,
@@ -62,7 +62,7 @@ impl ChoiceParameter for TimeZoneParameter {
     guild_only,
     rename = "tt_schedule",
     category = "Scheduling",
-    subcommands("add_message", "remove_message", "update_message", "list__messages", "set_timezone")
+    subcommands("add_message", "remove_message", "update_message", "list_messages", "set_timezone")
 )]
 pub(crate) async fn schedule(ctx: CommandContext<'_>) -> CommandResult<()> {
     send_invalid_command_call_error(ctx).await
@@ -75,7 +75,7 @@ pub(crate) async fn list_messages(
     const REPLY_TITLE: &str = "List scheduled messages";
     let data = ctx.data();
     let author = ctx.author();
-    let messages = list_scheduled_messages(&data.database, author.id).await?;
+    let messages = list_scheduled_messages_for_user(&data.database, author.id).await?;
 
     if messages.is_empty() {
         reply(&ctx, REPLY_TITLE, "You have no scheduled messages.").await?;
@@ -144,8 +144,13 @@ pub(crate) async fn update_message(
 
                     let mut parsed_datetime = None;
                     if let Some(d) = &datetime {
-                        // Check the datetime parses successfully
-                        parsed_datetime = Some(parse_datetime_to_utc(&data.database, d, author.id).await?);
+                        // Check the datetime parses successfully and is actually in the future
+                        let dt = parse_datetime_to_utc(&data.database, d, author.id).await?;
+                        if !validate_datetime(dt) {
+                            return Err(CommandError::new(format!("The target datetime {} is invalid as it is not in the future.", dt.to_rfc3339())));
+                        }
+
+                        parsed_datetime = Some(dt);
                     }
 
                     if let Some(r) = &repeat {
@@ -242,6 +247,10 @@ pub(crate) async fn add_message(
 
     let target_datetime = parse_datetime_to_utc(&data.database, &datetime, author.id).await?;
 
+    if !validate_datetime(target_datetime) {
+        return Err(CommandError::new(format!("The target datetime {} is invalid as it is not in the future.", target_datetime.to_rfc3339())));
+    }
+
     // If a repeat was specified, verify that adding it to the target datetime won't cause an error.
     if let Some(repeat) = &repeat {
         apply_repeat_duration(repeat, target_datetime)?;
@@ -278,7 +287,7 @@ pub(crate) async fn add_message(
     Ok(())
 }
 
-fn apply_repeat_duration(
+pub(crate) fn apply_repeat_duration(
     repeat: &str,
     current_datetime: DateTime<Utc>,
 ) -> anyhow::Result<DateTime<Utc>> {
@@ -415,7 +424,7 @@ async fn parse_datetime_to_utc(database: &Database, datetime: &str, user_id: Use
 }
 
 /// Validate datetime is current or future
-async fn validate_datetime(datetime: DateTime<Utc>) -> bool {
+fn validate_datetime(datetime: DateTime<Utc>) -> bool {
     let current_time = chrono::offset::Utc::now();
     datetime > current_time
 }
