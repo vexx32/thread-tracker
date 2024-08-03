@@ -2,59 +2,19 @@ use std::{collections::HashMap, str::FromStr};
 
 use anyhow::anyhow;
 use chrono::{DateTime, Days, Months, NaiveDateTime, TimeDelta, Utc};
+use chrono_tz::Tz;
 use poise::choice_parameter::ChoiceParameter;
 use regex::Regex;
-use serenity::{
-    model::prelude::*,
-    prelude::*,
-    utils::MessageBuilder,
-};
-use tracing::{error, info, warn};
+use serenity::{model::prelude::*, utils::MessageBuilder};
+use tracing::{error, info};
 
 use crate::{
     commands::{CommandContext, CommandError, CommandResult},
     consts::setting_names::*,
-    db::{
-        Database,
-        add_scheduled_message, delete_scheduled_message, get_scheduled_message, get_user_setting,
-        update_user_setting, update_scheduled_message, list_scheduled_messages_for_user,
-    },
+    db::{self, Database},
     messaging::{reply, reply_error, send_invalid_command_call_error, whisper, whisper_error},
     utils::truncate_string,
 };
-
-#[derive(Debug)]
-#[repr(transparent)]
-pub struct TimeZoneParameter(chrono_tz::Tz);
-
-impl ChoiceParameter for TimeZoneParameter {
-    fn list() -> Vec<poise::CommandParameterChoice> {
-        chrono_tz::TZ_VARIANTS
-            .iter()
-            .map(|tz| poise::CommandParameterChoice {
-                name: tz.name().to_owned(),
-                localizations: HashMap::new(),
-                __non_exhaustive: (),
-            })
-            .collect()
-    }
-
-    fn from_index(index: usize) -> Option<Self> {
-        chrono_tz::TZ_VARIANTS.get(index).map(|&tz| Self(tz))
-    }
-
-    fn from_name(name: &str) -> Option<Self> {
-        chrono_tz::TZ_VARIANTS.iter().find(|tz| tz.name() == name).map(|&tz| Self(tz))
-    }
-
-    fn name(&self) -> &'static str {
-        self.0.name()
-    }
-
-    fn localized_name(&self, _locale: &str) -> Option<&'static str> {
-        None
-    }
-}
 
 /// Manage scheduled messages
 #[poise::command(
@@ -62,25 +22,30 @@ impl ChoiceParameter for TimeZoneParameter {
     guild_only,
     rename = "tt_schedule",
     category = "Scheduling",
-    subcommands("add_message", "remove_message", "update_message", "list_messages", "set_timezone")
+    subcommands(
+        "add_message",
+        "remove_message",
+        "update_message",
+        "list_messages",
+        "set_timezone"
+    )
 )]
 pub(crate) async fn schedule(ctx: CommandContext<'_>) -> CommandResult<()> {
     send_invalid_command_call_error(ctx).await
 }
 
 #[poise::command(slash_command, guild_only, rename = "list", category = "Scheduling")]
-pub(crate) async fn list_messages(
-    ctx: CommandContext<'_>,
-) -> CommandResult<()> {
+pub(crate) async fn list_messages(ctx: CommandContext<'_>) -> CommandResult<()> {
     const REPLY_TITLE: &str = "List scheduled messages";
     let data = ctx.data();
     let author = ctx.author();
-    let messages = list_scheduled_messages_for_user(&data.database, author.id).await?;
+    let messages = db::list_scheduled_messages_for_user(&data.database, author.id).await?;
+
+    info!("Listing all scheduled messages for user {} ({})", author.name, author.id);
 
     if messages.is_empty() {
         reply(&ctx, REPLY_TITLE, "You have no scheduled messages.").await?;
-    }
-    else {
+    } else {
         let mut content = MessageBuilder::new();
         for msg in messages {
             content
@@ -94,10 +59,7 @@ pub(crate) async fn list_messages(
                 .push(&msg.datetime);
 
             if !msg.repeat.is_empty() && msg.repeat != "None" {
-                content
-                    .push(" (repeating every ")
-                    .push(msg.repeat)
-                    .push(")");
+                content.push(" (repeating every ").push(msg.repeat).push(")");
             }
 
             content.push_line("");
@@ -137,7 +99,7 @@ pub(crate) async fn update_message(
         },
         _ => {
             let data = ctx.data();
-            match get_scheduled_message(&data.database, message_id).await? {
+            match db::get_scheduled_message(&data.database, message_id).await? {
                 Some(existing_message) if existing_message.user_id() == author.id => {
                     // Validate fields that need validating; the inner method will take care of updates or not, depending on
                     // whether the optional parameters are supplied or not.
@@ -147,7 +109,10 @@ pub(crate) async fn update_message(
                         // Check the datetime parses successfully and is actually in the future
                         let dt = parse_datetime_to_utc(&data.database, d, author.id).await?;
                         if !validate_datetime(dt) {
-                            return Err(CommandError::new(format!("The target datetime {} is invalid as it is not in the future.", dt.to_rfc3339())));
+                            return Err(CommandError::new(format!(
+                                "The target datetime {} is invalid as it is not in the future.",
+                                dt.to_rfc3339()
+                            )));
                         }
 
                         parsed_datetime = Some(dt);
@@ -157,9 +122,16 @@ pub(crate) async fn update_message(
                         // Check the repeat is valid and can be applied to the scheduled time successfully.
                         let dt = match parsed_datetime {
                             Some(d) => d,
-                            None => match DateTime::parse_from_rfc3339(&existing_message.datetime) {
-                                Ok(dt) => dt.to_utc(),
-                                Err(e) => return Err(CommandError::detailed("Error parsing already stored datetime!", e)),
+                            None => {
+                                match DateTime::parse_from_rfc3339(&existing_message.datetime) {
+                                    Ok(dt) => dt.to_utc(),
+                                    Err(e) => {
+                                        return Err(CommandError::detailed(
+                                            "Error parsing already stored datetime!",
+                                            e,
+                                        ))
+                                    },
+                                }
                             },
                         };
 
@@ -168,23 +140,35 @@ pub(crate) async fn update_message(
 
                     let channel_id = channel.map(|c| c.id.get());
 
-                    match update_scheduled_message(&data.database, message_id, parsed_datetime, repeat, title, message, channel_id).await {
+                    match db::update_scheduled_message(
+                        &data.database,
+                        message_id,
+                        parsed_datetime,
+                        repeat,
+                        title,
+                        message,
+                        channel_id,
+                    )
+                    .await
+                    {
                         Ok(true) => {
-                            reply(&ctx, REPLY_TITLE, "Scheduled message updated successfully.").await?;
+                            reply(&ctx, REPLY_TITLE, "Scheduled message updated successfully.")
+                                .await?;
                             Ok(())
-                        }
-                        Ok(false) => Err(CommandError::new("Could not find or update scheduled message.")),
-                        Err(e) => Err(CommandError::detailed("Error updating scheduled message.", e)),
+                        },
+                        Ok(false) => {
+                            Err(CommandError::new("Could not find or update scheduled message."))
+                        },
+                        Err(e) => {
+                            Err(CommandError::detailed("Error updating scheduled message.", e))
+                        },
                     }
                 },
                 _ => {
-                    Err(CommandError::new(format!(
-                        "Unable to find message with id {}",
-                        message_id
-                    )))
+                    Err(CommandError::new(format!("Unable to find message with id {}", message_id)))
                 },
             }
-        }
+        },
     }
 }
 
@@ -199,9 +183,9 @@ pub(crate) async fn remove_message(
     let data = ctx.data();
     let author = ctx.author();
 
-    match get_scheduled_message(&data.database, message_id).await? {
+    match db::get_scheduled_message(&data.database, message_id).await? {
         Some(message) if message.user_id() == author.id => {
-            match delete_scheduled_message(&data.database, message_id).await {
+            match db::delete_scheduled_message(&data.database, message_id).await {
                 Ok(true) => {
                     reply(&ctx, REPLY_TITLE, "Scheduled message deleted successfully.").await?
                 },
@@ -233,14 +217,17 @@ pub(crate) async fn remove_message(
 #[poise::command(slash_command, guild_only, rename = "add", category = "Scheduling")]
 pub(crate) async fn add_message(
     ctx: CommandContext<'_>,
-    #[description = "The title of the message"] title: String,
-    #[description = "The message to send"] message: String,
-    #[description = "When to send the message (format: yyyy-MM-dd hh:mm:ss)"] datetime: String,
-    #[description = "How often to repeat, in minutes (m), hours (h), days (d), weeks (w), or years (y)"]
-    repeat: Option<String>,
+    #[description = "The title of the message"]
+    title: String,
+    #[description = "The message to send"]
+    message: String,
+    #[description = "When to send the message (format: yyyy-MM-dd hh:mm:ss)"]
+    datetime: String,
     #[description = "The channel to send the message to when it's time to be sent"]
     #[channel_types("NewsThread", "PrivateThread", "PublicThread", "Text")]
     channel: GuildChannel,
+    #[description = "How often to repeat, in minutes (m), hours (h), days (d), weeks (w), or years (y)"]
+    repeat: Option<String>,
 ) -> CommandResult<()> {
     let data = ctx.data();
     let author = ctx.author();
@@ -248,7 +235,10 @@ pub(crate) async fn add_message(
     let target_datetime = parse_datetime_to_utc(&data.database, &datetime, author.id).await?;
 
     if !validate_datetime(target_datetime) {
-        return Err(CommandError::new(format!("The target datetime {} is invalid as it is not in the future.", target_datetime.to_rfc3339())));
+        return Err(CommandError::new(format!(
+            "The target datetime {} is invalid as it is not in the future.",
+            target_datetime.to_rfc3339()
+        )));
     }
 
     // If a repeat was specified, verify that adding it to the target datetime won't cause an error.
@@ -257,7 +247,7 @@ pub(crate) async fn add_message(
     }
 
     let repeat = repeat.unwrap_or_else(|| "None".to_owned());
-    let success = add_scheduled_message(
+    let success = db::add_scheduled_message(
         &data.database,
         author.id,
         target_datetime,
@@ -285,6 +275,90 @@ pub(crate) async fn add_message(
     }
 
     Ok(())
+}
+
+/// Set the timezone used for all messages scheduled by you.
+#[poise::command(slash_command, guild_only, rename = "timezone", category = "Scheduling")]
+pub(crate) async fn set_timezone(
+    ctx: CommandContext<'_>,
+    #[description = "The timezone name, for example 'Australia/Sydney'; see https://en.wikipedia.org/wiki/List_of_tz_database_time_zones for a list of valid time zones"]
+    name: String,
+) -> CommandResult<()> {
+    const REPLY_TITLE: &str = "User timezone";
+    let timezone = match get_timezone(&name) {
+        Some(tz) => tz,
+        None => return Err(CommandError::new(format!("Unknown timezone '{}'", name))),
+    };
+
+    let result =
+        db::update_user_setting(&ctx.data().database, ctx.author().id, USER_TIMEZONE, timezone.name()).await;
+
+    let mut message = MessageBuilder::new();
+    match result {
+        Ok(true) => {
+            message.push_line(format!("Your timezone has been set to {}.", timezone.name()));
+        },
+        Ok(false) => {
+            message.push_line(format!("Your timezone was already set to {}.", timezone.name()));
+        },
+        Err(e) => {
+            return Err(CommandError::detailed("Error updating timezone setting", e));
+        },
+    }
+
+    whisper(&ctx, REPLY_TITLE, &message.build()).await?;
+
+    Ok(())
+}
+
+/// Format a single scheduled message for display.
+fn format_scheduled_message(
+    title: &str,
+    message: &str,
+    datetime: &str,
+    repeat: Option<&str>,
+    channel: ChannelId,
+) -> String {
+    let mut content = MessageBuilder::new();
+    content
+        .push_bold("Datetime: ")
+        .push_line(datetime)
+        .push_bold("Repeat: ")
+        .push_line(repeat.unwrap_or("None"))
+        .push_bold("Channel: ")
+        .mention(&channel)
+        .push_line("")
+        .push_bold("Title: ")
+        .push_line(title)
+        .push_bold_line("Message:")
+        .push_line(truncate_string(message, 500));
+
+    content.build()
+}
+
+/// Parse a string into a valid datetime.
+async fn parse_datetime_to_utc(
+    database: &Database,
+    datetime: &str,
+    user_id: UserId,
+) -> anyhow::Result<DateTime<Utc>> {
+    let parsed_datetime = match NaiveDateTime::parse_from_str(datetime, "%Y-%m-%d %H:%M:%S") {
+        Ok(val) => val,
+        Err(e) => return Err(CommandError::detailed("Error parsing input datetime", e).into()),
+    };
+    let user_timezone = db::get_user_setting(database, user_id, USER_TIMEZONE)
+        .await?
+        .map(|opt| chrono_tz::Tz::from_str(&opt.value).unwrap_or(chrono_tz::Tz::UTC))
+        .unwrap_or(chrono_tz::Tz::UTC);
+
+    match parsed_datetime.and_local_timezone(user_timezone).earliest() {
+        Some(dt) => Ok(dt.to_utc()),
+        None => Err(CommandError::new(format!(
+            "Could not construct a local datetime for {} in timezone {}",
+            parsed_datetime, user_timezone
+        ))
+        .into()),
+    }
 }
 
 pub(crate) fn apply_repeat_duration(
@@ -351,80 +425,19 @@ pub(crate) fn apply_repeat_duration(
     }
 }
 
-/// Set the timezone used for all messages scheduled by you.
-#[poise::command(slash_command, guild_only, rename = "timezone", category = "Scheduling")]
-pub(crate) async fn set_timezone(
-    ctx: CommandContext<'_>,
-    #[description = "The timezone identifier"] id: TimeZoneParameter,
-) -> CommandResult<()> {
-    const REPLY_TITLE: &str = "User timezone";
-    let result =
-        update_user_setting(&ctx.data().database, ctx.author().id, USER_TIMEZONE, id.name()).await;
-
-    let mut message = MessageBuilder::new();
-    match result {
-        Ok(true) => {
-            message.push_line(format!("Your timezone has been set to {}.", id.name()));
-        },
-        Ok(false) => {
-            message.push_line(format!("Your timezone was already set to {}.", id.name()));
-        },
-        Err(e) => {
-            return Err(CommandError::detailed("Error updating timezone setting", e));
-        },
-    }
-
-    whisper(&ctx, REPLY_TITLE, &message.build()).await?;
-
-    Ok(())
-}
-
-/// Format a single scheduled message for display.
-fn format_scheduled_message(
-    title: &str,
-    message: &str,
-    datetime: &str,
-    repeat: Option<&str>,
-    channel: ChannelId,
-) -> String {
-    let mut content = MessageBuilder::new();
-    content
-        .push_bold("Datetime: ")
-        .push_line(datetime)
-        .push_bold("Repeat: ")
-        .push_line(repeat.unwrap_or("None"))
-        .push_bold("Channel: ")
-        .mention(&channel)
-        .push_line("")
-        .push_bold("Title: ")
-        .push_line(title)
-        .push_bold_line("Message:")
-        .push_line(truncate_string(message, 500));
-
-    content.build()
-}
-
-/// Parse a string into a valid datetime.
-async fn parse_datetime_to_utc(database: &Database, datetime: &str, user_id: UserId) -> anyhow::Result<DateTime<Utc>> {
-    let parsed_datetime = match NaiveDateTime::parse_from_str(datetime, "%Y-%m-%d %H:%M:%S") {
-        Ok(val) => val,
-        Err(e) => return Err(CommandError::detailed("Error parsing input datetime", e).into()),
-    };
-    let user_timezone = get_user_setting(database, user_id, USER_TIMEZONE).await?
-        .map(|opt| chrono_tz::Tz::from_str(&opt.value).unwrap_or(chrono_tz::Tz::UTC))
-        .unwrap_or(chrono_tz::Tz::UTC);
-
-    match parsed_datetime.and_local_timezone(user_timezone).earliest() {
-        Some(dt) => Ok(dt.to_utc()),
-        None => Err(CommandError::new(format!(
-            "Could not construct a local datetime for {} in timezone {}",
-            parsed_datetime, user_timezone
-        )).into()),
-    }
-}
-
 /// Validate datetime is current or future
 fn validate_datetime(datetime: DateTime<Utc>) -> bool {
     let current_time = chrono::offset::Utc::now();
     datetime > current_time
+}
+
+pub(crate) async fn archive_scheduled_message(database: &Database, message_id: i64) {
+    if let Err(e) = db::archive_scheduled_message(&database, message_id).await {
+        error!("Unable to flag scheduled message {} as archived: {}", message_id, e);
+    }
+}
+
+/// Get a timezone value from a given timezone name, for example 'Australia/Sydney'
+fn get_timezone(name: &str) -> Option<Tz> {
+    chrono_tz::TZ_VARIANTS.iter().find(|&tz| tz.name() == name).cloned()
 }

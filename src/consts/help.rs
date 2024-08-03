@@ -7,6 +7,9 @@ pub(crate) const MAIN: &str = include_str!("../../help/main.md");
 pub(crate) const MUSES_TITLE: &str = "View or change registered muses.";
 pub(crate) const MUSES: &str = include_str!("../../help/muses.md");
 
+pub(crate) const SCHEDULING_TITLE: &str = "Manage scheduled messages and associated settings";
+pub(crate) const SCHEDULING: &str = include_str!("../../help/scheduling.md");
+
 pub(crate) const THREADS_TITLE: &str = "View or change tracked threads";
 pub(crate) const THREADS: &str = include_str!("../../help/threads.md");
 

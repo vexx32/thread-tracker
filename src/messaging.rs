@@ -16,54 +16,6 @@ use crate::{
     utils,
 };
 
-/// Mapping enum to select appropriate help messages for various commands and retrieve the associated text.
-pub(crate) enum HelpMessage {
-    Bugs,
-    Main,
-    Muses,
-    Threads,
-    Todos,
-}
-
-impl HelpMessage {
-    /// Retrieve a specific HelpMessage based on the category name as a string, case insensitive.
-    pub fn from_category(category: Option<&str>) -> Self {
-        match category.map(|s| s.to_ascii_lowercase()).as_deref() {
-            Some("bugs") => Self::Bugs,
-            Some("muses") => Self::Muses,
-            Some("threads" | "thread tracking") => Self::Threads,
-            Some("todos" | "todo list") => Self::Todos,
-            _ => Self::Main,
-        }
-    }
-
-    /// Get the text for this help message.
-    pub fn text(&self) -> &'static str {
-        use help::*;
-
-        match self {
-            Self::Bugs => BUGS,
-            Self::Main => MAIN,
-            Self::Muses => MUSES,
-            Self::Threads => THREADS,
-            Self::Todos => TODOS,
-        }
-    }
-
-    /// Get the message title for this help message.
-    pub fn title(&self) -> &'static str {
-        use help::*;
-
-        match self {
-            Self::Bugs => BUGS_TITLE,
-            Self::Main => MAIN_TITLE,
-            Self::Muses => MUSES_TITLE,
-            Self::Threads => THREADS_TITLE,
-            Self::Todos => TODOS_TITLE,
-        }
-    }
-}
-
 /// Send the target user a private/direct message.
 pub(crate) async fn dm(
     ctx: impl CacheHttp,

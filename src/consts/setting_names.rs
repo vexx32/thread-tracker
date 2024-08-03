@@ -1,1 +1,1 @@
-pub(crate) const USER_TIMEZONE: &'static str = "USER_TIMEZONE";
+pub(crate) const USER_TIMEZONE: &str = "USER_TIMEZONE";

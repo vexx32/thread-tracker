@@ -48,6 +48,7 @@ pub(crate) async fn update_scheduled_message(
         Some(mut record) => {
             if let Some(datetime) = datetime {
                 record.datetime = datetime.to_rfc3339();
+                record.archived = false;
             }
 
             if let Some(repeat) = repeat {
@@ -66,13 +67,15 @@ pub(crate) async fn update_scheduled_message(
                 record.channel_id = channel_id;
             }
 
-            let result = sqlx::query("UPDATE scheduled_messages SET channel_id = $2, datetime = $3, repeat = $4, title = $5, message = $6 WHERE id = $1")
+            let result = sqlx::query(
+                "UPDATE scheduled_messages SET channel_id = $2, datetime = $3, repeat = $4, title = $5, message = $6, archived = $7 WHERE id = $1")
                 .bind(id)
                 .bind(record.channel_id as i64)
                 .bind(record.datetime)
                 .bind(record.repeat)
                 .bind(record.title)
                 .bind(record.message)
+                .bind(record.archived)
                 .execute(database)
                 .await?;
 
