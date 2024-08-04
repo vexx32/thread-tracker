@@ -5,8 +5,7 @@ pub(crate) use models::*;
 use poise::serenity_prelude::UserId;
 
 pub(crate) use sqlx::PgPool as Database;
-
-type Result<T> = std::result::Result<T, sqlx::Error>;
+pub(crate) type Result<T> = std::result::Result<T, sqlx::Error>;
 
 /// Delete a scheduled message completely.
 pub(crate) async fn delete_scheduled_message(database: &Database, id: i32) -> Result<bool> {

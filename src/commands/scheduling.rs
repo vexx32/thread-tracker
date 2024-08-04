@@ -1,7 +1,7 @@
-use std::{str::FromStr, thread::current};
+use std::str::FromStr;
 
 use anyhow::anyhow;
-use chrono::{DateTime, Days, Months, NaiveDateTime, TimeDelta, Utc};
+use chrono::{DateTime, Days, FixedOffset, Months, NaiveDateTime, TimeDelta, Utc};
 use chrono_tz::Tz;
 use regex::Regex;
 use serenity::{model::prelude::*, utils::MessageBuilder};
@@ -48,6 +48,7 @@ pub(crate) async fn list_messages(ctx: CommandContext<'_>) -> CommandResult<()> 
     } else {
         let mut content = MessageBuilder::new();
         for msg in messages {
+            let local_datetime = parse_and_display_local_time(&msg.datetime, author.id, &data.database).await?;
             content
                 .push("- ")
                 .push_bold(msg.id.to_string())
@@ -56,10 +57,10 @@ pub(crate) async fn list_messages(ctx: CommandContext<'_>) -> CommandResult<()> 
                 .push(" in ")
                 .mention(&msg.channel_id())
                 .push(" @ ")
-                .push(&msg.datetime);
+                .push(&local_datetime);
 
             if !msg.repeat.is_empty() && msg.repeat != "None" {
-                content.push(" (repeating every ").push(msg.repeat).push(")");
+                content.push(" (every ").push(msg.repeat).push(")");
             }
 
             content.push_line("");
@@ -87,10 +88,12 @@ pub(crate) async fn get_message(
         _ => return Err(CommandError::new(format!("Unable to find the message with id {}", message_id))),
     };
 
+    let local_datetime = parse_and_display_local_time(&message.datetime, author.id, &data.database).await?;
+
     let response = format_scheduled_message(
         Some(message.id),
         &message.title,
-        &message.message,
+        &local_datetime,
         &message.datetime,
         Some(&message.repeat),
         message.channel_id());
@@ -287,10 +290,11 @@ pub(crate) async fn add_message(
     .await?;
 
     if success {
+        let local_datetime = display_as_local_time(target_datetime.fixed_offset(), author.id, &data.database).await?;
         reply(
             &ctx,
             "Added scheduled message successfully",
-            &format_scheduled_message(None, &title, &message, &datetime, Some(&repeat), channel.id),
+            &format_scheduled_message(None, &title, &message, &local_datetime, Some(&repeat), channel.id),
         )
         .await?;
     } else {
@@ -369,7 +373,25 @@ fn format_scheduled_message(
     content.build()
 }
 
-/// Parse a string into a valid datetime.
+/// Parse an RFC3339 datetime string and return a local time equivalent in RFC2822 format.
+async fn parse_and_display_local_time(datetime: &str, user_id: UserId, database: &Database) -> CommandResult<String> {
+    let parsed_datetime = match DateTime::parse_from_rfc3339(datetime) {
+        Ok(dt) => dt,
+        Err(e) => return Err(CommandError::detailed("Error parsing stored message datetime", e)),
+    };
+
+    display_as_local_time(parsed_datetime, user_id, database).await
+}
+
+/// Convert a datetime to the user's local timezone and format it for display using RFC2822 standards.
+async fn display_as_local_time(datetime: DateTime<FixedOffset>, user_id: UserId, database: &Database) -> CommandResult<String> {
+    let timezone = get_user_timezone(database, user_id).await?;
+    let local_time = datetime.with_timezone(&timezone);
+
+    Ok(local_time.to_rfc2822())
+}
+
+/// Parse a string into a valid UTC datetime.
 async fn parse_datetime_to_utc(
     database: &Database,
     datetime: &str,
@@ -379,10 +401,7 @@ async fn parse_datetime_to_utc(
         Ok(val) => val,
         Err(e) => return Err(CommandError::detailed("Error parsing input datetime", e).into()),
     };
-    let user_timezone = db::get_user_setting(database, user_id, USER_TIMEZONE)
-        .await?
-        .map(|opt| chrono_tz::Tz::from_str(&opt.value).unwrap_or(chrono_tz::Tz::UTC))
-        .unwrap_or(chrono_tz::Tz::UTC);
+    let user_timezone = get_user_timezone(database, user_id).await?;
 
     match parsed_datetime.and_local_timezone(user_timezone).earliest() {
         Some(dt) => Ok(dt.to_utc()),
@@ -394,6 +413,15 @@ async fn parse_datetime_to_utc(
     }
 }
 
+/// Get the currently set timezone for the user, or UTC if none is set.
+async fn get_user_timezone(database: &Database, user_id: UserId) -> db::Result<Tz> {
+    Ok(db::get_user_setting(database, user_id, USER_TIMEZONE)
+        .await?
+        .map(|opt| chrono_tz::Tz::from_str(&opt.value).unwrap_or(chrono_tz::Tz::UTC))
+        .unwrap_or(chrono_tz::Tz::UTC))
+}
+
+/// Apply the given repeat duration to the current datetime and return the resulting datetime.
 pub(crate) fn apply_repeat_duration(
     repeat: &str,
     current_datetime: DateTime<Utc>,
@@ -405,12 +433,11 @@ pub(crate) fn apply_repeat_duration(
     let mut new_datetime = current_datetime;
 
     // If this fails, this function is useless anyway and we need to rewrite the regex.
-    let regex = Regex::new("([0-9]+)([hmsdwmy])").unwrap();
+    let regex = Regex::new("([0-9]+)([a-zA-Z]+)").unwrap();
     let mut unrecognised = Vec::new();
     let mut time_delta = TimeDelta::seconds(0);
 
-    let repeat_lower = repeat.to_lowercase();
-    for token in repeat_lower.split_whitespace() {
+    for token in repeat.split_whitespace() {
         match regex.captures(token) {
             Some(captures) => {
                 // If this matches, there has to be a group 0 and 1, and group 0 has to contain all numbers, so these unwraps are safe.
@@ -418,9 +445,9 @@ pub(crate) fn apply_repeat_duration(
                 let time_period = captures.get(2).unwrap().as_str();
 
                 let changed_delta = match time_period {
-                    "h" => time_delta.checked_add(&TimeDelta::hours(number as i64)),
-                    "m" => time_delta.checked_add(&TimeDelta::minutes(number as i64)),
-                    "s" => time_delta.checked_add(&TimeDelta::seconds(number as i64)),
+                    "h" | "hr"  | "hrs"  | "hour"   | "hours" => time_delta.checked_add(&TimeDelta::hours(number as i64)),
+                    "m" | "min" | "mins" | "minute" | "minutes" => time_delta.checked_add(&TimeDelta::minutes(number as i64)),
+                    "s" | "sec" | "secs" | "second" | "seconds" => time_delta.checked_add(&TimeDelta::seconds(number as i64)),
                     _ => None,
                 };
 
@@ -428,9 +455,10 @@ pub(crate) fn apply_repeat_duration(
                     time_delta = delta;
                 } else {
                     let changed_datetime = match time_period {
-                        "y" => new_datetime.checked_add_months(Months::new(12 * number as u32)),
-                        "d" => new_datetime.checked_add_days(Days::new(number)),
-                        "w" => new_datetime.checked_add_days(Days::new(number * 7)),
+                        "y" | "yr" | "year" | "yrs"   | "years" => new_datetime.checked_add_months(Months::new(12 * number as u32)),
+                        "d" | "dy" | "dys"  | "day"   | "days" => new_datetime.checked_add_days(Days::new(number)),
+                        "w" | "wk" | "wks"  | "week"  | "weeks" => new_datetime.checked_add_days(Days::new(number * 7)),
+                        "M" | "mo" | "mos"  | "month" | "months" => new_datetime.checked_add_months(Months::new(number as u32)),
                         _ => None,
                     };
 
@@ -470,8 +498,9 @@ fn validate_datetime(datetime: DateTime<Utc>) -> bool {
     datetime > current_time
 }
 
+/// Archive a scheduled message, flagging it as having been already sent and not to be re-sent again.
 pub(crate) async fn archive_scheduled_message(database: &Database, message_id: i32) {
-    if let Err(e) = db::archive_scheduled_message(&database, message_id).await {
+    if let Err(e) = db::archive_scheduled_message(database, message_id).await {
         error!("Unable to flag scheduled message {} as archived: {}", message_id, e);
     }
 }
