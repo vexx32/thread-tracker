@@ -71,6 +71,35 @@ pub(crate) async fn list_messages(ctx: CommandContext<'_>) -> CommandResult<()> 
     Ok(())
 }
 
+
+/// Get a scheduled message
+#[poise::command(slash_command, guild_only, rename = "get", category = "Scheduling")]
+pub(crate) async fn get_message(
+    ctx: CommandContext<'_>,
+    #[description = "The numeric ID of the message to retrieve"]
+    message_id: i32,
+) -> CommandResult<()> {
+    let data = ctx.data();
+    let author = ctx.author();
+
+    let message = match db::get_scheduled_message(&data.database, message_id).await? {
+        Some(msg) if msg.user_id() == author.id => { msg },
+        _ => return Err(CommandError::new(format!("Unable to find the message with id {}", message_id))),
+    };
+
+    let response = format_scheduled_message(
+        Some(message.id),
+        &message.title,
+        &message.message,
+        &message.datetime,
+        Some(&message.repeat),
+        message.channel_id());
+
+    reply(&ctx, "Get scheduled message information", &response).await?;
+
+    Ok(())
+}
+
 /// Update an existing scheduled message
 #[poise::command(slash_command, guild_only, rename = "update", category = "Scheduling")]
 pub(crate) async fn update_message(
