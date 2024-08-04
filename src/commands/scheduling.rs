@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{str::FromStr, thread::current};
 
 use anyhow::anyhow;
 use chrono::{DateTime, Days, Months, NaiveDateTime, TimeDelta, Utc};
@@ -445,10 +445,16 @@ pub(crate) fn apply_repeat_duration(
         }
     }
 
-    if let Some(dt) = new_datetime.checked_add_signed(time_delta) {
-        new_datetime = dt;
-    } else {
-        return Err(anyhow!("Total parsed time delta was {}, which did not produce a valid datetime when added to {}", time_delta, new_datetime));
+    // Safeguard to ensure that the new scheduled time is always in the future.
+    // This preserves the repeat offets precisely, while also ensuring that
+    // we don't end up with a new scheduled time that happens to have already
+    // elapsed, for example if the bot has been down for a period of time.
+    while new_datetime <= chrono::offset::Utc::now() {
+        if let Some(dt) = new_datetime.checked_add_signed(time_delta) {
+            new_datetime = dt;
+        } else {
+            return Err(anyhow!("Total parsed time delta was {}, which did not produce a valid datetime when added to {}", time_delta, new_datetime));
+        }
     }
 
     if unrecognised.is_empty() {
