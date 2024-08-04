@@ -149,7 +149,7 @@ impl UserSetting {
 
 #[derive(FromRow)]
 pub(crate) struct ScheduledMessage {
-    pub id: i64,
+    pub id: i32,
     #[sqlx(try_from = "i64")]
     pub user_id: u64,
     #[sqlx(try_from = "i64")]
@@ -173,7 +173,7 @@ impl ScheduledMessage {
 
 #[derive(FromRow)]
 pub(crate) struct ScheduledMessageSummary {
-    pub id: i64,
+    pub id: i32,
     #[sqlx(try_from = "i64")]
     pub channel_id: u64,
     pub datetime: String,

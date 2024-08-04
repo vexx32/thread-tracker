@@ -23,7 +23,7 @@ pub(crate) const WATCHER_UPDATE_INTERVAL: Duration = Duration::from_secs(900);
 #[cfg(debug_assertions)]
 pub(crate) const WATCHER_UPDATE_INTERVAL: Duration = Duration::from_secs(60);
 
-pub(crate) const SCHEDULED_MESSAGE_INTERVAL: Duration = Duration::from_secs(300);
+pub(crate) const SCHEDULED_MESSAGE_INTERVAL: Duration = Duration::from_secs(60);
 
 pub(crate) const CACHE_TRIM_INTERVAL: Duration = Duration::from_secs(2995);
 

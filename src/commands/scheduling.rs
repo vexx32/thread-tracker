@@ -1,9 +1,8 @@
-use std::{collections::HashMap, str::FromStr};
+use std::str::FromStr;
 
 use anyhow::anyhow;
 use chrono::{DateTime, Days, Months, NaiveDateTime, TimeDelta, Utc};
 use chrono_tz::Tz;
-use poise::choice_parameter::ChoiceParameter;
 use regex::Regex;
 use serenity::{model::prelude::*, utils::MessageBuilder};
 use tracing::{error, info};
@@ -27,6 +26,7 @@ use crate::{
         "remove_message",
         "update_message",
         "list_messages",
+        "get_message",
         "set_timezone"
     )
 )]
@@ -75,12 +75,10 @@ pub(crate) async fn list_messages(ctx: CommandContext<'_>) -> CommandResult<()> 
 #[poise::command(slash_command, guild_only, rename = "update", category = "Scheduling")]
 pub(crate) async fn update_message(
     ctx: CommandContext<'_>,
-    #[description = "The numeric ID of the message to delete"] message_id: i64,
+    #[description = "The numeric ID of the message to delete"] message_id: i32,
     #[description = "The title of the message"] title: Option<String>,
     #[description = "The message to send"] message: Option<String>,
-    #[description = "When to send the message (format: yyyy-MM-dd hh:mm:ss)"] datetime: Option<
-        String,
-    >,
+    #[description = "When to send the message (format: yyyy-MM-dd hh:mm:ss)"] datetime: Option<String>,
     #[description = "How often to repeat, in minutes (m), hours (h), days (d), weeks (w), or years (y)"]
     repeat: Option<String>,
     #[description = "The channel to send the message to when it's time to be sent"]
@@ -176,7 +174,8 @@ pub(crate) async fn update_message(
 #[poise::command(slash_command, guild_only, rename = "remove", category = "Scheduling")]
 pub(crate) async fn remove_message(
     ctx: CommandContext<'_>,
-    #[description = "The numeric ID of the message to delete"] message_id: i64,
+    #[description = "The numeric ID of the message to delete"]
+    message_id: i32,
 ) -> CommandResult<()> {
     const REPLY_TITLE: &str = "Remove scheduled message";
 
@@ -262,7 +261,7 @@ pub(crate) async fn add_message(
         reply(
             &ctx,
             "Added scheduled message successfully",
-            &format_scheduled_message(&title, &message, &datetime, Some(&repeat), channel.id),
+            &format_scheduled_message(None, &title, &message, &datetime, Some(&repeat), channel.id),
         )
         .await?;
     } else {
@@ -281,7 +280,7 @@ pub(crate) async fn add_message(
 #[poise::command(slash_command, guild_only, rename = "timezone", category = "Scheduling")]
 pub(crate) async fn set_timezone(
     ctx: CommandContext<'_>,
-    #[description = "The timezone name, for example 'Australia/Sydney'; see https://en.wikipedia.org/wiki/List_of_tz_database_time_zones for a list of valid time zones"]
+    #[description = "The timezone identifier, for example 'Australia/Sydney'"]
     name: String,
 ) -> CommandResult<()> {
     const REPLY_TITLE: &str = "User timezone";
@@ -313,6 +312,7 @@ pub(crate) async fn set_timezone(
 
 /// Format a single scheduled message for display.
 fn format_scheduled_message(
+    id: Option<i32>,
     title: &str,
     message: &str,
     datetime: &str,
@@ -320,6 +320,10 @@ fn format_scheduled_message(
     channel: ChannelId,
 ) -> String {
     let mut content = MessageBuilder::new();
+    if let Some(id) = id {
+        content.push_bold("Id: ").push_line(id.to_string());
+    }
+
     content
         .push_bold("Datetime: ")
         .push_line(datetime)
@@ -381,8 +385,8 @@ pub(crate) fn apply_repeat_duration(
         match regex.captures(token) {
             Some(captures) => {
                 // If this matches, there has to be a group 0 and 1, and group 0 has to contain all numbers, so these unwraps are safe.
-                let number: u64 = captures.get(0).unwrap().as_str().parse().unwrap();
-                let time_period = captures.get(1).unwrap().as_str();
+                let number: u64 = captures.get(1).unwrap().as_str().parse().unwrap();
+                let time_period = captures.get(2).unwrap().as_str();
 
                 let changed_delta = match time_period {
                     "h" => time_delta.checked_add(&TimeDelta::hours(number as i64)),
@@ -431,7 +435,7 @@ fn validate_datetime(datetime: DateTime<Utc>) -> bool {
     datetime > current_time
 }
 
-pub(crate) async fn archive_scheduled_message(database: &Database, message_id: i64) {
+pub(crate) async fn archive_scheduled_message(database: &Database, message_id: i32) {
     if let Err(e) = db::archive_scheduled_message(&database, message_id).await {
         error!("Unable to flag scheduled message {} as archived: {}", message_id, e);
     }

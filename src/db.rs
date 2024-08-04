@@ -9,7 +9,7 @@ pub(crate) use sqlx::PgPool as Database;
 type Result<T> = std::result::Result<T, sqlx::Error>;
 
 /// Delete a scheduled message completely.
-pub(crate) async fn delete_scheduled_message(database: &Database, id: i64) -> Result<bool> {
+pub(crate) async fn delete_scheduled_message(database: &Database, id: i32) -> Result<bool> {
     match get_scheduled_message(database, id).await? {
         Some(_) => {
             let result = sqlx::query("DELETE FROM scheduled_messages WHERE id = $1")
@@ -24,7 +24,7 @@ pub(crate) async fn delete_scheduled_message(database: &Database, id: i64) -> Re
 }
 
 /// Flag a scheduled message as archived or already-sent, so that it cannot be sent again in future.
-pub(crate) async fn archive_scheduled_message(database: &Database, id: i64) -> Result<bool> {
+pub(crate) async fn archive_scheduled_message(database: &Database, id: i32) -> Result<bool> {
     let result = sqlx::query("UPDATE scheduled_messages SET archived = TRUE WHERE id = $1")
         .bind(id)
         .execute(database)
@@ -36,7 +36,7 @@ pub(crate) async fn archive_scheduled_message(database: &Database, id: i64) -> R
 /// Update an existing scheduled message. Datetime and repeat should be validated before being stored.
 pub(crate) async fn update_scheduled_message(
     database: &Database,
-    id: i64,
+    id: i32,
     datetime: Option<DateTime<Utc>>,
     repeat: Option<String>,
     title: Option<String>,
@@ -134,7 +134,7 @@ pub(crate) async fn list_scheduled_messages_for_user(
 /// Get a scheduled message
 pub(crate) async fn get_scheduled_message(
     database: &Database,
-    id: i64,
+    id: i32,
 ) -> Result<Option<ScheduledMessage>> {
     sqlx::query_as("SELECT id, user_id, channel_id, datetime, repeat, title, message, archived FROM scheduled_messages WHERE id = $1")
         .bind(id)
