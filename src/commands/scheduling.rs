@@ -4,14 +4,14 @@ use anyhow::anyhow;
 use chrono::{DateTime, Days, FixedOffset, Months, NaiveDateTime, TimeDelta, Utc};
 use chrono_tz::Tz;
 use regex::Regex;
-use serenity::{model::prelude::*, utils::MessageBuilder};
+use serenity::{all::CacheHttp, model::prelude::*, utils::MessageBuilder};
 use tracing::{error, info};
 
 use crate::{
     commands::{CommandContext, CommandError, CommandResult},
     consts::setting_names::*,
     db::{self, Database},
-    messaging::{reply, reply_error, send_invalid_command_call_error, whisper, whisper_error},
+    messaging::{reply, reply_error, send_invalid_command_call_error, send_message, whisper, whisper_error},
     utils::truncate_string,
 };
 
@@ -508,4 +508,80 @@ pub(crate) async fn archive_scheduled_message(database: &Database, message_id: i
 /// Get a timezone value from a given timezone name, for example 'Australia/Sydney'
 fn get_timezone(name: &str) -> Option<Tz> {
     chrono_tz::TZ_VARIANTS.iter().find(|&tz| tz.name() == name).cloned()
+}
+
+/// Send out any scheduled messages, and re-schedule any repeating ones.
+pub(crate) async fn send_scheduled_messages(
+    database: Database,
+    ctx: impl CacheHttp,
+) -> anyhow::Result<()> {
+    info!("Sending out any scheduled messages.");
+
+    let messages = db::get_all_scheduled_messages(&database).await?;
+
+    for message in messages.iter().filter(|m| !m.archived) {
+        let scheduled_time = match DateTime::parse_from_rfc3339(&message.datetime) {
+            Ok(dt) => dt.to_utc(),
+            Err(e) => {
+                error!(
+                    "Error parsing scheduled message's timestamp '{}' with title '{}': {}",
+                    &message.datetime, &message.title, e
+                );
+                continue;
+            },
+        };
+
+        if scheduled_time > chrono::offset::Utc::now() {
+            continue;
+        }
+
+        info!(
+            "Sending out scheduled message {} with title '{}', scheduled for {}",
+            message.id, message.title, message.datetime
+        );
+
+        if message.repeat.is_empty() || message.repeat == "None" {
+            info!("Flagging message {} as sent/archived.", message.id);
+            archive_scheduled_message(&database, message.id).await;
+        } else {
+            info!("Rescheduling message {} after {}", message.id, message.repeat);
+
+            match apply_repeat_duration(&message.repeat, scheduled_time) {
+                Ok(next) => {
+                    if let Err(e) = db::update_scheduled_message(
+                        &database,
+                        message.id,
+                        Some(next),
+                        None,
+                        None,
+                        None,
+                        None::<u64>,
+                    )
+                    .await
+                    {
+                        error!("Unable to re-schedule repeating message: {} -- archiving message as a fallback.", e);
+                        archive_scheduled_message(&database, message.id).await;
+                    }
+                },
+                Err(e) => {
+                    error!("Unable to re-schedule repeating message: {} -- archiving message as a fallback.", e);
+                    archive_scheduled_message(&database, message.id).await;
+                },
+            };
+        }
+
+        if let Err(e) = send_message(
+            &ctx,
+            message.channel_id(),
+            &message.title,
+            &message.message,
+            Colour::FABLED_PINK,
+        ).await
+        {
+            error!("Unable to send scheduled message, archiving it instead: {}", e);
+            archive_scheduled_message(&database, message.id).await;
+        }
+    }
+
+    Ok(())
 }

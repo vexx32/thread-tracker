@@ -4,7 +4,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::DateTime;
 use serenity::{gateway::ActivityData, model::prelude::*, prelude::*};
 use tokio::{
     sync::mpsc::{Receiver, Sender},
@@ -15,13 +14,12 @@ use tracing::{error, info};
 use crate::{
     cache::MessageCache,
     commands::{
-        scheduling::{apply_repeat_duration, archive_scheduled_message},
+        scheduling::send_scheduled_messages,
         threads::send_reply_notification,
         watchers,
     },
     consts::*,
     db::{self, Database, ThreadWatcher},
-    messaging::send_message,
     Data,
 };
 
@@ -218,80 +216,4 @@ pub(crate) async fn start_scheduled_messages_thread(
             error!("Error sending scheduled messages: {}", e);
         }
     });
-}
-
-/// Send out any scheduled messages, and re-schedule any repeating ones.
-pub(crate) async fn send_scheduled_messages(
-    database: Database,
-    ctx: Arc<impl CacheHttp + 'static>,
-) -> anyhow::Result<()> {
-    info!("Sending out any scheduled messages.");
-
-    let messages = db::get_all_scheduled_messages(&database).await?;
-
-    for message in messages.iter().filter(|m| !m.archived) {
-        let scheduled_time = match DateTime::parse_from_rfc3339(&message.datetime) {
-            Ok(dt) => dt.to_utc(),
-            Err(e) => {
-                error!(
-                    "Error parsing scheduled message's timestamp '{}' with title '{}': {}",
-                    &message.datetime, &message.title, e
-                );
-                continue;
-            },
-        };
-
-        if scheduled_time > chrono::offset::Utc::now() {
-            continue;
-        }
-
-        info!(
-            "Sending out scheduled message {} with title '{}', scheduled for {}",
-            message.id, message.title, message.datetime
-        );
-
-        if message.repeat.is_empty() || message.repeat == "None" {
-            info!("Flagging message {} as sent/archived.", message.id);
-            archive_scheduled_message(&database, message.id).await;
-        } else {
-            info!("Rescheduling message {} after {}", message.id, message.repeat);
-
-            match apply_repeat_duration(&message.repeat, scheduled_time) {
-                Ok(next) => {
-                    if let Err(e) = db::update_scheduled_message(
-                        &database,
-                        message.id,
-                        Some(next),
-                        None,
-                        None,
-                        None,
-                        None::<u64>,
-                    )
-                    .await
-                    {
-                        error!("Unable to re-schedule repeating message: {} -- archiving message as a fallback.", e);
-                        archive_scheduled_message(&database, message.id).await;
-                    }
-                },
-                Err(e) => {
-                    error!("Unable to re-schedule repeating message: {} -- archiving message as a fallback.", e);
-                    archive_scheduled_message(&database, message.id).await;
-                },
-            };
-        }
-
-        if let Err(e) = send_message(
-            &ctx,
-            message.channel_id(),
-            &message.title,
-            &message.message,
-            Colour::FABLED_PINK,
-        ).await
-        {
-            error!("Unable to send scheduled message, archiving it instead: {}", e);
-            archive_scheduled_message(&database, message.id).await;
-        }
-    }
-
-    Ok(())
 }
