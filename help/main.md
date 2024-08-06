@@ -17,6 +17,11 @@ Thanks for using Thread Tracker! You can call me Titi. To report bugs or make fe
 > `/tt_todolist`, `/tt_todo`, `/tt_done`
 > A personal to do list that you can update as needed. Use **`/tt_help tt_todolist`** for more information.
 
+### Scheduling Messages
+
+> `/tt_schedule add`, `/tt_schedule remove`, `/tt_schedule update]`, `/tt_schedule list`, `/tt_schedule timezone`
+> Schedule one-time or repeating messages. Use **`/tt_help tt_schedule`** for more information.
+
 ### Bug Reports
 
 Please submit any bug reports to our [Discord](https://discord.gg/DxdufuEkJR).
