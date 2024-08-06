@@ -151,28 +151,25 @@ pub(crate) async fn update_user_setting<Id>(
 where
     Id: Into<u64> + Copy,
 {
-    let result = match get_user_setting(database, user_id, name).await? {
+    let query_string = match get_user_setting(database, user_id, name).await? {
         Some(entry) => {
             if entry.value == value {
                 return Ok(false);
             }
 
-            sqlx::query("UPDATE user_settings SET value = $1 WHERE user_id = $2 AND name = $3")
-                .bind(value)
-                .bind(user_id.into() as i64)
-                .bind(name)
-                .execute(database)
-                .await?
+            "UPDATE user_settings SET value = $3 WHERE user_id = $1 AND name = $2"
         },
         None => {
-            sqlx::query("INSERT INTO user_settings (user_id, name, value) VALUES ($1, $2, $3)")
-                .bind(user_id.into() as i64)
-                .bind(name)
-                .bind(value)
-                .execute(database)
-                .await?
+            "INSERT INTO user_settings (user_id, name, value) VALUES ($1, $2, $3)"
         },
     };
+
+    let result = sqlx::query(query_string)
+        .bind(user_id.into() as i64)
+        .bind(name)
+        .bind(value)
+        .execute(database)
+        .await?;
 
     Ok(result.rows_affected() > 0)
 }

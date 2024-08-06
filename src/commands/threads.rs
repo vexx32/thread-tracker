@@ -12,8 +12,8 @@ use tracing::{error, info};
 use crate::{
     cache::MessageCache,
     commands::{muses, todos, CommandContext, CommandError, CommandResult, SortResultsBy},
-    consts::{MAX_EMBED_CHARS, THREAD_NAME_LENGTH},
-    db::{self, add_subscriber, remove_subscriber, Todo, TrackedThread},
+    consts::{setting_names::USER_SHOW_TIMESTAMPS, MAX_EMBED_CHARS, THREAD_NAME_LENGTH},
+    db::{self, add_subscriber, get_user_setting, remove_subscriber, Todo, TrackedThread},
     messaging::{dm, reply, reply_error, send_invalid_command_call_error, whisper, whisper_error},
     utils::*,
     Data,
@@ -428,8 +428,10 @@ pub(crate) async fn get_threads_and_todos(
         },
     };
 
+    let show_timestamps = show_timestamps(&data.database, guild_user.user_id).await;
+
     let message =
-        match get_formatted_list(threads, todos, muses, sort, &guild_user, context, &data.message_cache)
+        match get_formatted_list(threads, todos, muses, sort, &guild_user, context, &data.message_cache, show_timestamps)
             .await
         {
             Ok(m) => m,
@@ -460,6 +462,8 @@ pub(crate) async fn get_pending_thread_list(
 
     let categorised_threads = partition_into_map(pending_threads, |item| item.1.category.clone());
 
+    let show_timestamps: bool = show_timestamps(&data.database, user.id).await;
+
     let mut message = MessageBuilder::new();
 
     for (name, mut threads) in categorised_threads {
@@ -480,7 +484,15 @@ pub(crate) async fn get_pending_thread_list(
 
         for (reply_info, thread) in threads {
             let link = get_thread_link(&thread, None, context).await;
-            message.push("- ").push(link.to_string()).push(" — ").push_line(Bold + &reply_info.author_nick);
+            message.push("- ").push(link.to_string()).push(" — ").push(Bold + &reply_info.author_nick);
+            if show_timestamps {
+                message.push(" (")
+                    .push_timestamp(reply_info.timestamp)
+                    .push_line(")");
+            }
+            else {
+                message.push_line("");
+            }
         }
 
         message.push_line("");
@@ -598,6 +610,53 @@ pub(crate) async fn notify_replies_off(ctx: CommandContext<'_>) -> CommandResult
         whisper_error(&ctx, "Subscription", "You are not currently subscribed to thread replies.")
             .await?;
     }
+
+    Ok(())
+}
+
+#[poise::command(slash_command, category = "Thread tracking", rename = "tt_timestamps", subcommands("set_timestamps_on", "set_timestamps_off"))]
+pub(crate) async fn set_timestamps(ctx: CommandContext<'_>) -> CommandResult<()> {
+    send_invalid_command_call_error(ctx).await
+}
+
+#[poise::command(slash_command, category = "Thread tracking", rename = "on")]
+pub(crate) async fn set_timestamps_on(ctx: CommandContext<'_>) -> CommandResult<()> {
+    const REPLY_TITLE: &str = "Enable timestamps";
+    let data = ctx.data();
+    let author = ctx.author();
+
+    let result = db::update_user_setting(&data.database, author.id, USER_SHOW_TIMESTAMPS, "true").await?;
+
+    let mut message = MessageBuilder::new();
+    if result {
+        message.push("Timestamps successfully enabled");
+    }
+    else {
+        message.push("Timestamps are already enabled");
+    }
+
+    whisper(&ctx, REPLY_TITLE, &message.build()).await?;
+
+    Ok(())
+}
+
+#[poise::command(slash_command, category = "Thread tracking", rename = "off")]
+pub(crate) async fn set_timestamps_off(ctx: CommandContext<'_>) -> CommandResult<()> {
+    const REPLY_TITLE: &str = "Disable timestamps";
+    let data = ctx.data();
+    let author = ctx.author();
+
+    let result = db::update_user_setting(&data.database, author.id, USER_SHOW_TIMESTAMPS, "false").await?;
+
+    let mut message = MessageBuilder::new();
+    if result {
+        message.push("Timestamps successfully disabled");
+    }
+    else {
+        message.push("Timestamps are already disabled");
+    }
+
+    whisper(&ctx, REPLY_TITLE, &message.build()).await?;
 
     Ok(())
 }
@@ -737,6 +796,7 @@ pub(crate) async fn get_formatted_list(
     user: &GuildUser,
     context: &impl CacheHttp,
     message_cache: &MessageCache,
+    show_timestamps: bool,
 ) -> Result<String, SerenityError> {
     let mut threads = categorise(threads);
     let todos = todos::categorise(todos);
@@ -786,6 +846,7 @@ pub(crate) async fn get_formatted_list(
                     message_cache,
                     user.user_id,
                     &muses,
+                    show_timestamps,
                 )
                 .await;
             }
@@ -895,6 +956,7 @@ async fn push_thread_line<'a>(
     message_cache: &MessageCache,
     user_id: UserId,
     muses: &[String],
+    show_timestamps: bool,
 ) -> &'a mut MessageBuilder {
     let last_message_author = get_last_responder(thread, context, message_cache).await;
 
@@ -913,9 +975,14 @@ async fn push_thread_line<'a>(
                 message.push(Bold + last_author_name);
             }
 
-            message.push(" (");
-            message.push_timestamp(reply_info.timestamp);
-            message.push_line(")")
+            if show_timestamps {
+                message.push(" (");
+                message.push_timestamp(reply_info.timestamp);
+                message.push_line(")")
+            }
+            else {
+                message
+            }
         },
         None => message.push_line(Bold + "No replies yet"),
     }
@@ -975,4 +1042,13 @@ async fn cache_last_channel_message(
             }
         }
     }
+}
+
+/// Determine whether the current user has timestamps enabled
+async fn show_timestamps(database: &Database, user_id: UserId) -> bool {
+    get_user_setting(database, user_id, USER_SHOW_TIMESTAMPS).await
+        .map(|s| s.map(|s| s.value.parse::<bool>()))
+        .unwrap_or(None)
+        .map(|r| r.unwrap_or_default())
+        .unwrap_or_default()
 }

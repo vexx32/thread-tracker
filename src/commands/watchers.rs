@@ -10,13 +10,7 @@ use tracing::{error, info, warn};
 
 use super::CommandResult;
 use crate::{
-    cache::MessageCache,
-    commands::{muses, threads, todos, CommandContext},
-    db::{self, ThreadWatcher, Todo, TrackedThread},
-    messaging::{reply, whisper},
-    utils::get_channel_name,
-    CommandError,
-    Database,
+    cache::MessageCache, commands::{muses, threads, todos, CommandContext}, consts::setting_names::USER_SHOW_TIMESTAMPS, db::{self, ThreadWatcher, Todo, TrackedThread}, messaging::{reply, whisper}, utils::get_channel_name, CommandError, Database
 };
 
 /// List currently tracked watchers.
@@ -253,6 +247,11 @@ pub(crate) async fn update_watched_message(
     }
 
     let muses = muses::get_list(database, user.user_id, user.guild_id).await?;
+    let show_timestamps: bool = db::get_user_setting(database, user.user_id, USER_SHOW_TIMESTAMPS).await?
+        .map(|s| s.value)
+        .unwrap_or("false".to_owned())
+        .parse()
+        .unwrap_or_default();
     let threads_content = threads::get_formatted_list(
         threads,
         todos,
@@ -261,6 +260,7 @@ pub(crate) async fn update_watched_message(
         &watcher.user(),
         &cache_http,
         message_cache,
+        show_timestamps,
     )
     .await?;
 
