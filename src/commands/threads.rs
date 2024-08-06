@@ -982,12 +982,12 @@ async fn push_thread_line<'a>(
             }
 
             if user_data.show_timestamps {
-                message.push(" (");
-                message.push_timestamp(reply_info.timestamp);
-                message.push_line(")")
+                message.push(" (")
+                    .push_timestamp(reply_info.timestamp)
+                    .push_line(")")
             }
             else {
-                message
+                message.push_line("")
             }
         },
         None => message.push_line(Bold + "No replies yet"),
