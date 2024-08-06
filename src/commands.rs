@@ -86,6 +86,7 @@ pub(crate) fn list() -> Vec<poise::Command<Data, CommandError>> {
         threads::send_pending_list(),
         threads::send_random_thread(),
         threads::notify_replies(),
+        threads::set_timestamps(),
         todos::add(),
         todos::remove(),
         todos::list(),
