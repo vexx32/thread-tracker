@@ -42,6 +42,13 @@ impl PartialEq for LastReplyInfo {
     }
 }
 
+pub(crate) struct UserData {
+    pub id: UserId,
+    pub guild_id: GuildId,
+    pub muses: Vec<String>,
+    pub show_timestamps: bool,
+}
+
 /// Get an iterator for the entries from the threads table for the given user.
 pub(crate) async fn enumerate(
     database: &Database,
@@ -428,10 +435,15 @@ pub(crate) async fn get_threads_and_todos(
         },
     };
 
-    let show_timestamps = show_timestamps(&data.database, guild_user.user_id).await;
+    let user_data = UserData {
+        id: guild_user.user_id,
+        guild_id: guild_user.guild_id,
+        muses,
+        show_timestamps: show_timestamps(&data.database, guild_user.user_id).await,
+    };
 
     let message =
-        match get_formatted_list(threads, todos, muses, sort, &guild_user, context, &data.message_cache, show_timestamps)
+        match get_formatted_list(threads, todos, sort, context, &data.message_cache, &user_data)
             .await
         {
             Ok(m) => m,
@@ -791,18 +803,16 @@ async fn get_pending_threads(
 pub(crate) async fn get_formatted_list(
     threads: Vec<TrackedThread>,
     todos: Vec<Todo>,
-    muses: Vec<String>,
     sort: Option<SortResultsBy>,
-    user: &GuildUser,
     context: &impl CacheHttp,
     message_cache: &MessageCache,
-    show_timestamps: bool,
+    user_data: &UserData,
 ) -> Result<String, SerenityError> {
     let mut threads = categorise(threads);
     let todos = todos::categorise(todos);
 
     let mut guild_threads: HashMap<ChannelId, String> = HashMap::new();
-    for channel in user.guild_id.get_active_threads(context.http()).await?.threads.into_iter() {
+    for channel in user_data.guild_id.get_active_threads(context.http()).await?.threads.into_iter() {
         cache_last_channel_message(Some(&channel), context.http(), message_cache).await;
         guild_threads.insert(channel.id, channel.name);
     }
@@ -844,9 +854,7 @@ pub(crate) async fn get_formatted_list(
                     &guild_threads,
                     context,
                     message_cache,
-                    user.user_id,
-                    &muses,
-                    show_timestamps,
+                    user_data,
                 )
                 .await;
             }
@@ -954,9 +962,7 @@ async fn push_thread_line<'a>(
     guild_threads: &HashMap<ChannelId, String>,
     context: &impl CacheHttp,
     message_cache: &MessageCache,
-    user_id: UserId,
-    muses: &[String],
-    show_timestamps: bool,
+    user_data: &UserData,
 ) -> &'a mut MessageBuilder {
     let last_message_author = get_last_responder(thread, context, message_cache).await;
 
@@ -968,14 +974,14 @@ async fn push_thread_line<'a>(
     match last_message_author {
         Some(reply_info) => {
             let last_author_name = get_nick_or_name(&reply_info.author, thread.guild_id(), context).await;
-            if reply_info.author.id == user_id || muses.contains(&last_author_name) {
+            if reply_info.author.id == user_data.id || user_data.muses.contains(&last_author_name) {
                 message.push(last_author_name);
             }
             else {
                 message.push(Bold + last_author_name);
             }
 
-            if show_timestamps {
+            if user_data.show_timestamps {
                 message.push(" (");
                 message.push_timestamp(reply_info.timestamp);
                 message.push_line(")")
@@ -1045,7 +1051,7 @@ async fn cache_last_channel_message(
 }
 
 /// Determine whether the current user has timestamps enabled
-async fn show_timestamps(database: &Database, user_id: UserId) -> bool {
+pub(crate) async fn show_timestamps(database: &Database, user_id: UserId) -> bool {
     get_user_setting(database, user_id, USER_SHOW_TIMESTAMPS).await
         .map(|s| s.map(|s| s.value.parse::<bool>()))
         .unwrap_or(None)
