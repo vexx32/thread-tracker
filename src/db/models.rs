@@ -131,6 +131,7 @@ pub(crate) struct Statistics {
     pub muses: i64,
     pub todos: i64,
     pub watchers: i64,
+    pub scheduled_messages: i64,
 }
 
 #[derive(FromRow)]

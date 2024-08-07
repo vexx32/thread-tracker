@@ -8,7 +8,7 @@ use crate::{
 };
 
 /// Send the bot's statistics as a reply to the input context
-#[poise::command(prefix_command, dm_only, rename = "stats")]
+#[poise::command(prefix_command, dm_only, discard_spare_arguments, rename = "stats")]
 pub(crate) async fn send_statistics(ctx: CommandContext<'_>) -> CommandResult<()> {
     let data = ctx.data();
     let stats = db::statistics(&data.database).await?;
@@ -23,6 +23,7 @@ pub(crate) async fn send_statistics(ctx: CommandContext<'_>) -> CommandResult<()
     write_stats_line(&mut message, "Muses", stats.muses);
     write_stats_line(&mut message, "To Dos", stats.todos);
     write_stats_line(&mut message, "Watchers", stats.watchers);
+    write_stats_line(&mut message, "Scheduled Messages", stats.scheduled_messages);
 
     let user = ctx.author();
     info!("sending bot statistics to {} ({})", &user.name, user.id);
