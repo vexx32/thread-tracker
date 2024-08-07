@@ -2,6 +2,7 @@ pub(crate) mod greetings;
 pub(crate) mod help;
 pub(crate) mod muses;
 pub(crate) mod scheduling;
+pub(crate) mod server;
 pub(crate) mod stats;
 pub(crate) mod threads;
 pub(crate) mod todos;
@@ -79,6 +80,7 @@ pub(crate) fn list() -> Vec<poise::Command<Data, CommandError>> {
         muses::list(),
         stats::send_statistics(),
         scheduling::schedule(),
+        server::server(),
         threads::add(),
         threads::untrack(),
         threads::set_category(),

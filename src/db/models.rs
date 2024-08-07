@@ -187,3 +187,22 @@ impl ScheduledMessageSummary {
         self.channel_id.into()
     }
 }
+
+#[derive(FromRow)]
+pub(crate) struct ServerNickname {
+    #[sqlx(try_from = "i64")]
+    user_id: u64,
+    #[sqlx(try_from = "i64")]
+    guild_id: u64,
+    pub nickname: String,
+}
+
+impl ServerNickname {
+    pub fn user_id(&self) -> UserId {
+        self.user_id.into()
+    }
+
+    pub fn guild_id(&self) -> GuildId {
+        self.guild_id.into()
+    }
+}

@@ -52,3 +52,10 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
     message varchar(2000) NOT NULL,
     archived BOOLEAN NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS server_nicknames (
+    id serial PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    guild_id BIGINT NOT NULL,
+    nickname varchar(300) NOT NULL
+);

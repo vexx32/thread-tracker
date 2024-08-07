@@ -1,11 +1,94 @@
 mod models;
 
 use chrono::{DateTime, Utc};
+use serenity::all::{GuildId, UserId};
+
 pub(crate) use models::*;
-use poise::serenity_prelude::UserId;
 
 pub(crate) use sqlx::PgPool as Database;
 pub(crate) type Result<T> = std::result::Result<T, sqlx::Error>;
+
+pub(crate) async fn remove_server_nickname<A, B>(
+    database: &Database,
+    user_id: A,
+    guild_id: B,
+) -> Result<bool>
+where
+    A: Into<u64> + Copy,
+    B: Into<u64> + Copy,
+{
+    let result = sqlx::query("DELETE FROM server_nicknames WHERE user_id = $1 AND guild_id = $2")
+        .bind(user_id.into() as i64)
+        .bind(guild_id.into() as i64)
+        .execute(database)
+        .await?;
+
+    Ok(result.rows_affected() > 0)
+}
+
+/// Set the server nickname for a given user
+pub(crate) async fn set_server_nickname<A, B>(
+    database: &Database,
+    user_id: A,
+    guild_id: B,
+    nickname: &str,
+) -> Result<bool>
+where
+    A: Into<u64> + Copy,
+    B: Into<u64> + Copy,
+{
+    let query_string = match get_server_nickname(database, user_id, guild_id).await? {
+        Some(current_name) => {
+            if current_name.nickname == nickname {
+                return Ok(false);
+            }
+
+            "UPDATE server_nicknames SET nickname = $3 WHERE user_id = $1 AND guild_id = $2"
+        },
+        None => "INSERT INTO server_nicknames (user_id, guild_id, nickname) VALUES ($1, $2, $3)",
+    };
+
+    let result = sqlx::query(query_string)
+        .bind(user_id.into() as i64)
+        .bind(guild_id.into() as i64)
+        .bind(nickname)
+        .execute(database)
+        .await?;
+
+    Ok(result.rows_affected() > 0)
+}
+
+/// Get a server ID from a server nickname
+pub(crate) async fn get_server_id_from_nickname(
+    database: &Database,
+    user_id: impl Into<u64>,
+    nickname: &str,
+) -> Result<Option<GuildId>> {
+    let result: Option<ServerNickname> = sqlx::query_as("SELECT user_id, guild_id, nickname FROM server_nicknames WHERE nickname = $1 AND user_id = $2")
+        .bind(nickname)
+        .bind(user_id.into() as i64)
+        .fetch_optional(database)
+        .await?;
+
+    Ok(result.map(|n| n.guild_id()))
+}
+
+/// Get a user's set server nickname
+pub(crate) async fn get_server_nickname<A, B>(
+    database: &Database,
+    user_id: A,
+    guild_id: B,
+) -> Result<Option<ServerNickname>>
+where
+    A: Into<u64> + Copy,
+    B: Into<u64> + Copy,
+{
+    sqlx::query_as("SELECT user_id, guild_id, nickname FROM server_nicknames WHERE guild_id = $1 AND user_id = $2")
+        .bind(guild_id.into() as i64)
+        .bind(user_id.into() as i64)
+        .fetch_optional(database)
+        .await
+}
 
 /// Delete a scheduled message completely.
 pub(crate) async fn delete_scheduled_message(database: &Database, id: i32) -> Result<bool> {
@@ -159,9 +242,7 @@ where
 
             "UPDATE user_settings SET value = $3 WHERE user_id = $1 AND name = $2"
         },
-        None => {
-            "INSERT INTO user_settings (user_id, name, value) VALUES ($1, $2, $3)"
-        },
+        None => "INSERT INTO user_settings (user_id, name, value) VALUES ($1, $2, $3)",
     };
 
     let result = sqlx::query(query_string)
