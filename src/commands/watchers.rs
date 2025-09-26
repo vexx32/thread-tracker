@@ -60,17 +60,19 @@ pub(crate) async fn add(
     ctx: CommandContext<'_>,
     #[description = "The category to filter the watched threads by"] category: Option<String>,
 ) -> CommandResult<()> {
-    let user = ctx.author();
-
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => return Err(CommandError::new("Unable to manage watchers outside of a server")),
     };
 
+    ctx.defer().await?;
+
+    let user = ctx.author();
+
     let data = ctx.data();
 
     info!("adding watcher for {} ({}), categories {:?}", user.name, user.id, category);
-    let list = threads::get_threads_and_todos(user, guild_id, category.as_deref(), None, data, ctx.serenity_context())
+    let list = threads::get_threads_and_todos(user, guild_id, category.as_deref(), None, data, &ctx)
         .await?;
 
     if list.chars().count() > crate::consts::MAX_EMBED_CHARS {
