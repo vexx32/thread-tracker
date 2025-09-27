@@ -222,7 +222,7 @@ impl EventHandler for Handler {
                         utils::delete_message(&message, &context, &data).await;
                     }
                 }
-                else if let Some(interaction) = &root_message.interaction {
+                else if let Some(MessageInteractionMetadata::Command(interaction)) = root_message.interaction_metadata.as_deref() {
                     info!("Processing deletion request for message {}", message.id);
                     if Some(interaction.user.id) == reaction.user_id {
                         utils::delete_message(&message, &context, &data).await;

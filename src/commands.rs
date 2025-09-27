@@ -80,6 +80,7 @@ pub(crate) fn list() -> Vec<poise::Command<Data, CommandError>> {
         stats::send_statistics(),
         scheduling::schedule(),
         threads::add(),
+        threads::cleanup(),
         threads::untrack(),
         threads::set_category(),
         threads::send_list(),

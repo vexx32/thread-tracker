@@ -25,8 +25,8 @@ pub(crate) async fn hello(ctx: CommandContext<'_>) -> CommandResult<()> {
 /// Retrieves a random greeting from the preset list.
 fn get_random_greeting() -> &'static str {
     let greetings = MESSAGES;
-    let mut rng = rand::thread_rng();
-    let index = rng.gen_range(0..greetings.len());
+    let mut rng = rand::rng();
+    let index = rng.random_range(0..greetings.len());
 
     greetings[index]
 }

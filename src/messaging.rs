@@ -1,7 +1,7 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, fmt::Display};
 
 use anyhow::anyhow;
-use poise::{serenity_prelude::*, CreateReply};
+use poise::{serenity_prelude::*, CreateReply, ReplyHandle};
 use serenity::{
     builder::{CreateEmbed, CreateMessage},
     http::CacheHttp,
@@ -15,6 +15,29 @@ use crate::{
     consts::*,
     utils,
 };
+
+/// Button options for a confirmation prompt.
+pub(crate) enum ConfirmationResponse {
+    Confirm,
+    Cancel
+}
+
+impl Display for ConfirmationResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::Confirm => "confirm",
+            Self::Cancel => "cancel"
+        };
+
+        write!(f, "{}", s)
+    }
+}
+
+impl Into<String> for ConfirmationResponse {
+    fn into(self) -> String {
+        self.to_string()
+    }
+}
 
 /// Send the target user a private/direct message.
 pub(crate) async fn dm(
@@ -98,6 +121,62 @@ async fn send_chunked_reply<'a>(
     }
 
     Ok(results)
+}
+
+/// Send an ephemeral reply message to confirm a user action.
+/// Use the returned message handle to wait for an interaction response from the buttons,
+/// using the `ConfirmationResponse` enum IDs to check which button was selected.
+pub(crate) async fn send_confirmation_prompt<'a, S>(
+    ctx: &CommandContext<'a>,
+    title: S,
+    description: S,
+) -> anyhow::Result<ReplyHandle<'a>>
+where 
+    S: Into<Cow<'a, str>>
+{
+    let embed = CreateEmbed::default().title(title.into()).description(description.into()).colour(Colour::BLURPLE);
+    let components = vec![
+        CreateActionRow::Buttons(vec![
+            CreateButton::new(ConfirmationResponse::Confirm).label("Confirm").style(ButtonStyle::Danger),
+            CreateButton::new(ConfirmationResponse::Cancel).label("Cancel").style(ButtonStyle::Secondary),
+        ])
+    ];
+
+    let reply = CreateReply::default().embed(embed).ephemeral(true).components(components);
+    Ok(ctx.send(reply).await?)
+}
+
+pub(crate) async fn edit_message<'a, S>(
+    ctx: CommandContext<'a>,
+    handle: ReplyHandle<'a>,
+    title: Option<S>,
+    description: Option<S>,
+    colour: Option<Colour>,
+    remove_components: bool
+) -> anyhow::Result<()>
+where 
+    S: Into<Cow<'a, str>>
+{
+    let mut embed = CreateEmbed::default();
+    if let Some(t) = title {
+        embed = embed.title(t.into())
+    }
+    
+    if let Some(d) = description {
+        embed = embed.description(d.into())
+    }
+    
+    if let Some(c) = colour {
+        embed = embed.colour(c);
+    }
+
+    let mut reply = CreateReply::default().embed(embed);
+
+    if remove_components {
+        reply = reply.components(Vec::new());
+    }
+    
+    Ok(handle.edit(ctx, reply).await?)
 }
 
 pub(crate) async fn send_message<'a, S>(
