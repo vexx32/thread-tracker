@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use anyhow::anyhow;
-use poise::{serenity_prelude::*, CreateReply};
+use poise::{serenity_prelude::*, CreateReply, ReplyHandle};
 use serenity::{
     builder::{CreateEmbed, CreateMessage},
     http::CacheHttp,
@@ -98,6 +98,69 @@ async fn send_chunked_reply<'a>(
     }
 
     Ok(results)
+}
+
+pub(crate) async fn send_confirmation_prompt<'a, S>(
+    ctx: &CommandContext<'a>,
+    title: S,
+    description: S,
+) -> anyhow::Result<ReplyHandle<'a>>
+where 
+    S: Into<Cow<'a, str>>
+{
+    let embed = CreateEmbed::default().title(title.into()).description(description.into()).colour(Colour::PURPLE);
+    let components = vec![
+        CreateActionRow::Buttons(vec![
+            CreateButton::new("confirm").label("Confirm").style(ButtonStyle::Danger),
+            CreateButton::new("cancel").label("Cancel").style(ButtonStyle::Secondary),
+        ])
+    ];
+
+    let reply = CreateReply::default().embed(embed).ephemeral(true).components(components);
+    Ok(ctx.send(reply).await?)
+}
+
+pub(crate) async fn edit_message<'a, S>(
+    ctx: CommandContext<'a>,
+    handle: ReplyHandle<'a>,
+    title: Option<S>,
+    description: Option<S>,
+    colour: Option<Colour>,
+    remove_components: bool
+) -> anyhow::Result<()>
+where 
+    S: Into<Cow<'a, str>>
+{
+    let mut embed = CreateEmbed::default();
+    if let Some(t) = title {
+        embed = embed.title(t.into())
+    }
+    
+    if let Some(d) = description {
+        embed = embed.description(d.into())
+    }
+    
+    if let Some(c) = colour {
+        embed = embed.colour(c);
+    }
+
+    let mut reply = CreateReply::default().embed(embed);
+
+    if remove_components {
+        reply = reply.components(Vec::new());
+    }
+    
+    Ok(handle.edit(ctx, reply).await?)
+}
+
+fn get_timestamp() -> String {
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::new(0,0))
+        .as_millis()
+        .to_string()
 }
 
 pub(crate) async fn send_message<'a, S>(

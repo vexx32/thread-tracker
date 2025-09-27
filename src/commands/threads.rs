@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet, HashMap}, sync::Arc, cmp::Reverse};
+use std::{cmp::Reverse, collections::{BTreeMap, BTreeSet, HashMap}, sync::Arc, time::Duration};
 
 use rand::Rng;
 use serenity::{
@@ -14,7 +14,7 @@ use crate::{
     commands::{muses, todos, CommandContext, CommandError, CommandResult, SortResultsBy},
     consts::{setting_names::USER_SHOW_TIMESTAMPS, MAX_EMBED_CHARS, THREAD_NAME_LENGTH},
     db::{self, add_subscriber, get_user_setting, remove_subscriber, Todo, TrackedThread},
-    messaging::{dm, reply, reply_error, send_invalid_command_call_error, whisper, whisper_error},
+    messaging::{dm, edit_message, reply, reply_error, send_confirmation_prompt, send_invalid_command_call_error, whisper, whisper_error},
     utils::*,
     Data,
     Database,
@@ -244,15 +244,13 @@ pub(crate) async fn untrack_thread(
     let mut threads_removed = MessageBuilder::new();
     let mut errors = MessageBuilder::new();
 
-    info!("removing tracked thread `{}` for {} ({})", thread.id, user.name, user.id);
-    let result = db::remove_thread(database, guild_id.get(), thread.id.get(), user.id.get()).await;
+    let result = remove_tracked_thread(user, thread.id, guild_id, data, database).await;
 
     match result {
         Ok(0) => {
             errors.push_line(format!("- {} is not currently being tracked", thread.id.mention()))
         },
         Ok(_) => {
-            data.remove_tracked_thread(thread.id).await.ok();
             threads_removed.push_line(format!("- {:}", thread.id.mention()))
         },
         Err(e) => errors.push_line(format!(
@@ -272,6 +270,18 @@ pub(crate) async fn untrack_thread(
     }
 
     Ok(())
+}
+
+/// Remove a given tracked thread from the database and cache.
+async fn remove_tracked_thread(user: &User, channel_id: ChannelId, guild_id: GuildId, data: &Data, database: &Database) -> sqlx::Result<u64> {
+    info!("removing tracked thread `{}` for {} ({})", channel_id, user.name, user.id);
+    let result = db::remove_thread(database, guild_id.get(), channel_id.get(), user.id.get()).await;
+
+    if let Ok(_) = result {
+        data.remove_tracked_thread(channel_id).await.ok();
+    }
+
+    result
 }
 
 /// Remove all threads in the selected category from tracking.
@@ -671,6 +681,88 @@ pub(crate) async fn set_timestamps_off(ctx: CommandContext<'_>) -> CommandResult
     whisper(&ctx, REPLY_TITLE, &message.build()).await?;
 
     Ok(())
+}
+
+/// Clean up any inaccessible / deleted threads or channels and remove them from tracking.
+#[poise::command(slash_command, guild_only, rename = "tt_cleanup", category = "Thread tracking")]
+pub(crate) async fn cleanup(
+    ctx: CommandContext<'_>,
+    #[description = "Only cleanup inaccessible threads from this category"] category: Option<String>,
+) -> CommandResult<()> {
+    let guild_id = match ctx.guild_id() {
+        Some(id) => id,
+        None => {
+            return Err(CommandError::new("Unable to manage tracked threads outside of a server"))
+        },
+    };
+    let user = ctx.author();
+    let data = ctx.data();
+
+    info!("Cleaning up tracked threads for {} ({}){}", user.name, user.id, category.as_deref().map_or(String::new(), |c| format!(" in category {}", c)));
+
+    let guild_user = GuildUser { user_id: user.id, guild_id };
+
+    let mut threads_to_remove = Vec::new();
+    match enumerate(&data.database, &guild_user, category.as_deref()).await {
+        Ok(threads) => {
+            for thread in threads {
+                match thread.channel_id().to_channel(&ctx.http()).await {
+                    Ok(_) => {},
+                    Err(_) => threads_to_remove.push(thread),
+                }
+            }
+
+            let reply_title = format!("Cleanup threads{}", category.map_or(String::new(), |c| format!(" in category {}", c)));
+            if threads_to_remove.is_empty() {
+                reply(&ctx, &reply_title, "No deleted or inaccessible threads to cleanup.");
+                Ok(())
+            }
+            else {
+                let mut response = MessageBuilder::new();
+                response.push("The following threads could not be found:");
+                for thread in threads_to_remove {
+                    response.push(format!("{} (id: {})", thread.channel_id().mention(), thread.channel_id));
+                }
+
+                match send_confirmation_prompt(&ctx, reply_title, response.build()).await {
+                    Ok(handle) => {
+                        match handle
+                            .message()
+                            .await?
+                            .await_component_interaction(&ctx.serenity_context().shard)
+                            .timeout(Duration::from_secs(60 * 5))
+                            .await
+                        {
+                            Some(interaction) => {
+                                // TODO
+                            }
+                            None => {
+                                edit_message(ctx, handle, None, Some("-# *Timed out. Please reissue the command again.*"), Some(Colour::DARKER_GREY), true).await?;
+                                return Ok(());
+                            }
+                        }
+
+                        Ok(())
+                    },
+                    Ok(None) => {
+                        error!("Error sending confirmation reply to user {} ({}) to cleanup deleted threads.", &user.name, user.id);
+                        Err(CommandError::new("Unable to send confirmation response to cleanup deleted threads."))
+                    },
+                    Err(e) => {
+                        error!("Error sending confirmation reply to user {} ({}) to cleanup deleted threads.", &user.name, user.id);
+                        Err(CommandError::detailed("Unable to send confirmation response to cleanup deleted threads.", e))
+                    }
+                }
+            }
+        },
+        Err(e) => {
+            error!("Error finding tracked threads for {}: {}", user.name, e);
+            Err(CommandError::detailed(
+                format!("Error listing tracked threads for {}", user.name),
+                e,
+            ))
+        },
+    }
 }
 
 /// Send reply notification DMs to all users tracking the thread a new reply was posted in.
