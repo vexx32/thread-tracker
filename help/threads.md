@@ -11,6 +11,7 @@ Parameters in _`italics`_ are optional.
 > **`/tt_track`** `thread` _`category`_ - Track new threads, optionally with a category.
 > **`/tt_untrack thread`** `thread` - Remove a tracked thread from your list.
 > **`/tt_untrack category`** `name` - Remove all tracked threads in the given categories. Use `all` as the category to untrack everything.
+> **`/tt_cleanup`** _`category`_ - Cleanup/remove inaccessible or deleted threads from tracking, optionally in a specific category.
 
 ### Change Categories
 
