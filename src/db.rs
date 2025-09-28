@@ -494,7 +494,7 @@ pub(crate) async fn list_muses(
     guild_id: u64,
     user_id: u64,
 ) -> Result<Vec<Muse>> {
-    sqlx::query_as("SELECT id, muse_name FROM muses WHERE user_id = $1 AND guild_id = $2")
+    sqlx::query_as("SELECT id, muse_name FROM muses WHERE user_id = $1 AND guild_id = $2 ORDER BY muse_name")
         .bind(user_id as i64)
         .bind(guild_id as i64)
         .fetch_all(database)
