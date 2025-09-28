@@ -24,11 +24,17 @@ pub(crate) struct CommandError {
 
 impl CommandError {
     pub(crate) fn new(text: impl Into<Cow<'static, str>>) -> Self {
-        Self { text: text.into(), inner: None }
+        Self {
+            text: text.into(),
+            inner: None,
+        }
     }
 
     pub(crate) fn detailed(text: impl Into<Cow<'static, str>>, inner: impl Into<Error>) -> Self {
-        Self { text: text.into(), inner: Some(inner.into()) }
+        Self {
+            text: text.into(),
+            inner: Some(inner.into()),
+        }
     }
 }
 
@@ -45,19 +51,28 @@ impl std::error::Error for CommandError {}
 
 impl From<serenity::Error> for CommandError {
     fn from(value: serenity::Error) -> Self {
-        Self { text: "Communication error".into(), inner: Some(value.into()) }
+        Self {
+            text: "Communication error".into(),
+            inner: Some(value.into()),
+        }
     }
 }
 
 impl From<anyhow::Error> for CommandError {
     fn from(value: anyhow::Error) -> Self {
-        Self { text: value.to_string().into(), inner: None }
+        Self {
+            text: value.to_string().into(),
+            inner: None,
+        }
     }
 }
 
 impl From<sqlx::Error> for CommandError {
     fn from(value: sqlx::Error) -> Self {
-        Self { text: "Database error".into(), inner: Some(value.into()) }
+        Self {
+            text: "Database error".into(),
+            inner: Some(value.into()),
+        }
     }
 }
 

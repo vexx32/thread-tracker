@@ -6,7 +6,6 @@ use crate::{
     messaging::reply,
 };
 
-
 /// Mapping enum to select appropriate help messages for various commands and retrieve the associated text.
 pub(crate) enum HelpMessage {
     Bugs,
@@ -69,8 +68,7 @@ pub(crate) async fn help(
 ) -> Result<(), CommandError> {
     if command.is_none() {
         reply(&ctx, "Command help", HelpMessage::Main.text()).await?;
-    }
-    else {
+    } else {
         let category = ctx
             .framework()
             .options

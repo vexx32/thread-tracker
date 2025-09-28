@@ -19,14 +19,14 @@ use crate::{
 /// Button options for a confirmation prompt.
 pub(crate) enum ConfirmationResponse {
     Confirm,
-    Cancel
+    Cancel,
 }
 
 impl Display for ConfirmationResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             Self::Confirm => "confirm",
-            Self::Cancel => "cancel"
+            Self::Cancel => "cancel",
         };
 
         write!(f, "{}", s)
@@ -131,18 +131,26 @@ pub(crate) async fn send_confirmation_prompt<'a, S>(
     title: S,
     description: S,
 ) -> anyhow::Result<ReplyHandle<'a>>
-where 
-    S: Into<Cow<'a, str>>
+where
+    S: Into<Cow<'a, str>>,
 {
-    let embed = CreateEmbed::default().title(title.into()).description(description.into()).colour(Colour::BLURPLE);
-    let components = vec![
-        CreateActionRow::Buttons(vec![
-            CreateButton::new(ConfirmationResponse::Confirm).label("Confirm").style(ButtonStyle::Danger),
-            CreateButton::new(ConfirmationResponse::Cancel).label("Cancel").style(ButtonStyle::Secondary),
-        ])
-    ];
+    let embed = CreateEmbed::default()
+        .title(title.into())
+        .description(description.into())
+        .colour(Colour::BLURPLE);
+    let components = vec![CreateActionRow::Buttons(vec![
+        CreateButton::new(ConfirmationResponse::Confirm)
+            .label("Confirm")
+            .style(ButtonStyle::Danger),
+        CreateButton::new(ConfirmationResponse::Cancel)
+            .label("Cancel")
+            .style(ButtonStyle::Secondary),
+    ])];
 
-    let reply = CreateReply::default().embed(embed).ephemeral(true).components(components);
+    let reply = CreateReply::default()
+        .embed(embed)
+        .ephemeral(true)
+        .components(components);
     Ok(ctx.send(reply).await?)
 }
 
@@ -152,20 +160,20 @@ pub(crate) async fn edit_message<'a, S>(
     title: Option<S>,
     description: Option<S>,
     colour: Option<Colour>,
-    remove_components: bool
+    remove_components: bool,
 ) -> anyhow::Result<()>
-where 
-    S: Into<Cow<'a, str>>
+where
+    S: Into<Cow<'a, str>>,
 {
     let mut embed = CreateEmbed::default();
     if let Some(t) = title {
         embed = embed.title(t.into())
     }
-    
+
     if let Some(d) = description {
         embed = embed.description(d.into())
     }
-    
+
     if let Some(c) = colour {
         embed = embed.colour(c);
     }
@@ -175,7 +183,7 @@ where
     if remove_components {
         reply = reply.components(Vec::new());
     }
-    
+
     Ok(handle.edit(ctx, reply).await?)
 }
 
@@ -190,11 +198,15 @@ where
     S: Into<Cow<'a, str>>,
 {
     let Some(channel) = channel_id.to_channel(&ctx).await?.guild() else {
-        return Err(anyhow!("This method can only be used to send messages to guild channels"));
+        return Err(anyhow!(
+            "This method can only be used to send messages to guild channels"
+        ));
     };
 
-    let embed =
-        CreateEmbed::new().title(title.into()).description(description.into()).colour(colour);
+    let embed = CreateEmbed::new()
+        .title(title.into())
+        .description(description.into())
+        .colour(colour);
     let message = CreateMessage::default().add_embed(embed);
     channel.send_message(ctx, message).await?;
 
@@ -202,7 +214,8 @@ where
 }
 
 pub(crate) async fn send_invalid_command_call_error(ctx: CommandContext<'_>) -> CommandResult<()> {
-    let result = whisper_error(&ctx, "Invalid command called", "The command you called is not intended to be called directly. This may happen if command registrations have been recently updated. Check for any subcommands or other options when trying to enter the command and use those as well instead of only this base command.").await;
+    const ERROR_TEXT: &'static str = "The command you called is not intended to be called directly. This may happen if command registrations have been recently updated. Check for any subcommands or other options when trying to enter the command and use those as well instead of only this base command.";
+    let result = whisper_error(&ctx, "Invalid command called", ERROR_TEXT).await;
 
     if let Err(e) = result {
         error!("Error sending an error response to the user: {}", e);

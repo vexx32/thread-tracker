@@ -3,7 +3,7 @@ use_field_init_shorthand = true
 condense_wildcard_suffixes = true
 reorder_impl_items = true
 
-use_small_heuristics = "Max"
+use_small_heuristics = "Default"
 fn_params_layout = "Tall"
 
 imports_layout = "HorizontalVertical"
@@ -13,4 +13,4 @@ group_imports = "StdExternalCrate"
 brace_style = "SameLineWhere"
 control_brace_style = "ClosingNextLine"
 
-chain_width = 100
+max_width = 120

@@ -13,11 +13,7 @@ use tracing::{error, info};
 
 use crate::{
     cache::MessageCache,
-    commands::{
-        scheduling::send_scheduled_messages,
-        threads::send_reply_notification,
-        watchers,
-    },
+    commands::{scheduling::send_scheduled_messages, threads::send_reply_notification, watchers},
     consts::*,
     db::{self, Database, ThreadWatcher},
     Data,
@@ -55,17 +51,11 @@ pub(crate) fn listen_for_background_tasks(
 
         while let Some(task) = receiver.recv().await {
             match task {
-                Notify(message) => {
-                    send_reply_notification(message, database.clone(), context.clone()).await
-                },
+                Notify(message) => send_reply_notification(message, database.clone(), context.clone()).await,
                 Heartbeat(context) => heartbeat(&context).await,
-                UpdateWatchers => {
-                    start_watcher_update_thread(context.clone(), database.clone(), cache.clone())
-                },
+                UpdateWatchers => start_watcher_update_thread(context.clone(), database.clone(), cache.clone()),
                 PurgeCache => purge_expired_cache_entries(Arc::new(cache.clone())).await,
-                SendScheduledMessages => {
-                    start_scheduled_messages_thread(database.clone(), context.clone()).await
-                },
+                SendScheduledMessages => start_scheduled_messages_thread(database.clone(), context.clone()).await,
             };
         }
     });
@@ -75,7 +65,9 @@ pub(crate) fn listen_for_background_tasks(
 pub(crate) fn run_periodic_shard_tasks(context: &Context, sender: &Sender<Task>) {
     info!("Starting periodic per-shard tasks");
     let c = Arc::new(context.clone());
-    spawn_task_loop(sender.clone(), HEARTBEAT_INTERVAL, false, move || Task::Heartbeat(c.clone()));
+    spawn_task_loop(sender.clone(), HEARTBEAT_INTERVAL, false, move || {
+        Task::Heartbeat(c.clone())
+    });
 }
 
 /// Core task spawning function. Creates a set of periodically recurring tasks on their own threads.
@@ -119,11 +111,7 @@ pub(crate) async fn heartbeat(ctx: &Context) {
     info!("heartbeat set_presence request completed for shard ID {}", ctx.shard_id);
 }
 
-fn start_watcher_update_thread(
-    context: Arc<impl CacheHttp + 'static>,
-    database: Database,
-    cache: MessageCache,
-) {
+fn start_watcher_update_thread(context: Arc<impl CacheHttp + 'static>, database: Database, cache: MessageCache) {
     tokio::spawn(async move {
         if let Err(e) = update_watchers(context, database, cache).await {
             error!("Error updating watchers: {}", e);
@@ -153,9 +141,7 @@ pub(crate) async fn update_watchers(
         tasks.spawn(async move {
             for watcher in watcher_batch {
                 let id = watcher.id;
-                let result =
-                    watchers::update_watched_message(watcher, &ctx, &database, &message_cache)
-                        .await;
+                let result = watchers::update_watched_message(watcher, &ctx, &database, &message_cache).await;
                 if let Err(e) = result {
                     error!("error updating watcher {}: {}", id, e);
                 }
@@ -207,10 +193,7 @@ async fn purge_expired_cache_entries(cache: Arc<MessageCache>) {
 }
 
 /// Start a background thread to handle sending scheduled messages.
-pub(crate) async fn start_scheduled_messages_thread(
-    database: Database,
-    ctx: Arc<impl CacheHttp + 'static>,
-) {
+pub(crate) async fn start_scheduled_messages_thread(database: Database, ctx: Arc<impl CacheHttp + 'static>) {
     tokio::spawn(async move {
         if let Err(e) = send_scheduled_messages(database, ctx).await {
             error!("Error sending scheduled messages: {}", e);

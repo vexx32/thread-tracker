@@ -28,7 +28,10 @@ struct Cached<T> {
 impl<T> Cached<T> {
     /// Create a new cache item.
     pub fn new(data: &Arc<T>) -> Self {
-        Self { data: Arc::clone(data), timestamp: Instant::now() }
+        Self {
+            data: Arc::clone(data),
+            timestamp: Instant::now(),
+        }
     }
 
     /// Returns true if the cache entry is older than the defined maximum lifetime.

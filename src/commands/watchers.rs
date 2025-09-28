@@ -1,16 +1,26 @@
 use anyhow::anyhow;
 use chrono::Utc;
 use serenity::{
+    builder::{CreateEmbed, CreateEmbedFooter, EditMessage, EditThread},
     http::CacheHttp,
     model::{prelude::*, Colour},
-    utils::{EmbedMessageBuilding, MessageBuilder}, builder::{EditThread, EditMessage, CreateEmbed, CreateEmbedFooter},
+    utils::{EmbedMessageBuilding, MessageBuilder},
 };
 use tokio::time::Instant;
 use tracing::{error, info, warn};
 
 use super::CommandResult;
 use crate::{
-    cache::MessageCache, commands::{muses, threads::{self, show_timestamps, UserData}, todos, CommandContext}, db::{self, ThreadWatcher, Todo, TrackedThread}, messaging::{reply, whisper}, utils::get_channel_name, CommandError, Database
+    cache::MessageCache,
+    commands::{
+        muses,
+        threads::{self, show_timestamps, UserData},
+        todos, CommandContext,
+    },
+    db::{self, ThreadWatcher, Todo, TrackedThread},
+    messaging::{reply, whisper},
+    utils::get_channel_name,
+    CommandError, Database,
 };
 
 /// List currently tracked watchers.
@@ -37,9 +47,7 @@ pub(crate) async fn list(ctx: CommandContext<'_>) -> CommandResult<()> {
     for watcher in watchers {
         let url = format!(
             "https://discord.com/channels/{}/{}/{}",
-            watcher.guild_id,
-            watcher.channel_id,
-            watcher.message_id
+            watcher.guild_id, watcher.channel_id, watcher.message_id
         );
         message
             .push_quote("- Categories: ")
@@ -71,16 +79,17 @@ pub(crate) async fn add(
 
     let data = ctx.data();
 
-    info!("adding watcher for {} ({}), categories {:?}", user.name, user.id, category);
-    let list = threads::get_threads_and_todos(user, guild_id, category.as_deref(), None, data, &ctx)
-        .await?;
+    info!(
+        "adding watcher for {} ({}), categories {:?}",
+        user.name, user.id, category
+    );
+    let list = threads::get_threads_and_todos(user, guild_id, category.as_deref(), None, data, &ctx).await?;
 
     if list.chars().count() > crate::consts::MAX_EMBED_CHARS {
         return Err(CommandError::new(
             "Watched messages cannot span multiple messages. Please use categories to reduce the threads the new watcher must track."
         ));
-    }
-    else if list.is_empty() {
+    } else if list.is_empty() {
         return Err(CommandError::new("Could not create the watcher message."));
     }
 
@@ -104,8 +113,7 @@ pub(crate) async fn add(
 
     match result {
         Ok(true) => {
-            whisper(&ctx, "Watcher created", "The requested watcher has been created.")
-                .await?;
+            whisper(&ctx, "Watcher created", "The requested watcher has been created.").await?;
 
             Ok(())
         },
@@ -158,23 +166,34 @@ pub(crate) async fn remove(
     );
 
     match db::remove_watcher(database, watcher.id).await? {
-        0 => error!("Watcher should have been present in the database, but was missing when removal was attempted: {:?}", watcher),
+        0 => error!(
+            "Watcher should have been present in the database, but was missing when removal was attempted: {:?}",
+            watcher
+        ),
         _ => {
             let channel_message = watcher.message();
-            let message = message_cache.get_or_else(
-                &channel_message,
-                || channel_message.fetch(&ctx)
-            ).await;
+            let message = message_cache
+                .get_or_else(&channel_message, || channel_message.fetch(&ctx))
+                .await;
 
             match message {
-                Ok(message) => if let Err(e) = message.delete(ctx).await {
-                    return Err(anyhow!("Unable to delete watched message ({}): {}", message_url, e).into());
-                }
-                Err(e) => return Err(anyhow!("Unable to locate message {}. Perhaps it was already deleted?", e).into()),
+                Ok(message) => {
+                    if let Err(e) = message.delete(ctx).await {
+                        return Err(anyhow!("Unable to delete watched message ({}): {}", message_url, e).into());
+                    }
+                },
+                Err(e) => {
+                    return Err(anyhow!("Unable to locate message {}. Perhaps it was already deleted?", e).into())
+                },
             }
 
-            whisper(&ctx, "Watcher removed", &format!("Watcher with id {} removed successfully.", watcher.id)).await?;
-        }
+            whisper(
+                &ctx,
+                "Watcher removed",
+                &format!("Watcher with id {} removed successfully.", watcher.id),
+            )
+            .await?;
+        },
     }
 
     Ok(())
@@ -189,43 +208,44 @@ pub(crate) async fn update_watched_message(
     info!("updating watched message for {:?}", &watcher);
     let start_time = Instant::now();
 
-    let mut message =
-        match cache_http.http().get_message(watcher.channel_id.into(), watcher.message_id.into()).await {
-            Ok(m) => m,
-            Err(e) => {
-                let channel_name = get_channel_name(watcher.channel_id(), cache_http)
-                    .await
-                    .unwrap_or_else(|| "<unavailable channel>".to_owned());
+    let mut message = match cache_http
+        .http()
+        .get_message(watcher.channel_id.into(), watcher.message_id.into())
+        .await
+    {
+        Ok(m) => m,
+        Err(e) => {
+            let channel_name = get_channel_name(watcher.channel_id(), cache_http)
+                .await
+                .unwrap_or_else(|| "<unavailable channel>".to_owned());
 
-                if cfg!(debug_assertions) {
-                    warn!(
-                        "could not find message {} in channel {} for watcher {}: {}.",
-                        watcher.message_id,
-                        channel_name,
-                        watcher.id,
-                        e
-                    );
-                }
-                else {
-                    warn!(
+            if cfg!(debug_assertions) {
+                warn!(
+                    "could not find message {} in channel {} for watcher {}: {}.",
+                    watcher.message_id, channel_name, watcher.id, e
+                );
+            } else {
+                warn!(
                     "could not find message {} in channel {} for watcher {}: {}. Removing watcher.",
                     watcher.message_id, channel_name, watcher.id, e
                 );
-                    db::remove_watcher(database, watcher.id)
-                        .await
-                        .map_err(|e| error!("Failed to remove watcher: {}", e))
-                        .ok();
-                }
+                db::remove_watcher(database, watcher.id)
+                    .await
+                    .map_err(|e| error!("Failed to remove watcher: {}", e))
+                    .ok();
+            }
 
-                return Ok(());
-            },
-        };
+            return Ok(());
+        },
+    };
 
     if let Some(mut channel) = message.channel(&cache_http).await?.guild() {
         // If this is a thread, there will be thread metadata
         if let Some(metadata) = channel.thread_metadata {
             if metadata.archived {
-                channel.edit_thread(&cache_http, EditThread::new().archived(false)).await?;
+                channel
+                    .edit_thread(&cache_http, EditThread::new().archived(false))
+                    .await?;
             }
         }
     }
@@ -255,33 +275,26 @@ pub(crate) async fn update_watched_message(
         show_timestamps: show_timestamps(database, user.user_id).await,
     };
 
-    let threads_content = threads::get_formatted_list(
-        threads,
-        todos,
-        None,
-        &cache_http,
-        message_cache,
-        &user_data,
-    )
-    .await?;
+    let threads_content =
+        threads::get_formatted_list(threads, todos, None, &cache_http, message_cache, &user_data).await?;
 
     let edit_result = message
         .edit(
             &cache_http,
-            EditMessage::new()
-                .add_embed(
-                    CreateEmbed::new()
-                        .colour(Colour::PURPLE)
-                        .title("Watching threads")
-                        .description(threads_content)
-                        .footer(CreateEmbedFooter::new(format!("Last updated: {} UTC", Utc::now())))))
+            EditMessage::new().add_embed(
+                CreateEmbed::new()
+                    .colour(Colour::PURPLE)
+                    .title("Watching threads")
+                    .description(threads_content)
+                    .footer(CreateEmbedFooter::new(format!("Last updated: {} UTC", Utc::now()))),
+            ),
+        )
         .await;
     if let Err(e) = edit_result {
         // If we return here, an error updating one watcher message would prevent the rest from being updated.
         // Simply log these instead.
         error!("Could not edit message: {}", e);
-    }
-    else {
+    } else {
         let elapsed = Instant::now() - start_time;
         info!("updated watcher {} in {:.2} ms", watcher.id, elapsed.as_millis());
     }

@@ -18,7 +18,10 @@ pub(crate) struct GuildUser {
 
 impl From<&ThreadWatcher> for GuildUser {
     fn from(value: &ThreadWatcher) -> Self {
-        Self { user_id: value.user_id(), guild_id: value.guild_id() }
+        Self {
+            user_id: value.user_id(),
+            guild_id: value.guild_id(),
+        }
     }
 }
 
@@ -49,10 +52,7 @@ impl From<(ChannelId, MessageId)> for ChannelMessage {
 }
 
 /// Returns a `BTreeMap` which maps a derived key from `key_function` to a `Vec<TValue>` which contains the values that produced that key.
-pub(crate) fn partition_into_map<TKey, TValue, F>(
-    items: Vec<TValue>,
-    key_function: F,
-) -> BTreeMap<TKey, Vec<TValue>>
+pub(crate) fn partition_into_map<TKey, TValue, F>(items: Vec<TValue>, key_function: F) -> BTreeMap<TKey, Vec<TValue>>
 where
     TKey: Ord,
     F: Fn(&TValue) -> TKey,
@@ -77,8 +77,7 @@ pub(crate) fn substring(string: &str, max_length: usize) -> &str {
     if string.chars().count() > max_length {
         let (cutoff, _) = string.char_indices().nth(max_length - 1).unwrap();
         string[0..cutoff].trim()
-    }
-    else {
+    } else {
         string
     }
 }
@@ -88,18 +87,18 @@ pub(crate) fn truncate_string(string: &str, max_length: usize) -> String {
     let substring = substring(string, max_length - 1);
     if substring.len() != string.len() {
         substring.to_owned() + "\u{2026}"
-    }
-    else {
+    } else {
         string.to_owned()
     }
 }
 
 /// Retrieve the name of a Discord channel as a string. May return None if the channel cannot be accessed.
-pub(crate) async fn get_channel_name(
-    channel_id: ChannelId,
-    cache_http: impl CacheHttp,
-) -> Option<String> {
-    channel_id.to_channel(cache_http.http()).await.map_or(None, |c| c.guild()).map(|gc| gc.name)
+pub(crate) async fn get_channel_name(channel_id: ChannelId, cache_http: impl CacheHttp) -> Option<String> {
+    channel_id
+        .to_channel(cache_http.http())
+        .await
+        .map_or(None, |c| c.guild())
+        .map(|gc| gc.name)
 }
 
 /// Subdivide a string into pieces of a given maximum length. All but the last piece will be the max length.
@@ -140,13 +139,11 @@ pub(crate) fn split_into_chunks(s: &str, max_chunk_length: usize) -> Vec<String>
                         current = String::new();
                     }
                 }
-            }
-            else {
+            } else {
                 chunks.push(current);
                 current = line.to_owned();
             }
-        }
-        else {
+        } else {
             current.push('\n');
             current.push_str(line);
         }
@@ -160,18 +157,16 @@ pub(crate) fn split_into_chunks(s: &str, max_chunk_length: usize) -> Vec<String>
 }
 
 /// Delete the target Message.
-pub(crate) async fn delete_message(
-    message: &Message,
-    context: &impl CacheHttp,
-    data: &crate::Data,
-) {
+pub(crate) async fn delete_message(message: &Message, context: &impl CacheHttp, data: &crate::Data) {
     if let Err(e) = message.delete(context).await {
         error!("Unable to delete message with ID {:?}: {}", message.id, e);
-    }
-    else {
+    } else {
         info!("Message deleted successfully!");
         data.message_cache
-            .remove(&ChannelMessage { message_id: message.id, channel_id: message.channel_id })
+            .remove(&ChannelMessage {
+                message_id: message.id,
+                channel_id: message.channel_id,
+            })
             .await;
     }
 }

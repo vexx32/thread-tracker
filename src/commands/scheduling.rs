@@ -41,7 +41,10 @@ pub(crate) async fn list_messages(ctx: CommandContext<'_>) -> CommandResult<()> 
     let author = ctx.author();
     let messages = db::list_scheduled_messages_for_user(&data.database, author.id).await?;
 
-    info!("Listing all scheduled messages for user {} ({})", author.name, author.id);
+    info!(
+        "Listing all scheduled messages for user {} ({})",
+        author.name, author.id
+    );
 
     if messages.is_empty() {
         reply(&ctx, REPLY_TITLE, "You have no scheduled messages.").await?;
@@ -72,20 +75,23 @@ pub(crate) async fn list_messages(ctx: CommandContext<'_>) -> CommandResult<()> 
     Ok(())
 }
 
-
 /// Get a scheduled message
 #[poise::command(slash_command, guild_only, rename = "get", category = "Scheduling")]
 pub(crate) async fn get_message(
     ctx: CommandContext<'_>,
-    #[description = "The numeric ID of the message to retrieve"]
-    message_id: i32,
+    #[description = "The numeric ID of the message to retrieve"] message_id: i32,
 ) -> CommandResult<()> {
     let data = ctx.data();
     let author = ctx.author();
 
     let message = match db::get_scheduled_message(&data.database, message_id).await? {
-        Some(msg) if msg.user_id() == author.id => { msg },
-        _ => return Err(CommandError::new(format!("Unable to find the message with id {}", message_id))),
+        Some(msg) if msg.user_id() == author.id => msg,
+        _ => {
+            return Err(CommandError::new(format!(
+                "Unable to find the message with id {}",
+                message_id
+            )))
+        },
     };
 
     let local_datetime = parse_and_display_local_time(&message.datetime, author.id, &data.database).await?;
@@ -96,7 +102,8 @@ pub(crate) async fn get_message(
         &local_datetime,
         &message.datetime,
         Some(&message.repeat),
-        message.channel_id());
+        message.channel_id(),
+    );
 
     reply(&ctx, "Get scheduled message information", &response).await?;
 
@@ -111,8 +118,9 @@ pub(crate) async fn update_message(
     #[description = "The title of the message"] title: Option<String>,
     #[description = "The message to send"] message: Option<String>,
     #[description = "When to send the message (format: yyyy-MM-dd hh:mm:ss)"] datetime: Option<String>,
-    #[description = "How often to repeat, in minutes (m), hours (h), days (d), weeks (w), or years (y)"]
-    repeat: Option<String>,
+    #[description = "How often to repeat, in minutes (m), hours (h), days (d), weeks (w), or years (y)"] repeat: Option<
+        String,
+    >,
     #[description = "The channel to send the message to when it's time to be sent"]
     #[channel_types("NewsThread", "PrivateThread", "PublicThread", "Text")]
     channel: Option<GuildChannel>,
@@ -122,8 +130,7 @@ pub(crate) async fn update_message(
 
     match (&title, &message, &datetime, &repeat, &channel) {
         (None, None, None, None, None) => {
-            whisper(&ctx, REPLY_TITLE, "No message properties to update have been supplied.")
-                .await?;
+            whisper(&ctx, REPLY_TITLE, "No message properties to update have been supplied.").await?;
 
             Ok(())
         },
@@ -152,16 +159,11 @@ pub(crate) async fn update_message(
                         // Check the repeat is valid and can be applied to the scheduled time successfully.
                         let dt = match parsed_datetime {
                             Some(d) => d,
-                            None => {
-                                match DateTime::parse_from_rfc3339(&existing_message.datetime) {
-                                    Ok(dt) => dt.to_utc(),
-                                    Err(e) => {
-                                        return Err(CommandError::detailed(
-                                            "Error parsing already stored datetime!",
-                                            e,
-                                        ))
-                                    },
-                                }
+                            None => match DateTime::parse_from_rfc3339(&existing_message.datetime) {
+                                Ok(dt) => dt.to_utc(),
+                                Err(e) => {
+                                    return Err(CommandError::detailed("Error parsing already stored datetime!", e))
+                                },
                             },
                         };
 
@@ -182,21 +184,17 @@ pub(crate) async fn update_message(
                     .await
                     {
                         Ok(true) => {
-                            reply(&ctx, REPLY_TITLE, "Scheduled message updated successfully.")
-                                .await?;
+                            reply(&ctx, REPLY_TITLE, "Scheduled message updated successfully.").await?;
                             Ok(())
                         },
-                        Ok(false) => {
-                            Err(CommandError::new("Could not find or update scheduled message."))
-                        },
-                        Err(e) => {
-                            Err(CommandError::detailed("Error updating scheduled message.", e))
-                        },
+                        Ok(false) => Err(CommandError::new("Could not find or update scheduled message.")),
+                        Err(e) => Err(CommandError::detailed("Error updating scheduled message.", e)),
                     }
                 },
-                _ => {
-                    Err(CommandError::new(format!("Unable to find message with id {}", message_id)))
-                },
+                _ => Err(CommandError::new(format!(
+                    "Unable to find message with id {}",
+                    message_id
+                ))),
             }
         },
     }
@@ -206,8 +204,7 @@ pub(crate) async fn update_message(
 #[poise::command(slash_command, guild_only, rename = "remove", category = "Scheduling")]
 pub(crate) async fn remove_message(
     ctx: CommandContext<'_>,
-    #[description = "The numeric ID of the message to delete"]
-    message_id: i32,
+    #[description = "The numeric ID of the message to delete"] message_id: i32,
 ) -> CommandResult<()> {
     const REPLY_TITLE: &str = "Remove scheduled message";
 
@@ -217,9 +214,7 @@ pub(crate) async fn remove_message(
     match db::get_scheduled_message(&data.database, message_id).await? {
         Some(message) if message.user_id() == author.id => {
             match db::delete_scheduled_message(&data.database, message_id).await {
-                Ok(true) => {
-                    reply(&ctx, REPLY_TITLE, "Scheduled message deleted successfully.").await?
-                },
+                Ok(true) => reply(&ctx, REPLY_TITLE, "Scheduled message deleted successfully.").await?,
                 Ok(false) => {
                     reply_error(
                         &ctx,
@@ -228,9 +223,7 @@ pub(crate) async fn remove_message(
                     )
                     .await?
                 },
-                Err(e) => {
-                    return Err(CommandError::detailed("Error deleting scheduled message", e))
-                },
+                Err(e) => return Err(CommandError::detailed("Error deleting scheduled message", e)),
             };
         },
         _ => {
@@ -248,17 +241,15 @@ pub(crate) async fn remove_message(
 #[poise::command(slash_command, guild_only, rename = "add", category = "Scheduling")]
 pub(crate) async fn add_message(
     ctx: CommandContext<'_>,
-    #[description = "The title of the message"]
-    title: String,
-    #[description = "The message to send"]
-    message: String,
-    #[description = "When to send the message (format: yyyy-MM-dd hh:mm:ss)"]
-    datetime: String,
+    #[description = "The title of the message"] title: String,
+    #[description = "The message to send"] message: String,
+    #[description = "When to send the message (format: yyyy-MM-dd hh:mm:ss)"] datetime: String,
     #[description = "The channel to send the message to when it's time to be sent"]
     #[channel_types("NewsThread", "PrivateThread", "PublicThread", "Text")]
     channel: GuildChannel,
-    #[description = "How often to repeat, in minutes (m), hours (h), days (d), weeks (w), or years (y)"]
-    repeat: Option<String>,
+    #[description = "How often to repeat, in minutes (m), hours (h), days (d), weeks (w), or years (y)"] repeat: Option<
+        String,
+    >,
 ) -> CommandResult<()> {
     let data = ctx.data();
     let author = ctx.author();
@@ -313,8 +304,7 @@ pub(crate) async fn add_message(
 #[poise::command(slash_command, guild_only, rename = "timezone", category = "Scheduling")]
 pub(crate) async fn set_timezone(
     ctx: CommandContext<'_>,
-    #[description = "The timezone identifier, for example 'Australia/Sydney'"]
-    name: String,
+    #[description = "The timezone identifier, for example 'Australia/Sydney'"] name: String,
 ) -> CommandResult<()> {
     const REPLY_TITLE: &str = "User timezone";
     let timezone = match get_timezone(&name) {
@@ -322,8 +312,7 @@ pub(crate) async fn set_timezone(
         None => return Err(CommandError::new(format!("Unknown timezone '{}'", name))),
     };
 
-    let result =
-        db::update_user_setting(&ctx.data().database, ctx.author().id, USER_TIMEZONE, timezone.name()).await;
+    let result = db::update_user_setting(&ctx.data().database, ctx.author().id, USER_TIMEZONE, timezone.name()).await;
 
     let mut message = MessageBuilder::new();
     match result {
@@ -384,7 +373,11 @@ async fn parse_and_display_local_time(datetime: &str, user_id: UserId, database:
 }
 
 /// Convert a datetime to the user's local timezone and format it for display using RFC2822 standards.
-async fn display_as_local_time(datetime: DateTime<FixedOffset>, user_id: UserId, database: &Database) -> CommandResult<String> {
+async fn display_as_local_time(
+    datetime: DateTime<FixedOffset>,
+    user_id: UserId,
+    database: &Database,
+) -> CommandResult<String> {
     let timezone = get_user_timezone(database, user_id).await?;
     let local_time = datetime.with_timezone(&timezone);
 
@@ -392,11 +385,7 @@ async fn display_as_local_time(datetime: DateTime<FixedOffset>, user_id: UserId,
 }
 
 /// Parse a string into a valid UTC datetime.
-async fn parse_datetime_to_utc(
-    database: &Database,
-    datetime: &str,
-    user_id: UserId,
-) -> anyhow::Result<DateTime<Utc>> {
+async fn parse_datetime_to_utc(database: &Database, datetime: &str, user_id: UserId) -> anyhow::Result<DateTime<Utc>> {
     let parsed_datetime = match NaiveDateTime::parse_from_str(datetime, "%Y-%m-%d %H:%M:%S") {
         Ok(val) => val,
         Err(e) => return Err(CommandError::detailed("Error parsing input datetime", e).into()),
@@ -422,10 +411,7 @@ async fn get_user_timezone(database: &Database, user_id: UserId) -> db::Result<T
 }
 
 /// Apply the given repeat duration to the current datetime and return the resulting datetime.
-pub(crate) fn apply_repeat_duration(
-    repeat: &str,
-    current_datetime: DateTime<Utc>,
-) -> anyhow::Result<DateTime<Utc>> {
+pub(crate) fn apply_repeat_duration(repeat: &str, current_datetime: DateTime<Utc>) -> anyhow::Result<DateTime<Utc>> {
     if repeat.is_empty() {
         return Err(anyhow!("The repeat duration is empty."));
     }
@@ -445,9 +431,13 @@ pub(crate) fn apply_repeat_duration(
                 let time_period = captures.get(2).unwrap().as_str();
 
                 let changed_delta = match time_period {
-                    "h" | "hr"  | "hrs"  | "hour"   | "hours" => time_delta.checked_add(&TimeDelta::hours(number as i64)),
-                    "m" | "min" | "mins" | "minute" | "minutes" => time_delta.checked_add(&TimeDelta::minutes(number as i64)),
-                    "s" | "sec" | "secs" | "second" | "seconds" => time_delta.checked_add(&TimeDelta::seconds(number as i64)),
+                    "h" | "hr" | "hrs" | "hour" | "hours" => time_delta.checked_add(&TimeDelta::hours(number as i64)),
+                    "m" | "min" | "mins" | "minute" | "minutes" => {
+                        time_delta.checked_add(&TimeDelta::minutes(number as i64))
+                    },
+                    "s" | "sec" | "secs" | "second" | "seconds" => {
+                        time_delta.checked_add(&TimeDelta::seconds(number as i64))
+                    },
                     _ => None,
                 };
 
@@ -455,10 +445,14 @@ pub(crate) fn apply_repeat_duration(
                     time_delta = delta;
                 } else {
                     let changed_datetime = match time_period {
-                        "y" | "yr" | "year" | "yrs"   | "years" => new_datetime.checked_add_months(Months::new(12 * number as u32)),
-                        "d" | "dy" | "dys"  | "day"   | "days" => new_datetime.checked_add_days(Days::new(number)),
-                        "w" | "wk" | "wks"  | "week"  | "weeks" => new_datetime.checked_add_days(Days::new(number * 7)),
-                        "M" | "mo" | "mos"  | "month" | "months" => new_datetime.checked_add_months(Months::new(number as u32)),
+                        "y" | "yr" | "year" | "yrs" | "years" => {
+                            new_datetime.checked_add_months(Months::new(12 * number as u32))
+                        },
+                        "d" | "dy" | "dys" | "day" | "days" => new_datetime.checked_add_days(Days::new(number)),
+                        "w" | "wk" | "wks" | "week" | "weeks" => new_datetime.checked_add_days(Days::new(number * 7)),
+                        "M" | "mo" | "mos" | "month" | "months" => {
+                            new_datetime.checked_add_months(Months::new(number as u32))
+                        },
                         _ => None,
                     };
 
@@ -481,14 +475,21 @@ pub(crate) fn apply_repeat_duration(
         if let Some(dt) = new_datetime.checked_add_signed(time_delta) {
             new_datetime = dt;
         } else {
-            return Err(anyhow!("Total parsed time delta was {}, which did not produce a valid datetime when added to {}", time_delta, new_datetime));
+            return Err(anyhow!(
+                "Total parsed time delta was {}, which did not produce a valid datetime when added to {}",
+                time_delta,
+                new_datetime
+            ));
         }
     }
 
     if unrecognised.is_empty() {
         Ok(new_datetime)
     } else {
-        Err(anyhow!("Unrecognised tokens in repeat duration: {}", unrecognised.join(", ")))
+        Err(anyhow!(
+            "Unrecognised tokens in repeat duration: {}",
+            unrecognised.join(", ")
+        ))
     }
 }
 
@@ -511,10 +512,7 @@ fn get_timezone(name: &str) -> Option<Tz> {
 }
 
 /// Send out any scheduled messages, and re-schedule any repeating ones.
-pub(crate) async fn send_scheduled_messages(
-    database: Database,
-    ctx: impl CacheHttp,
-) -> anyhow::Result<()> {
+pub(crate) async fn send_scheduled_messages(database: Database, ctx: impl CacheHttp) -> anyhow::Result<()> {
     info!("Sending out any scheduled messages.");
 
     let messages = db::get_all_scheduled_messages(&database).await?;
@@ -548,23 +546,22 @@ pub(crate) async fn send_scheduled_messages(
 
             match apply_repeat_duration(&message.repeat, scheduled_time) {
                 Ok(next) => {
-                    if let Err(e) = db::update_scheduled_message(
-                        &database,
-                        message.id,
-                        Some(next),
-                        None,
-                        None,
-                        None,
-                        None::<u64>,
-                    )
-                    .await
+                    if let Err(e) =
+                        db::update_scheduled_message(&database, message.id, Some(next), None, None, None, None::<u64>)
+                            .await
                     {
-                        error!("Unable to re-schedule repeating message: {} -- archiving message as a fallback.", e);
+                        error!(
+                            "Unable to re-schedule repeating message: {} -- archiving message as a fallback.",
+                            e
+                        );
                         archive_scheduled_message(&database, message.id).await;
                     }
                 },
                 Err(e) => {
-                    error!("Unable to re-schedule repeating message: {} -- archiving message as a fallback.", e);
+                    error!(
+                        "Unable to re-schedule repeating message: {} -- archiving message as a fallback.",
+                        e
+                    );
                     archive_scheduled_message(&database, message.id).await;
                 },
             };
@@ -576,7 +573,8 @@ pub(crate) async fn send_scheduled_messages(
             &message.title,
             &message.message,
             Colour::FABLED_PINK,
-        ).await
+        )
+        .await
         {
             error!("Unable to send scheduled message, archiving it instead: {}", e);
             archive_scheduled_message(&database, message.id).await;

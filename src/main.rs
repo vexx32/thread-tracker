@@ -2,8 +2,7 @@ use std::{
     collections::HashSet,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
-        Arc,
-        Mutex,
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -12,18 +11,17 @@ use background_tasks::Task;
 use cache::MessageCache;
 use commands::{threads, CommandError};
 use db::Database;
-use poise::{
-    serenity_prelude::*,
-    FrameworkError,
-};
+use poise::{serenity_prelude::*, FrameworkError};
 use serenity::model::channel::Message;
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
-    ConnectOptions,
-    Executor,
+    ConnectOptions, Executor,
 };
 use tokio::{
-    sync::{mpsc::{self, Sender}, RwLock},
+    sync::{
+        mpsc::{self, Sender},
+        RwLock,
+    },
     time::sleep,
 };
 use toml::Table;
@@ -31,11 +29,7 @@ use tracing::{debug, error, info, log::LevelFilter};
 use utils::message_is_command;
 
 use crate::{
-    background_tasks::{
-        listen_for_background_tasks,
-        run_periodic_shard_tasks,
-        start_periodic_tasks,
-    },
+    background_tasks::{listen_for_background_tasks, run_periodic_shard_tasks, start_periodic_tasks},
     consts::{DELETE_EMOJI, MPSC_BUFFER_SIZE, SHARD_CHECKUP_INTERVAL},
     messaging::reply_error,
 };
@@ -86,9 +80,11 @@ impl Data {
         let mut tracked_threads = self.tracked_threads.write().await;
         tracked_threads.clear();
 
-        threads::enumerate_tracked_channel_ids(&self.database).await?.for_each(|id| {
-            tracked_threads.insert(id);
-        });
+        threads::enumerate_tracked_channel_ids(&self.database)
+            .await?
+            .for_each(|id| {
+                tracked_threads.insert(id);
+            });
 
         Ok(())
     }
@@ -135,11 +131,7 @@ struct Handler {
 
 impl Handler {
     /// Create a new Handler.
-    fn new(
-        options: poise::FrameworkOptions<Data, CommandError>,
-        database: Database,
-        channel: Sender<Task>,
-    ) -> Self {
+    fn new(options: poise::FrameworkOptions<Data, CommandError>, database: Database, channel: Sender<Task>) -> Self {
         Self {
             options,
             channel,
@@ -160,8 +152,7 @@ impl Handler {
 
         if value == 0u64 {
             None
-        }
-        else {
+        } else {
             Some(value.into())
         }
     }
@@ -190,7 +181,10 @@ impl EventHandler for Handler {
             return;
         }
 
-        debug!("Received reaction {} on message {}", reaction.emoji, reaction.message_id);
+        debug!(
+            "Received reaction {} on message {}",
+            reaction.emoji, reaction.message_id
+        );
 
         if DELETE_EMOJI.iter().any(|&emoji| reaction.emoji.unicode_eq(emoji)) {
             let channel_message = (reaction.channel_id, reaction.message_id).into();
@@ -221,20 +215,21 @@ impl EventHandler for Handler {
                     if Some(referenced_message.author.id) == reaction.user_id {
                         utils::delete_message(&message, &context, &data).await;
                     }
-                }
-                else if let Some(MessageInteractionMetadata::Command(interaction)) = root_message.interaction_metadata.as_deref() {
+                } else if let Some(MessageInteractionMetadata::Command(interaction)) =
+                    root_message.interaction_metadata.as_deref()
+                {
                     info!("Processing deletion request for message {}", message.id);
                     if Some(interaction.user.id) == reaction.user_id {
                         utils::delete_message(&message, &context, &data).await;
                     }
-                }
-                else {
+                } else {
                     error!("Could not find referenced message to check requesting user ID against")
                 }
             }
         }
 
-        self.forward_to_poise(&context, FullEvent::ReactionAdd { add_reaction: reaction }).await;
+        self.forward_to_poise(&context, FullEvent::ReactionAdd { add_reaction: reaction })
+            .await;
     }
 
     async fn message(&self, context: Context, message: Message) {
@@ -244,8 +239,7 @@ impl EventHandler for Handler {
         }
 
         if !message_is_command(&message.content) {
-            let is_tracking_thread =
-                { self.data.read().await.tracking_thread(message.channel_id).await };
+            let is_tracking_thread = { self.data.read().await.tracking_thread(message.channel_id).await };
 
             if is_tracking_thread {
                 let data = self.data.read().await;
@@ -264,7 +258,8 @@ impl EventHandler for Handler {
             }
         }
 
-        self.forward_to_poise(&context, FullEvent::Message { new_message: message }).await;
+        self.forward_to_poise(&context, FullEvent::Message { new_message: message })
+            .await;
     }
 
     async fn message_update(
@@ -274,13 +269,23 @@ impl EventHandler for Handler {
         new: Option<Message>,
         event: MessageUpdateEvent,
     ) {
-        self.forward_to_poise(&ctx, FullEvent::MessageUpdate { old_if_available, new, event })
-            .await;
+        self.forward_to_poise(
+            &ctx,
+            FullEvent::MessageUpdate {
+                old_if_available,
+                new,
+                event,
+            },
+        )
+        .await;
     }
 
     async fn guild_create(&self, ctx: Context, guild: Guild, is_new: Option<bool>) {
         if let Some(true) = is_new {
-            info!("notified that Titi was added to a new guild: `{}` ({})!", guild.name, guild.id);
+            info!(
+                "notified that Titi was added to a new guild: `{}` ({})!",
+                guild.name, guild.id
+            );
             self.data.read().await.guild_count.fetch_add(1, Ordering::SeqCst);
 
             if cfg!(debug_assertions) {
@@ -288,18 +293,16 @@ impl EventHandler for Handler {
             }
         }
 
-        self.forward_to_poise(&ctx, FullEvent::GuildCreate { guild, is_new }).await;
+        self.forward_to_poise(&ctx, FullEvent::GuildCreate { guild, is_new })
+            .await;
     }
 
-    async fn guild_delete(
-        &self,
-        ctx: Context,
-        guild_partial: UnavailableGuild,
-        guild_full: Option<Guild>,
-    ) {
+    async fn guild_delete(&self, ctx: Context, guild_partial: UnavailableGuild, guild_full: Option<Guild>) {
         if !guild_partial.unavailable {
-            let guild_name =
-                guild_full.as_ref().map(|g| g.name.clone()).unwrap_or_else(|| format!("{}", guild_partial.id));
+            let guild_name = guild_full
+                .as_ref()
+                .map(|g| g.name.clone())
+                .unwrap_or_else(|| format!("{}", guild_partial.id));
             info!(
                 "notified that Titi has been removed from the `{}` guild ({})",
                 guild_name, guild_partial.id
@@ -308,7 +311,14 @@ impl EventHandler for Handler {
             self.data.read().await.guild_count.fetch_sub(1, Ordering::SeqCst);
         }
 
-        self.forward_to_poise(&ctx, FullEvent::GuildDelete { incomplete: guild_partial, full: guild_full }).await;
+        self.forward_to_poise(
+            &ctx,
+            FullEvent::GuildDelete {
+                incomplete: guild_partial,
+                full: guild_full,
+            },
+        )
+        .await;
     }
 
     async fn ready(&self, ctx: Context, ready: Ready) {
@@ -327,17 +337,22 @@ impl EventHandler for Handler {
         let result = Command::set_global_commands(&ctx, commands).await;
 
         match result {
-            Ok(cmds) => info!("Successfully updated global command registration with {} commands", cmds.len()),
+            Ok(cmds) => info!(
+                "Successfully updated global command registration with {} commands",
+                cmds.len()
+            ),
             Err(e) => error!("Unable to register commands globally: {}", e),
         }
 
         run_periodic_shard_tasks(&ctx, &self.channel);
 
-        self.forward_to_poise(&ctx, FullEvent::Ready { data_about_bot: ready }).await;
+        self.forward_to_poise(&ctx, FullEvent::Ready { data_about_bot: ready })
+            .await;
     }
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
-        self.forward_to_poise(&ctx, FullEvent::InteractionCreate { interaction }).await;
+        self.forward_to_poise(&ctx, FullEvent::InteractionCreate { interaction })
+            .await;
     }
 }
 
@@ -348,7 +363,7 @@ async fn on_error(error: poise::FrameworkError<'_, Data, CommandError>) {
     // and forward the rest to the default handler
     match &error {
         FrameworkError::Setup { error: e, .. } => panic!("Failed to start bot: {:?}", e),
-        FrameworkError::Command { error: e, ctx , ..} => {
+        FrameworkError::Command { error: e, ctx, .. } => {
             error!("Error in command `{}`: {}", ctx.command().name, e);
             if let Err(e) = reply_error(ctx, "Error running command", &e.to_string()).await {
                 error!("Could not send error response to user: {}", e);
@@ -372,9 +387,16 @@ async fn main() -> anyhow::Result<()> {
     let configuration = include_str!("../Secrets.toml").parse::<Table>().unwrap();
 
     // Get the discord token set in `Secrets.toml`
-    let token_entry = if cfg!(debug_assertions) { "DISCORD_TOKEN_DEV" } else { "DISCORD_TOKEN" };
-    let db_entry =
-        if cfg!(debug_assertions) { "CONNECTION_STRING_DEV" } else { "CONNECTION_STRING" };
+    let token_entry = if cfg!(debug_assertions) {
+        "DISCORD_TOKEN_DEV"
+    } else {
+        "DISCORD_TOKEN"
+    };
+    let db_entry = if cfg!(debug_assertions) {
+        "CONNECTION_STRING_DEV"
+    } else {
+        "CONNECTION_STRING"
+    };
 
     let discord_token = configuration[token_entry].as_str().unwrap();
     let connection_string = configuration[db_entry].as_str().unwrap();
@@ -383,15 +405,10 @@ async fn main() -> anyhow::Result<()> {
         .parse::<PgConnectOptions>()?
         .log_statements(LevelFilter::Trace)
         .log_slow_statements(LevelFilter::Warn, Duration::from_secs(5));
-    let database = PgPoolOptions::new()
-        .max_connections(20)
-        .connect_with(options)
-        .await?;
+    let database = PgPoolOptions::new().max_connections(20).connect_with(options).await?;
 
     // Run the schema migration
-    database
-        .execute(include_str!("../sql/schema.sql"))
-        .await?;
+    database.execute(include_str!("../sql/schema.sql")).await?;
 
     // FrameworkOptions contains all of poise's configuration option in one struct
     // Every option can be omitted to use its default value
@@ -443,8 +460,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let handler = std::sync::Arc::new(handler);
-    let mut client =
-        Client::builder(discord_token, intents).event_handler_arc(Arc::clone(&handler)).await?;
+    let mut client = Client::builder(discord_token, intents)
+        .event_handler_arc(Arc::clone(&handler))
+        .await?;
 
     client.cache.set_max_messages(1);
 
@@ -456,7 +474,10 @@ async fn main() -> anyhow::Result<()> {
             let runners = manager.runners.lock().await;
 
             for (id, runner) in runners.iter() {
-                info!("Shard ID {} is {} with a latency of {:?}", id, runner.stage, runner.latency);
+                info!(
+                    "Shard ID {} is {} with a latency of {:?}",
+                    id, runner.stage, runner.latency
+                );
             }
         }
     });

@@ -1,11 +1,17 @@
-use std::{cmp::Reverse, collections::{BTreeMap, BTreeSet, HashMap}, sync::Arc, time::Duration};
+use std::{
+    cmp::Reverse,
+    collections::{BTreeMap, BTreeSet, HashMap},
+    sync::Arc,
+    time::Duration,
+};
 
 use rand::Rng;
 use serenity::{
+    builder::GetMessages,
     http::CacheHttp,
     model::prelude::*,
     prelude::*,
-    utils::{ContentModifier::*, EmbedMessageBuilding, MessageBuilder}, builder::GetMessages,
+    utils::{ContentModifier::*, EmbedMessageBuilding, MessageBuilder},
 };
 use tracing::{error, info};
 
@@ -14,10 +20,12 @@ use crate::{
     commands::{muses, todos, CommandContext, CommandError, CommandResult, SortResultsBy},
     consts::{setting_names::USER_SHOW_TIMESTAMPS, MAX_EMBED_CHARS, THREAD_NAME_LENGTH},
     db::{self, add_subscriber, get_user_setting, remove_subscriber, Todo, TrackedThread},
-    messaging::{dm, edit_message, reply, reply_error, send_confirmation_prompt, send_invalid_command_call_error, whisper, whisper_error, ConfirmationResponse},
+    messaging::{
+        dm, edit_message, reply, reply_error, send_confirmation_prompt, send_invalid_command_call_error, whisper,
+        whisper_error, ConfirmationResponse,
+    },
     utils::*,
-    Data,
-    Database,
+    Data, Database,
 };
 
 struct LastReplyInfo {
@@ -55,7 +63,11 @@ pub(crate) async fn enumerate(
     user: &GuildUser,
     category: Option<&str>,
 ) -> anyhow::Result<impl Iterator<Item = TrackedThread>> {
-    Ok(db::list_threads(database, user.guild_id.get(), user.user_id.get(), category).await?.into_iter())
+    Ok(
+        db::list_threads(database, user.guild_id.get(), user.user_id.get(), category)
+            .await?
+            .into_iter(),
+    )
 }
 
 /// Iterate over the tracked ChannelId values from the threads table.
@@ -94,12 +106,20 @@ pub(crate) async fn add(
 
     match thread.id.to_channel(ctx).await {
         Ok(channel) => {
-            info!("Adding tracked thread {} for user `{}` ({})", thread.id, user.name, user.id);
+            info!(
+                "Adding tracked thread {} for user `{}` ({})",
+                thread.id, user.name, user.id
+            );
             cache_last_channel_message(channel.guild().as_ref(), ctx, message_cache).await;
 
-            let result =
-                db::add_thread(database, guild_id.get(), thread.id.get(), user.id.get(), category.as_deref())
-                    .await;
+            let result = db::add_thread(
+                database,
+                guild_id.get(),
+                thread.id.get(),
+                user.id.get(),
+                category.as_deref(),
+            )
+            .await;
             match result {
                 Ok(true) => {
                     data.add_tracked_thread(thread.id).await;
@@ -151,7 +171,9 @@ pub(crate) async fn set_category(
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => {
-            return Err(CommandError::new("Unable to managed tracked threads outside of a server"))
+            return Err(CommandError::new(
+                "Unable to managed tracked threads outside of a server",
+            ))
         },
     };
 
@@ -177,9 +199,10 @@ pub(crate) async fn set_category(
         .await
         {
             Ok(true) => threads_updated.push("- ").mention(&thread.id).push_line(""),
-            Ok(false) => {
-                errors.push("- ").mention(&thread.id).push_line(" is not currently being tracked")
-            },
+            Ok(false) => errors
+                .push("- ")
+                .mention(&thread.id)
+                .push_line(" is not currently being tracked"),
             Err(e) => errors
                 .push("- Failed to update thread category for ")
                 .mention(&thread.id)
@@ -233,7 +256,9 @@ pub(crate) async fn untrack_thread(
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => {
-            return Err(CommandError::new("Unable to manage tracked threads outside of a server"))
+            return Err(CommandError::new(
+                "Unable to manage tracked threads outside of a server",
+            ))
         },
     };
 
@@ -246,17 +271,9 @@ pub(crate) async fn untrack_thread(
     let result = remove_tracked_thread(user, thread.id, guild_id, data).await;
 
     match result {
-        Ok(0) => {
-            errors.push_line(format!("- {} is not currently being tracked", thread.id.mention()))
-        },
-        Ok(_) => {
-            threads_removed.push_line(format!("- {:}", thread.id.mention()))
-        },
-        Err(e) => errors.push_line(format!(
-            "- Failed to unregister thread {}: {}",
-            thread.id.mention(),
-            e
-        )),
+        Ok(0) => errors.push_line(format!("- {} is not currently being tracked", thread.id.mention())),
+        Ok(_) => threads_removed.push_line(format!("- {:}", thread.id.mention())),
+        Err(e) => errors.push_line(format!("- Failed to unregister thread {}: {}", thread.id.mention(), e)),
     };
 
     if !errors.0.is_empty() {
@@ -272,8 +289,16 @@ pub(crate) async fn untrack_thread(
 }
 
 /// Remove a given tracked thread from the database and cache.
-async fn remove_tracked_thread(user: &User, channel_id: ChannelId, guild_id: GuildId, data: &Data) -> sqlx::Result<u64> {
-    info!("removing tracked thread `{}` for {} ({})", channel_id, user.name, user.id);
+async fn remove_tracked_thread(
+    user: &User,
+    channel_id: ChannelId,
+    guild_id: GuildId,
+    data: &Data,
+) -> sqlx::Result<u64> {
+    info!(
+        "removing tracked thread `{}` for {} ({})",
+        channel_id, user.name, user.id
+    );
     let result = db::remove_thread(&data.database, guild_id.get(), channel_id.get(), user.id.get()).await;
 
     if let Ok(_) = result {
@@ -287,15 +312,16 @@ async fn remove_tracked_thread(user: &User, channel_id: ChannelId, guild_id: Gui
 #[poise::command(slash_command, guild_only, rename = "category")]
 pub(crate) async fn untrack_category(
     ctx: CommandContext<'_>,
-    #[description = "Category to untrack all threads from; use 'all' to untrack everything"]
-    name: String,
+    #[description = "Category to untrack all threads from; use 'all' to untrack everything"] name: String,
 ) -> CommandResult<()> {
     const ERROR_TITLE: &str = "Error adding tracked thread";
 
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => {
-            return Err(CommandError::new("Unable to manage tracked threads outside of a server"))
+            return Err(CommandError::new(
+                "Unable to manage tracked threads outside of a server",
+            ))
         },
     };
 
@@ -311,12 +337,16 @@ pub(crate) async fn untrack_category(
         _ => (Some(name.as_str()), format!(" in category {}", name)),
     };
 
-    info!("removing all tracked threads{} for {} ({})", category_message, user.name, user.id);
+    info!(
+        "removing all tracked threads{} for {} ({})",
+        category_message, user.name, user.id
+    );
     match db::remove_all_threads(database, guild_id.get(), user.id.get(), category).await {
-        Ok(0) => threads_removed
-            .push_line(format!("No threads are currently being tracked{}.", category_message)),
-        Ok(count) => threads_removed
-            .push_line(format!("All {} threads{} removed from tracking.", count, category_message)),
+        Ok(0) => threads_removed.push_line(format!("No threads are currently being tracked{}.", category_message)),
+        Ok(count) => threads_removed.push_line(format!(
+            "All {} threads{} removed from tracking.",
+            count, category_message
+        )),
         Err(e) => {
             error!(
                 "Error untracking all threads{} for user {} ({}): {}",
@@ -352,7 +382,9 @@ pub(crate) async fn send_list(
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => {
-            return Err(CommandError::new("Unable to manage tracked threads outside of a server"))
+            return Err(CommandError::new(
+                "Unable to manage tracked threads outside of a server",
+            ))
         },
     };
 
@@ -361,8 +393,7 @@ pub(crate) async fn send_list(
     let title = "Currently tracked threads";
 
     let threads_list =
-        get_threads_and_todos(ctx.author(), guild_id, category.as_deref(), sort, ctx.data(), &ctx)
-            .await?;
+        get_threads_and_todos(ctx.author(), guild_id, category.as_deref(), sort, ctx.data(), &ctx).await?;
 
     reply(&ctx, title, &threads_list).await?;
 
@@ -379,15 +410,16 @@ pub(crate) async fn send_pending_list(
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => {
-            return Err(CommandError::new("Unable to manage tracked threads outside of a server"))
+            return Err(CommandError::new(
+                "Unable to manage tracked threads outside of a server",
+            ))
         },
     };
 
     ctx.defer().await?;
 
     let threads_list =
-        get_pending_thread_list(ctx.author(), guild_id, category.as_deref(), sort, ctx.data(), &ctx)
-            .await?;
+        get_pending_thread_list(ctx.author(), guild_id, category.as_deref(), sort, ctx.data(), &ctx).await?;
 
     reply(&ctx, "Threads awaiting replies", &threads_list).await?;
 
@@ -405,7 +437,10 @@ pub(crate) async fn get_threads_and_todos(
 ) -> CommandResult<String> {
     info!("Getting tracked threads and todo list for {} ({})", user.name, user.id);
 
-    let guild_user = GuildUser { user_id: user.id, guild_id };
+    let guild_user = GuildUser {
+        user_id: user.id,
+        guild_id,
+    };
 
     let mut threads: Vec<TrackedThread> = Vec::new();
     let mut todos: Vec<Todo> = Vec::new();
@@ -432,8 +467,7 @@ pub(crate) async fn get_threads_and_todos(
         },
     }
 
-    let muses = match muses::get_list(&data.database, guild_user.user_id, guild_user.guild_id).await
-    {
+    let muses = match muses::get_list(&data.database, guild_user.user_id, guild_user.guild_id).await {
         Ok(m) => m,
         Err(e) => {
             error!("Error finding muse list for {}: {}", user.name, e);
@@ -451,19 +485,16 @@ pub(crate) async fn get_threads_and_todos(
         show_timestamps: show_timestamps(&data.database, guild_user.user_id).await,
     };
 
-    let message =
-        match get_formatted_list(threads, todos, sort, context, &data.message_cache, &user_data)
-            .await
-        {
-            Ok(m) => m,
-            Err(e) => {
-                error!("Error collating tracked threads for {}: {}", user.name, e);
-                return Err(CommandError::detailed(
-                    format!("Error collating tracked threads for {}", user.name),
-                    e,
-                ));
-            },
-        };
+    let message = match get_formatted_list(threads, todos, sort, context, &data.message_cache, &user_data).await {
+        Ok(m) => m,
+        Err(e) => {
+            error!("Error collating tracked threads for {}: {}", user.name, e);
+            return Err(CommandError::detailed(
+                format!("Error collating tracked threads for {}", user.name),
+                e,
+            ));
+        },
+    };
 
     Ok(message)
 }
@@ -499,19 +530,20 @@ pub(crate) async fn get_pending_thread_list(
                 },
                 SortResultsBy::OldestFirst => {
                     threads.sort_by_key(|item| item.0.timestamp);
-                }
+                },
             }
         }
 
         for (reply_info, thread) in threads {
             let link = get_thread_link(&thread, None, context).await;
-            message.push("- ").push(link.to_string()).push(" — ").push(Bold + &reply_info.author_nick);
+            message
+                .push("- ")
+                .push(link.to_string())
+                .push(" — ")
+                .push(Bold + &reply_info.author_nick);
             if show_timestamps {
-                message.push(" (")
-                    .push_timestamp(reply_info.timestamp)
-                    .push_line(")");
-            }
-            else {
+                message.push(" (").push_timestamp(reply_info.timestamp).push_line(")");
+            } else {
                 message.push_line("");
             }
         }
@@ -539,7 +571,9 @@ pub(crate) async fn send_random_thread(
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => {
-            return Err(CommandError::new("Unable to manage tracked threads outside of a server"))
+            return Err(CommandError::new(
+                "Unable to manage tracked threads outside of a server",
+            ))
         },
     };
 
@@ -562,8 +596,7 @@ pub(crate) async fn send_random_thread(
                     .push(" from your ")
                     .push(Bold + Underline + category)
                     .push_line(" threads!");
-            }
-            else {
+            } else {
                 message.push_line("!");
             }
 
@@ -579,7 +612,10 @@ pub(crate) async fn send_random_thread(
     };
 
     if !errors.0.is_empty() {
-        error!("Errors encountered getting a random thread for {}: {}", user.name, errors);
+        error!(
+            "Errors encountered getting a random thread for {}: {}",
+            user.name, errors
+        );
         reply_error(&ctx, ERROR_TITLE, &errors.build()).await?;
     }
 
@@ -609,10 +645,8 @@ pub(crate) async fn notify_replies_on(ctx: CommandContext<'_>) -> CommandResult<
 
     if add_subscriber(&data.database, user.id).await? {
         whisper(&ctx, "Subscription", "Subscribed to thread replies successfully!").await?;
-    }
-    else {
-        whisper_error(&ctx, "Subscription", "You are already subscribed to thread replies.")
-            .await?;
+    } else {
+        whisper_error(&ctx, "Subscription", "You are already subscribed to thread replies.").await?;
     }
 
     Ok(())
@@ -626,16 +660,24 @@ pub(crate) async fn notify_replies_off(ctx: CommandContext<'_>) -> CommandResult
 
     if remove_subscriber(&data.database, user.id).await? {
         whisper(&ctx, "Subscription", "Unsubscribed from thread replies successfully!").await?;
-    }
-    else {
-        whisper_error(&ctx, "Subscription", "You are not currently subscribed to thread replies.")
-            .await?;
+    } else {
+        whisper_error(
+            &ctx,
+            "Subscription",
+            "You are not currently subscribed to thread replies.",
+        )
+        .await?;
     }
 
     Ok(())
 }
 
-#[poise::command(slash_command, category = "Thread tracking", rename = "tt_timestamps", subcommands("set_timestamps_on", "set_timestamps_off"))]
+#[poise::command(
+    slash_command,
+    category = "Thread tracking",
+    rename = "tt_timestamps",
+    subcommands("set_timestamps_on", "set_timestamps_off")
+)]
 pub(crate) async fn set_timestamps(ctx: CommandContext<'_>) -> CommandResult<()> {
     send_invalid_command_call_error(ctx).await
 }
@@ -651,8 +693,7 @@ pub(crate) async fn set_timestamps_on(ctx: CommandContext<'_>) -> CommandResult<
     let mut message = MessageBuilder::new();
     if result {
         message.push("Timestamps successfully enabled");
-    }
-    else {
+    } else {
         message.push("Timestamps are already enabled");
     }
 
@@ -672,8 +713,7 @@ pub(crate) async fn set_timestamps_off(ctx: CommandContext<'_>) -> CommandResult
     let mut message = MessageBuilder::new();
     if result {
         message.push("Timestamps successfully disabled");
-    }
-    else {
+    } else {
         message.push("Timestamps are already disabled");
     }
 
@@ -691,14 +731,26 @@ pub(crate) async fn cleanup(
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => {
-            return Err(CommandError::new("Unable to manage tracked threads outside of a server"))
+            return Err(CommandError::new(
+                "Unable to manage tracked threads outside of a server",
+            ))
         },
     };
     let user = ctx.author();
     let data = ctx.data();
-    let guild_user = GuildUser { user_id: user.id, guild_id };
+    let guild_user = GuildUser {
+        user_id: user.id,
+        guild_id,
+    };
 
-    info!("Cleaning up tracked threads for {} ({}){}", user.name, user.id, category.as_deref().map_or(String::new(), |c| format!(" in category {}", c)));
+    info!(
+        "Cleaning up tracked threads for {} ({}){}",
+        user.name,
+        user.id,
+        category
+            .as_deref()
+            .map_or(String::new(), |c| format!(" in category {}", c))
+    );
 
     let mut threads_to_remove = Vec::new();
     ctx.defer_ephemeral().await?;
@@ -712,16 +764,22 @@ pub(crate) async fn cleanup(
                 }
             }
 
-            let reply_title = format!("Cleanup threads{}", category.map_or(String::new(), |c| format!(" in category {}", c)));
+            let reply_title = format!(
+                "Cleanup threads{}",
+                category.map_or(String::new(), |c| format!(" in category {}", c))
+            );
             if threads_to_remove.is_empty() {
                 whisper(&ctx, &reply_title, "No deleted or inaccessible threads to cleanup.").await?;
                 Ok(())
-            }
-            else {
+            } else {
                 let mut response = MessageBuilder::new();
                 response.push_line("The following threads could not be found:");
                 for thread in threads_to_remove.iter() {
-                    response.push_line(format!("- {} (id: {})", thread.channel_id().mention(), thread.channel_id));
+                    response.push_line(format!(
+                        "- {} (id: {})",
+                        thread.channel_id().mention(),
+                        thread.channel_id
+                    ));
                 }
 
                 response.push_line("")
@@ -739,55 +797,77 @@ pub(crate) async fn cleanup(
                             .timeout(Duration::from_secs(60 * 3))
                             .await
                         {
-                            Some(interaction) => {
-                                match interaction.data.kind {
-                                    ComponentInteractionDataKind::Button => {
-                                        if interaction.data.custom_id == ConfirmationResponse::Confirm.to_string() {
-                                            let mut removed = 0;
-                                            let mut message = MessageBuilder::new();
-
-                                            for thread in threads_to_remove.iter() {
-                                                match remove_tracked_thread(user, thread.channel_id(), guild_id, &ctx.data()).await {
-                                                    Ok(n) => {
-                                                        removed += n;
-                                                        message.push_line(format!("- {}", thread.channel_id()));
-                                                    },
-                                                    Err(e) => {
-                                                        error!("Error removing tracked thread {} for user {} ({}): {}", thread.channel_id, user.name, user.id, e);
-                                                    }
-                                                };
-                                            }
-
-                                            message
-                                                .push_line("")
-                                                .push_line(format!("Cleaned up {} thread(s).", removed));
-                                            
-
-                                            reply(&ctx, &reply_title, &message.build()).await?;
-                                        }
-                                        
-                                        handle.delete(ctx).await?;
+                            Some(ComponentInteraction {
+                                data:
+                                    ComponentInteractionData {
+                                        kind: ComponentInteractionDataKind::Button,
+                                        custom_id,
+                                        ..
                                     },
-                                    _ => {
-                                        let error = "Unexpected interaction response type for a confirmation prompt; terminating interaction.";
-                                        error!(error);
-                                        handle.delete(ctx).await?;
-                                        return Err(CommandError::new(error));
+                                ..
+                            }) => {
+                                if custom_id == ConfirmationResponse::Confirm.to_string() {
+                                    let mut removed = 0;
+                                    let mut message = MessageBuilder::new();
+
+                                    for thread in threads_to_remove.iter() {
+                                        match remove_tracked_thread(user, thread.channel_id(), guild_id, &ctx.data())
+                                            .await
+                                        {
+                                            Ok(n) => {
+                                                removed += n;
+                                                message.push_line(format!("- {}", thread.channel_id()));
+                                            },
+                                            Err(e) => {
+                                                error!(
+                                                    "Error removing tracked thread {} for user {} ({}): {}",
+                                                    thread.channel_id, user.name, user.id, e
+                                                );
+                                            },
+                                        };
                                     }
+
+                                    message
+                                        .push_line("")
+                                        .push_line(format!("Cleaned up {} thread(s).", removed));
+
+                                    reply(&ctx, &reply_title, &message.build()).await?;
                                 }
-                            }
+
+                                handle.delete(ctx).await?;
+                            },
+                            Some(_) => {
+                                let error = "Unexpected interaction response type for a confirmation prompt; terminating interaction.";
+                                error!(error);
+                                handle.delete(ctx).await?;
+                                return Err(CommandError::new(error));
+                            },
                             None => {
                                 info!("Thread cleanup interaction timed out for {} ({})", user.name, user.id);
-                                edit_message(ctx, handle, None, Some("-# *Timed out. Please reissue the command again.*"), Some(Colour::DARKER_GREY), true).await?;
-                            }
+                                edit_message(
+                                    ctx,
+                                    handle,
+                                    None,
+                                    Some("-# *Timed out. Please reissue the command again.*"),
+                                    Some(Colour::DARKER_GREY),
+                                    true,
+                                )
+                                .await?;
+                            },
                         }
 
                         Ok(())
                     },
                     Err(e) => {
-                        error!("Error sending confirmation prompt to user {} ({}) to cleanup deleted threads.", &user.name, user.id);
-                        Err(CommandError::detailed("Unable to send confirmation prompt to cleanup deleted threads.", e))
-                    }
+                        error!(
+                            "Error sending confirmation prompt to user {} ({}) to cleanup deleted threads.",
+                            &user.name, user.id
+                        );
+                        Err(CommandError::detailed(
+                            "Unable to send confirmation prompt to cleanup deleted threads.",
+                            e,
+                        ))
+                    },
                 }
             }
         },
@@ -802,11 +882,7 @@ pub(crate) async fn cleanup(
 }
 
 /// Send reply notification DMs to all users tracking the thread a new reply was posted in.
-pub(crate) async fn send_reply_notification(
-    reply: Message,
-    database: Database,
-    context: impl CacheHttp,
-) {
+pub(crate) async fn send_reply_notification(reply: Message, database: Database, context: impl CacheHttp) {
     let guild_id = match reply.guild_id {
         Some(id) => id,
         None => return,
@@ -836,8 +912,7 @@ pub(crate) async fn send_reply_notification(
 
                 if preview.is_empty() {
                     (None, None)
-                }
-                else {
+                } else {
                     (Some("Reply preview"), Some(preview))
                 }
             };
@@ -847,7 +922,11 @@ pub(crate) async fn send_reply_notification(
                 "https://discord.com/channels/{}/{}/{}",
                 guild_id, reply.channel_id, reply.id
             );
-            content.push("New reply from ").mention(&author).push(" in thread ").push(link);
+            content
+                .push("New reply from ")
+                .mention(&author)
+                .push(" in thread ")
+                .push(link);
 
             let content = content.build();
 
@@ -868,9 +947,7 @@ pub(crate) async fn send_reply_notification(
                 if subscribers.contains(&user) && !muses.contains(&author.name) {
                     info!("Sending reply notification to user ID {}", user);
 
-                    if let Err(e) =
-                        dm(&context, user, &content, preview_title, reply_preview.as_deref()).await
-                    {
+                    if let Err(e) = dm(&context, user, &content, preview_title, reply_preview.as_deref()).await {
                         error!("Unable to DM user {} for thread reply notification: {}", user, e);
                     }
                 }
@@ -890,13 +967,11 @@ async fn get_random_thread(
     guild_id: GuildId,
     context: &CommandContext<'_>,
 ) -> CommandResult<Option<(LastReplyInfo, TrackedThread)>> {
-    let mut pending_threads =
-        get_pending_threads(category, user, guild_id, context, context.data()).await?;
+    let mut pending_threads = get_pending_threads(category, user, guild_id, context, context.data()).await?;
 
     if pending_threads.is_empty() {
         Ok(None)
-    }
-    else {
+    } else {
         let mut rng = rand::rng();
         let index = rng.random_range(0..pending_threads.len());
         Ok(Some(pending_threads.remove(index)))
@@ -911,7 +986,10 @@ async fn get_pending_threads(
     context: &impl CacheHttp,
     data: &Data,
 ) -> CommandResult<Vec<(LastReplyInfo, TrackedThread)>> {
-    let guild_user = GuildUser { user_id: user.id, guild_id };
+    let guild_user = GuildUser {
+        user_id: user.id,
+        guild_id,
+    };
     let muses = muses::get_list(&data.database, guild_user.user_id, guild_user.guild_id).await?;
     let mut pending_threads = Vec::new();
 
@@ -940,7 +1018,13 @@ pub(crate) async fn get_formatted_list(
     let todos = todos::categorise(todos);
 
     let mut guild_threads: HashMap<ChannelId, String> = HashMap::new();
-    for channel in user_data.guild_id.get_active_threads(context.http()).await?.threads.into_iter() {
+    for channel in user_data
+        .guild_id
+        .get_active_threads(context.http())
+        .await?
+        .threads
+        .into_iter()
+    {
         cache_last_channel_message(Some(&channel), context.http(), message_cache).await;
         guild_threads.insert(channel.id, channel.name);
     }
@@ -971,20 +1055,14 @@ pub(crate) async fn get_formatted_list(
             if let Some(sort) = sort {
                 match sort {
                     SortResultsBy::NewestFirst => threads_reply_info.sort_by_key(|x| x.0.as_ref().map(|r| r.timestamp)),
-                    SortResultsBy::OldestFirst => threads_reply_info.sort_by_key(|x| x.0.as_ref().map(|r| Reverse(r.timestamp))),
+                    SortResultsBy::OldestFirst => {
+                        threads_reply_info.sort_by_key(|x| x.0.as_ref().map(|r| Reverse(r.timestamp)))
+                    },
                 }
             }
 
             for (_, thread) in threads_reply_info {
-                push_thread_line(
-                    &mut message,
-                    thread,
-                    &guild_threads,
-                    context,
-                    message_cache,
-                    user_data,
-                )
-                .await;
+                push_thread_line(&mut message, thread, &guild_threads, context, message_cache, user_data).await;
             }
         }
 
@@ -1036,8 +1114,7 @@ async fn get_last_responder(
                     .get_or_else(&channel_message, || channel_message.fetch(context.http()))
                     .await
                     .ok()
-            }
-            else {
+            } else {
                 None
             };
 
@@ -1052,8 +1129,7 @@ async fn get_last_responder(
             if let Some(message) = last_message {
                 let nick = get_nick_or_name(&message.author, thread.guild_id(), &context).await;
                 Some(LastReplyInfo::new(message.as_ref(), nick))
-            }
-            else {
+            } else {
                 None
             }
         },
@@ -1062,10 +1138,7 @@ async fn get_last_responder(
 }
 
 /// Get the last message from a channel, if any.
-async fn get_last_channel_message(
-    channel: GuildChannel,
-    context: impl CacheHttp,
-) -> Option<Message> {
+async fn get_last_channel_message(channel: GuildChannel, context: impl CacheHttp) -> Option<Message> {
     channel
         .messages(context.http(), GetMessages::new().limit(1))
         .await
@@ -1077,8 +1150,7 @@ async fn get_last_channel_message(
 async fn get_nick_or_name(user: &User, guild_id: GuildId, cache_http: impl CacheHttp) -> String {
     if user.bot {
         user.name.clone()
-    }
-    else {
+    } else {
         user.nick_in(cache_http, guild_id).await.unwrap_or(user.name.clone())
     }
 }
@@ -1104,17 +1176,13 @@ async fn push_thread_line<'a>(
             let last_author_name = get_nick_or_name(&reply_info.author, thread.guild_id(), context).await;
             if reply_info.author.id == user_data.id || user_data.muses.contains(&last_author_name) {
                 message.push(last_author_name);
-            }
-            else {
+            } else {
                 message.push(Bold + last_author_name);
             }
 
             if user_data.show_timestamps {
-                message.push(" (")
-                    .push_timestamp(reply_info.timestamp)
-                    .push_line(")")
-            }
-            else {
+                message.push(" (").push_timestamp(reply_info.timestamp).push_line(")")
+            } else {
                 message.push_line("")
             }
         },
@@ -1123,11 +1191,7 @@ async fn push_thread_line<'a>(
 }
 
 /// Build a thread link, either as a named link or a simple thread mention if the name isn't provided and can't be looked up.
-async fn get_thread_link(
-    thread: &TrackedThread,
-    name: Option<String>,
-    cache_http: impl CacheHttp,
-) -> MessageBuilder {
+async fn get_thread_link(thread: &TrackedThread, name: Option<String>, cache_http: impl CacheHttp) -> MessageBuilder {
     let mut link = MessageBuilder::new();
     let channel_name = match name {
         Some(n) => Some(n),
@@ -1153,8 +1217,7 @@ fn trim_string(name: &str, max_length: usize) -> String {
     if name.chars().count() > max_length {
         let trimmed = substring(name, max_length);
         format!("{}…", trimmed.trim())
-    }
-    else {
+    } else {
         name.to_owned()
     }
 }
@@ -1180,7 +1243,8 @@ async fn cache_last_channel_message(
 
 /// Determine whether the current user has timestamps enabled
 pub(crate) async fn show_timestamps(database: &Database, user_id: UserId) -> bool {
-    get_user_setting(database, user_id, USER_SHOW_TIMESTAMPS).await
+    get_user_setting(database, user_id, USER_SHOW_TIMESTAMPS)
+        .await
         .map(|s| s.map(|s| s.value.parse::<bool>()))
         .unwrap_or(None)
         .map(|r| r.unwrap_or_default())

@@ -6,7 +6,7 @@ use serenity::{
 use tracing::{error, info};
 
 use crate::{
-    commands::{CommandResult, CommandContext},
+    commands::{CommandContext, CommandResult},
     db::{self, Database},
     messaging::reply,
 };
@@ -43,7 +43,11 @@ pub(crate) async fn add(
         },
         Err(e) => {
             error!("Error adding muse for {}: {}", user.name, e);
-            errors.push_line(e.as_database_error().map(|x| x.to_string()).unwrap_or(String::from("unknown error")));
+            errors.push_line(
+                e.as_database_error()
+                    .map(|x| x.to_string())
+                    .unwrap_or(String::from("unknown error")),
+            );
             let error = errors.build();
             Err(anyhow!(error).into())
         },
@@ -104,8 +108,7 @@ pub(crate) async fn list(ctx: CommandContext<'_>) -> CommandResult<()> {
         for muse in muses {
             result.push_line(format!("- {}", muse));
         }
-    }
-    else {
+    } else {
         result.push_line("You have not registered any muses yet.");
     }
 
@@ -116,11 +119,7 @@ pub(crate) async fn list(ctx: CommandContext<'_>) -> CommandResult<()> {
 }
 
 /// Get the list of muses for the user out of the database.
-pub(crate) async fn get_list(
-    database: &Database,
-    user_id: UserId,
-    guild_id: GuildId,
-) -> anyhow::Result<Vec<String>> {
+pub(crate) async fn get_list(database: &Database, user_id: UserId, guild_id: GuildId) -> anyhow::Result<Vec<String>> {
     Ok(db::list_muses(database, guild_id.get(), user_id.get())
         .await?
         .into_iter()

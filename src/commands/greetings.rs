@@ -1,14 +1,18 @@
 use rand::Rng;
-use serenity::{utils::MessageBuilder, prelude::Mentionable};
+use serenity::{prelude::Mentionable, utils::MessageBuilder};
 
-use crate::{commands::{CommandContext, CommandResult}, consts::greetings::MESSAGES};
+use crate::{
+    commands::{CommandContext, CommandResult},
+    consts::greetings::MESSAGES,
+};
 
 #[poise::command(
     prefix_command,
     broadcast_typing,
     discard_spare_arguments,
     user_cooldown = 5,
-    aliases("hello!", "hi", "hi!", "hullo!", "hullo", "hey", "hey!", "yo", "yo!", "sup", "sup?"))]
+    aliases("hello!", "hi", "hi!", "hullo!", "hullo", "hey", "hey!", "yo", "yo!", "sup", "sup?")
+)]
 /// Have Titi reply with a short greeting.
 pub(crate) async fn hello(ctx: CommandContext<'_>) -> CommandResult<()> {
     let user = ctx.author().mention();

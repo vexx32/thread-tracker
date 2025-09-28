@@ -46,7 +46,11 @@ pub(crate) async fn add(
         },
         Err(e) => {
             error!("Error adding todo list item for {}: {}", user.name, e);
-            errors.push_line(e.as_database_error().map(|x| x.to_string()).unwrap_or(String::from("unknown error")));
+            errors.push_line(
+                e.as_database_error()
+                    .map(|x| x.to_string())
+                    .unwrap_or(String::from("unknown error")),
+            );
             Err(anyhow!(errors.build()).into())
         },
     }
@@ -75,9 +79,11 @@ pub(crate) async fn remove(
         message.push("To do list entry ").push(Italic + &entry).push(" was ");
 
         db::remove_todo(database, guild_id.get(), user.id.get(), &entry).await
-    }
-    else if let Some(category) = category {
-        info!("removing all todos in category `{}` for {} ({})", category, user.name, user.id);
+    } else if let Some(category) = category {
+        info!(
+            "removing all todos in category `{}` for {} ({})",
+            category, user.name, user.id
+        );
         match category.as_str() {
             "all" => {
                 message.push("To do list entries were ");
@@ -88,8 +94,7 @@ pub(crate) async fn remove(
                 db::remove_all_todos(database, guild_id.get(), user.id.get(), Some(cat)).await
             },
         }
-    }
-    else {
+    } else {
         return Err(anyhow!("No to do list entry or category specified to remove.").into());
     };
 
@@ -115,7 +120,10 @@ pub(crate) async fn list(
 ) -> CommandResult<()> {
     let user = ctx.author();
     let guild_user = match ctx.guild_id() {
-        Some(id) => GuildUser { user_id: user.id, guild_id: id },
+        Some(id) => GuildUser {
+            user_id: user.id,
+            guild_id: id,
+        },
         None => return Err(anyhow!("Unable to manage todo list items outside of a server").into()),
     };
 
@@ -132,8 +140,7 @@ pub(crate) async fn list(
             user.id
         );
         get_todos(database, &guild_user, Some(categories)).await
-    }
-    else {
+    } else {
         info!("sending all todos for {} ({})", user.name, user.id);
         get_todos(database, &guild_user, None).await
     };
@@ -155,8 +162,7 @@ pub(crate) async fn list(
 
                     message.push_line("");
                 }
-            }
-            else {
+            } else {
                 message.push_line("There is nothing on your to do list.");
             }
 
@@ -164,7 +170,11 @@ pub(crate) async fn list(
             Ok(())
         },
         Err(e) => {
-            message.push("Error retrieving ").mention(&user.id).push(": ").push_line(e.to_string());
+            message
+                .push("Error retrieving ")
+                .mention(&user.id)
+                .push(": ")
+                .push_line(e.to_string());
             Err(anyhow!(message.build()).into())
         },
     }
@@ -186,9 +196,7 @@ pub(crate) async fn get_todos(
     match categories {
         Some(cats) => {
             for category in cats {
-                result.extend(
-                    enumerate(database, user, Some(category.trim_start_matches('!'))).await?,
-                );
+                result.extend(enumerate(database, user, Some(category.trim_start_matches('!'))).await?);
             }
         },
         None => result.extend(enumerate(database, user, None).await?),
@@ -203,15 +211,14 @@ pub(crate) async fn enumerate(
     user: &GuildUser,
     category: Option<&str>,
 ) -> anyhow::Result<impl Iterator<Item = Todo>> {
-    Ok(db::list_todos(database, user.guild_id.get(), user.user_id.get(), category)
-        .await?
-        .into_iter())
+    Ok(
+        db::list_todos(database, user.guild_id.get(), user.user_id.get(), category)
+            .await?
+            .into_iter(),
+    )
 }
 
 /// Append a line to the message builder containing the to do list item's text.
-pub(crate) fn push_todo_line<'a>(
-    message: &'a mut MessageBuilder,
-    todo: &Todo,
-) -> &'a mut MessageBuilder {
+pub(crate) fn push_todo_line<'a>(message: &'a mut MessageBuilder, todo: &Todo) -> &'a mut MessageBuilder {
     message.push_line(format!("- {}", &todo.content))
 }
