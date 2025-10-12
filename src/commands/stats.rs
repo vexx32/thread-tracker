@@ -7,8 +7,8 @@ use crate::{
     messaging::reply,
 };
 
-/// Send the bot's statistics as a reply to the input context
-#[poise::command(prefix_command, dm_only, discard_spare_arguments, rename = "stats")]
+/// Send the bot's current statistics
+#[poise::command(slash_command, dm_only, owners_only, rename = "stats")]
 pub(crate) async fn send_statistics(ctx: CommandContext<'_>) -> CommandResult<()> {
     let data = ctx.data();
     let stats = db::statistics(&data.database).await?;
@@ -31,6 +31,12 @@ pub(crate) async fn send_statistics(ctx: CommandContext<'_>) -> CommandResult<()
     reply(&ctx, "Statistics", &message.build()).await?;
 
     Ok(())
+}
+
+/// Retrieve information on which servers the bot is a member of
+#[poise::command(slash_command, dm_only, owners_only, rename = "servers")]
+pub(crate) async fn send_servers(ctx: CommandContext<'_>) -> CommandResult<()> {
+    Ok(poise::builtins::servers(ctx).await?)
 }
 
 /// Write a line to the message being built, in the format `- **<name>** - <value>`

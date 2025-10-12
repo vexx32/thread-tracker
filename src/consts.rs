@@ -1,12 +1,14 @@
 use std::time::Duration;
 
+use serenity::all::UserId;
+
 pub(crate) mod greetings;
 pub(crate) mod help;
 pub(crate) mod setting_names;
 
 pub(crate) const DELETE_EMOJI: [&str; 2] = ["🚫", "🗑️"];
 
-//pub(crate) const DEBUG_USER: u64 = 283711673934807042;
+pub(crate) const OWNERS: [UserId; 2] = [UserId::new(283711673934807042), UserId::new(283669503353815040)];
 
 pub(crate) const THREAD_NAME_LENGTH: usize = 32;
 

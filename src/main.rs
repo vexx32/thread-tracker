@@ -30,7 +30,7 @@ use utils::message_is_command;
 
 use crate::{
     background_tasks::{listen_for_background_tasks, run_periodic_shard_tasks, start_periodic_tasks},
-    consts::{DELETE_EMOJI, MPSC_BUFFER_SIZE, SHARD_CHECKUP_INTERVAL},
+    consts::{DELETE_EMOJI, MPSC_BUFFER_SIZE, OWNERS, SHARD_CHECKUP_INTERVAL},
     messaging::reply_error,
 };
 
@@ -331,16 +331,11 @@ impl EventHandler for Handler {
         let data = self.data.read().await;
         data.guild_count.store(guild_count, Ordering::Relaxed);
 
-        let commands = poise::builtins::create_application_commands(&self.options.commands);
-
         // Register current commands.
-        let result = Command::set_global_commands(&ctx, commands).await;
+        let result = poise::builtins::register_globally(&ctx, &self.options.commands).await;
 
         match result {
-            Ok(cmds) => info!(
-                "Successfully updated global command registration with {} commands",
-                cmds.len()
-            ),
+            Ok(_) => info!("Successfully updated global command registration with {} commands", &self.options.commands.len()),
             Err(e) => error!("Unable to register commands globally: {}", e),
         }
 
@@ -413,6 +408,7 @@ async fn main() -> anyhow::Result<()> {
     // FrameworkOptions contains all of poise's configuration option in one struct
     // Every option can be omitted to use its default value
     let options = poise::FrameworkOptions {
+        allowed_mentions: Some(CreateAllowedMentions::new().all_roles(true).all_users(true)),
         commands: commands::list(),
         prefix_options: poise::PrefixFrameworkOptions {
             prefix: Some("tt!".into()),
@@ -422,6 +418,8 @@ async fn main() -> anyhow::Result<()> {
         },
         // The global error handler for all error cases that may occur
         on_error: |error| Box::pin(on_error(error)),
+        // Set owners for owner-only commands
+        owners: HashSet::from(OWNERS),
         // This code is run before every command
         pre_command: |ctx| {
             Box::pin(async move {
